@@ -1,0 +1,5 @@
+﻿  main.cpp
+C:\Users\kk409\Documents\Person Project\FirstGameEngine\MyFirstGameEngineProject\ThirdParty\GLFW\include\GLFW\glfw3.h(3235,1): warning C4819: The file contains a character that cannot be represented in the current code page (949). Save the file in Unicode format to prevent data loss
+  (compiling source file 'main.cpp')
+  
+  MyGameEngineProject.vcxproj -> C:\Users\kk409\Documents\Person Project\FirstGameEngine\MyFirstGameEngineProject\x64\Debug\MyGameEngineProject.exe
