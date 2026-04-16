@@ -271,16 +271,7 @@ std::string DirectLightPass::getGLSL() const
         directBody += info.directContrib;
     }
 
-    std::string glsl = constants + uniforms;
-
-    // Background sky gradient — independent of any light type
-    glsl +=
-        "\nvec3 skyColor(vec3 d) {\n"
-        "    float t = 0.5 * (normalize(d).y + 1.0);\n"
-        "    return mix(vec3(1.0), vec3(0.5, 0.7, 1.0), t);\n"
-        "}\n";
-
-    glsl += functions;
+    std::string glsl = constants + uniforms + functions;
 
     glsl +=
         "\nvec3 shadeDirect(vec3 p, vec3 n, int type, int idx) {\n"
@@ -343,7 +334,18 @@ std::string IndirectLightPass::getGLSL() const
         indirectBody += info.indirectContrib;
     }
 
-    std::string glsl = constants + uniforms + functions;
+    // Sky gradient uniforms + skyColor() — always emitted here so trace() and
+    // shadeEnvLight() can both call skyColor() regardless of light configuration.
+    std::string glsl =
+        "\nuniform vec3  uSkyHorizon;\n"
+        "uniform vec3  uSkyZenith;\n"
+        "uniform float uSkyExp;\n"
+        "\nvec3 skyColor(vec3 d) {\n"
+        "    float t = clamp(normalize(d).y * 0.5 + 0.5, 0.0, 1.0);\n"
+        "    return mix(uSkyHorizon, uSkyZenith, pow(t, uSkyExp));\n"
+        "}\n";
+
+    glsl += constants + uniforms + functions;
 
     glsl +=
         "\nvec3 shadeIndirect(vec3 p, vec3 n, int type, int idx) {\n"
@@ -365,12 +367,26 @@ void IndirectLightPass::uploadUniforms(unsigned int prog,
                                         const ACamera& /*cam*/) const
 {
     GLuint p = static_cast<GLuint>(prog);
+
+    // Defaults — bright midday sky
+    glm::vec3 horizon(0.95f, 0.92f, 0.82f);
+    glm::vec3 zenith (0.30f, 0.60f, 1.00f);
+    float     skyExp = 0.6f;
     glm::vec3 envEffect(0.0f);
+
     for (const ALight* light : scene.Lights) {
-        if (auto* el = dynamic_cast<EnvironmentLight*>(light->lightComp))
+        if (auto* el = dynamic_cast<EnvironmentLight*>(light->lightComp)) {
+            horizon   = el->horizonColor;
+            zenith    = el->zenithColor;
+            skyExp    = el->skyExp;
             envEffect = el->LightColor * el->LightIntensity;
+        }
     }
-    glUniform3fv(glGetUniformLocation(p, "uEnvEffect"), 1, glm::value_ptr(envEffect));
+
+    glUniform3fv(glGetUniformLocation(p, "uSkyHorizon"), 1, glm::value_ptr(horizon));
+    glUniform3fv(glGetUniformLocation(p, "uSkyZenith"),  1, glm::value_ptr(zenith));
+    glUniform1f (glGetUniformLocation(p, "uSkyExp"),     skyExp);
+    glUniform3fv(glGetUniformLocation(p, "uEnvEffect"),  1, glm::value_ptr(envEffect));
 }
 
 // ===========================================================================
@@ -810,9 +826,21 @@ glm::vec3 URayTracing::TraceQ3(const URay& ray, const UScene& scene,
 {
     const int MAX_DEPTH = 5;
 
-    auto skyColor = [](const glm::vec3& dir) -> glm::vec3 {
-        float t = 0.5f * (glm::normalize(dir).y + 1.0f);
-        return glm::mix(glm::vec3(1.0f), glm::vec3(0.5f, 0.7f, 1.0f), t);
+    // Read sky gradient from the scene's EnvironmentLight; fall back to defaults.
+    glm::vec3 skyHorizon(0.95f, 0.92f, 0.82f);
+    glm::vec3 skyZenith (0.30f, 0.60f, 1.00f);
+    float     skyExpVal = 0.6f;
+    for (const ALight* light : scene.Lights) {
+        if (auto* el = dynamic_cast<EnvironmentLight*>(light->lightComp)) {
+            skyHorizon = el->horizonColor;
+            skyZenith  = el->zenithColor;
+            skyExpVal  = el->skyExp;
+            break;
+        }
+    }
+    auto skyColor = [&](const glm::vec3& dir) -> glm::vec3 {
+        float t = glm::clamp(glm::normalize(dir).y * 0.5f + 0.5f, 0.0f, 1.0f);
+        return glm::mix(skyHorizon, skyZenith, std::pow(t, skyExpVal));
     };
 
     float hitT; const AActor* actor;

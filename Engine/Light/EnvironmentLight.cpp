@@ -7,7 +7,9 @@
 #include <cfloat>
 #include <cmath>
 #include <string>
+#include <algorithm>
 #include <glm/gtc/constants.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 // ---------------------------------------------------------------------------
 // genBounceGLSL — C++ recursive helper that builds GLSL nested-loop code for
@@ -75,10 +77,9 @@ static std::string genBounceGLSL(int d, int maxDepth, const std::string& ind)
 
     c += in2 + "acc" + D + " += c" + D + ";\n";
 
-    // Miss branch — sky gradient
+    // Miss branch — delegate to skyColor() (reads uSkyHorizon/uSkyZenith/uSkyExp)
     c += in1 + "} else {\n";
-    c += in2 + "float blend" + D + " = 0.5 * (dir" + D + ".y + 1.0);\n";
-    c += in2 + "acc" + D + " += mix(vec3(0.3, 0.2, 0.1), vec3(0.5, 0.7, 1.0), blend" + D + ");\n";
+    c += in2 + "acc" + D + " += skyColor(dir" + D + ");\n";
     c += in1 + "}\n";
     c += ind + "}\n";   // end for
 
@@ -159,10 +160,9 @@ glm::vec3 EnvironmentLight::illuminate(
         }
         else
         {
-            // Unoccluded: sample sky gradient
-            float blend = 0.5f * (dir.y + 1.0f);
-            accumulated += glm::mix(glm::vec3(0.3f, 0.2f, 0.1f),
-                                    glm::vec3(0.5f, 0.7f, 1.0f), blend);
+            // Unoccluded: use sky gradient defined by this light's color fields
+            float blend = glm::clamp(dir.y * 0.5f + 0.5f, 0.0f, 1.0f);
+            accumulated += glm::mix(horizonColor, zenithColor, std::pow(blend, skyExp));
         }
     }
 
@@ -195,4 +195,68 @@ LightGLSLInfo EnvironmentLight::getGLSLInfo() const
     // directContrib intentionally empty — EnvironmentLight is indirect-only
 
     return info;
+}
+
+// ---------------------------------------------------------------------------
+//  applyTimeOfDay — sets sky gradient + light color/intensity from a
+//  time-of-day value in [-10, +10]:
+//    -10 = midnight   -5 = pre-dawn twilight   0 = sunrise
+//     +5 = golden morning   +10 = bright noon
+// ---------------------------------------------------------------------------
+void EnvironmentLight::applyTimeOfDay(EnvironmentLight& light, float tod)
+{
+    tod = glm::clamp(tod, -10.0f, 10.0f);
+
+    struct Key {
+        float     t;
+        glm::vec3 horizon;
+        glm::vec3 zenith;
+        float     skyExp;
+        float     intensity;
+        glm::vec3 lightColor;
+    };
+
+    static const Key keys[] = {
+        // Midnight — near-black deep blue
+        { -10.0f,
+          glm::vec3(0.02f, 0.02f, 0.08f),
+          glm::vec3(0.00f, 0.00f, 0.05f),
+          1.5f, 0.00f, glm::vec3(0.50f, 0.55f, 0.80f) },
+        // Pre-dawn twilight — dark purple horizon
+        {  -5.0f,
+          glm::vec3(0.30f, 0.15f, 0.25f),
+          glm::vec3(0.05f, 0.05f, 0.20f),
+          1.2f, 0.05f, glm::vec3(0.70f, 0.60f, 0.80f) },
+        // Sunrise — warm orange horizon, soft blue zenith
+        {   0.0f,
+          glm::vec3(0.95f, 0.55f, 0.25f),
+          glm::vec3(0.35f, 0.55f, 0.85f),
+          0.8f, 0.25f, glm::vec3(1.00f, 0.80f, 0.55f) },
+        // Golden morning — warm haze, bright blue
+        {   5.0f,
+          glm::vec3(0.97f, 0.87f, 0.70f),
+          glm::vec3(0.28f, 0.58f, 0.95f),
+          0.7f, 0.65f, glm::vec3(1.00f, 0.93f, 0.75f) },
+        // Bright noon — pale warm white, vivid sky blue
+        {  10.0f,
+          glm::vec3(0.95f, 0.92f, 0.82f),
+          glm::vec3(0.25f, 0.55f, 1.00f),
+          0.6f, 1.00f, glm::vec3(1.00f, 0.97f, 0.90f) },
+    };
+    constexpr int N = 5;
+
+    // Find the two bracketing keypoints
+    int lo = 0;
+    for (int i = 0; i < N - 1; ++i)
+        if (tod >= keys[i].t) lo = i;
+    int hi = std::min(lo + 1, N - 1);
+
+    float alpha = (hi == lo) ? 0.0f
+                : (tod - keys[lo].t) / (keys[hi].t - keys[lo].t);
+
+    light.horizonColor   = glm::mix(keys[lo].horizon,    keys[hi].horizon,    alpha);
+    light.zenithColor    = glm::mix(keys[lo].zenith,     keys[hi].zenith,     alpha);
+    light.skyExp         = glm::mix(keys[lo].skyExp,     keys[hi].skyExp,     alpha);
+    light.LightIntensity = glm::vec3(glm::mix(keys[lo].intensity, keys[hi].intensity, alpha));
+    light.LightColor     = glm::mix(keys[lo].lightColor, keys[hi].lightColor, alpha);
 }
