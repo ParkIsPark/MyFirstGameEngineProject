@@ -465,7 +465,7 @@ void URayTracing::Init(const UScene& scene)
     std::string fragSrc =
         "#version 330 core\n"
         "#define ENV_LIGHT_SAMPLES "   + std::to_string(ENV_LIGHT_SAMPLES)   + "\n" +
-        "#define GI_BOUNCE_DEPTH "     + std::to_string(GI_BOUNCE_DEPTH)     + "\n" +
+        "#define GI_BOUNCE_DEPTH "     + std::to_string(GI_BOUNCE_DEPTH)     + "\n" + // NOTE: defined but unused — GLSL has no recursion; GPU is always 1-bounce
         "#define SOFT_SHADOW_SAMPLES " + std::to_string(SOFT_SHADOW_SAMPLES) + "\n" +
         "#define SOFT_SHADOW_RADIUS "  + std::to_string(SOFT_SHADOW_RADIUS)  + "\n" +
         "#define MAX_DEPTH 5\n"
