@@ -1,0 +1,31 @@
+# -------------------------------------------------------
+# User homework projects — work here freely, not tracked
+# -------------------------------------------------------
+Source/*
+!Source/.gitkeep
+
+# -------------------------------------------------------
+# Visual Studio
+# -------------------------------------------------------
+.vs/
+*.user
+*.suo
+*.aps
+*.ncb
+*.sdf
+*.opensdf
+*.opendb
+ipch/
+
+# -------------------------------------------------------
+# Build output (DLLs in bin/ ARE tracked; exes are not)
+# -------------------------------------------------------
+bin/*.exe
+bin/*.pdb
+bin/*.ilk
+
+# Intermediate / object files
+x64/
+Win32/
+Debug/
+Release/

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ImportGroup Label="PropertySheets" />
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <!-- Always output to the repo-root bin\ so DLLs are co-located with the exe -->
+    <OutDir>$(SolutionDir)bin\</OutDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <AdditionalIncludeDirectories>
+        $(SolutionDir)include;
+        $(SolutionDir)Engine\Core;
+        $(SolutionDir)Engine\World;
+        $(SolutionDir)Engine\Light;
+        $(SolutionDir)Engine\Physics;
+        $(SolutionDir)Engine\RayTracing;
+        %(AdditionalIncludeDirectories)
+      </AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(SolutionDir)lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>glew32.lib;freeglut.lib;glfw3.lib;glfw3dll.lib;opengl32.lib;glu32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup />
+</Project>
