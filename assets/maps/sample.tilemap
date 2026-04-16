@@ -1,0 +1,54 @@
+// New-format tilemap — equivalent scene to sample_legacy.tilemap
+// Parsed by FTilemapParser (UTilemap.cpp)
+
+@HEADER
+scale  2.0
+origin 0 0 0
+@END
+
+@SYMBOLS
+floor  CUBE
+wall   CUBE
+pillar CUBE
+ball   SPHERE
+hero   PLAYER
+@END
+
+@DEFS
+define floor {
+    geometry { half 1.0 0.1 1.0 }
+    material { kd 0.7 0.7 0.7; ka 0.1 0.1 0.1 }
+}
+define wall {
+    geometry { half 1.0 1.0 0.1 }
+    material { kd 0.2 0.2 0.8; ka 0.05 0.05 0.1; shine 32 }
+    physics  { static true }
+}
+define pillar {
+    geometry { half 1.0 1.0 1.0 }
+    material { kd 0.5 0.5 0.5; ka 0.1 0.1 0.1; shine 8 }
+    physics  { static true }
+}
+define ball {
+    geometry { radius 0.4 }
+    material { kd 0.9 0.2 0.2; ka 0.1 0.05 0.05; ks 0.4 0.4 0.4; shine 64 }
+    physics  { mass 1.5; restitution 0.8; friction 0.2 }
+}
+define hero {}
+@END
+
+@INSTANCES
+// Grid mode — spaces separate symbol names, "." is empty cell
+grid layer=0 {
+    pillar pillar pillar pillar pillar pillar pillar pillar pillar
+    pillar .      .      .      .      .      .      .      pillar
+    pillar .      .      .      ball   .      .      .      pillar
+    pillar .      .      .      hero   .      .      .      pillar
+    pillar pillar pillar pillar pillar pillar pillar pillar pillar
+    pillar pillar pillar pillar pillar pillar pillar pillar wall
+}
+
+// Explicit world-space placement — mixed with grid mode
+place ball  at  3.0  1.0  -4.0  { mass 3.0; kd 0.2 0.9 0.2 }
+place floor at  0.0 -1.0   0.0
+@END

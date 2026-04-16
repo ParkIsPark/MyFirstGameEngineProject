@@ -1,0 +1,42 @@
+// Converted from legacy .tilemap by tools/convert_tilemap.py
+@HEADER
+scale  2
+origin 0 0 0
+@END
+
+@SYMBOLS
+hash  CUBE
+W  CUBE
+O  SPHERE
+P  PLAYER
+@END
+
+@DEFS
+define hash {
+    geometry { half 1 0.1 1 }
+    material { kd 0.7 0.7 0.7 }
+}
+define W {
+    geometry { half 1 1 0.1 }
+    material { kd 0.2 0.2 0.8 }
+    physics  { static true }
+}
+define O {
+    geometry { radius 0.4 }
+    material { kd 0.9 0.2 0.2 }
+    physics  { mass 1.5; restitution 0.8; friction 0.2 }
+}
+define P {
+}
+@END
+
+@INSTANCES
+grid layer=0 {
+    hash  hash  hash  hash  hash  hash  hash  hash  hash
+    hash  .  .  .  .  .  .  .  hash
+    hash  .  .  .  O  .  .  .  hash
+    hash  .  .  .  P  .  .  .  hash
+    hash  hash  hash  hash  hash  hash  hash  hash  hash
+    hash  hash  hash  hash  hash  hash  hash  hash  W
+}
+@END

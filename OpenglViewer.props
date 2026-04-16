@@ -15,6 +15,7 @@
         $(SolutionDir)Engine\World;
         $(SolutionDir)Engine\Light;
         $(SolutionDir)Engine\Physics;
+        $(SolutionDir)Engine\Player;
         $(SolutionDir)Engine\RayTracing;
         %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
