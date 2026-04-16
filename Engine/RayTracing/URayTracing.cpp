@@ -5,6 +5,8 @@
 #include <string>
 #include <map>
 #include <set>
+#include <random>
+#include <cmath>
 
 // Surface / light types for IntersectionPass and LightingPass implementations
 #include "SphereSurface.h"
@@ -454,21 +456,93 @@ void URayTracing::uploadCameraUniforms(const ACamera& cam, const UScene& scene) 
 }
 
 // ===========================================================================
-//  CPU ray tracer (modes 0 / Q1, 1 / Q2) — unchanged
+//  CPU ray tracer
+//
+//  Blinn-Phong model (per lecture):
+//    L = ka*Ia + sum_lights[ kd*Il*max(0,n·l) + ks*Il*max(0,n·h)^p ] * (1-shadow)
+//  where h = normalize(l + v),  Ia = white (1,1,1) unit ambient.
+//
+//  mode 0  TraceQ2  Phong + shadow, no reflection
+//  mode 1  TraceQ3  Phong + shadow + km mirror reflection (recursive, MAX_DEPTH 5)
+//
+//  Lights are read from scene.Lights (PointLight components only for Q2/Q3 direct).
+//  EnvironmentLight (GI) is handled inside TraceQ3 via ComputePhong → illuminate().
 // ===========================================================================
 
-void URayTracing::Render(UScene& scene, ACamera& camera, int mode) const
+void URayTracing::Render(UScene& scene, ACamera& camera, int mode,
+                          const RenderSettings& s) const
 {
+    scene.outputImage.assign(scene.width * scene.height * 3, 0.0f);
+
+    // ------------------------------------------------------------------
+    // Step 1: Trace — one sample or N jittered samples per pixel
+    // ------------------------------------------------------------------
+    const bool doAA = s.enableAA && s.aaSamples > 1;
+
     for (int iy = 0; iy < scene.height; ++iy)
         for (int ix = 0; ix < scene.width; ++ix)
         {
-            URay      ray   = camera.generateRay(ix, iy, scene.width, scene.height);
-            glm::vec3 color = Trace(ray, scene, camera, mode);
+            glm::vec3 color;
+            if (doAA) {
+                color = TracePixelAA(ix, iy, mode, scene, camera, s.aaSamples);
+            } else {
+                URay ray = camera.generateRay(ix, iy, scene.width, scene.height);
+                switch (mode) {
+                case 0:  color = TraceQ2(ray, scene, camera); break;
+                case 1:  color = TraceQ3(ray, scene, camera); break;
+                default: color = glm::vec3(0.0f);
+                }
+            }
             int idx = (iy * scene.width + ix) * 3;
             scene.outputImage[idx + 0] = color.r;
             scene.outputImage[idx + 1] = color.g;
             scene.outputImage[idx + 2] = color.b;
         }
+
+    // ------------------------------------------------------------------
+    // Step 2: Gamma correction  output = linear^(1/gamma)
+    // Applied after all pixels are traced so AA averages stay linear.
+    // ------------------------------------------------------------------
+    if (s.enableGamma)
+        ApplyGamma(scene, s.gamma);
+}
+
+// ---------------------------------------------------------------------------
+//  TracePixelAA — uniform random supersampling (box filter)
+//  Shoots N rays with random sub-pixel offsets, returns their average.
+//  Thread-local RNG so the same seed gives reproducible results per thread.
+// ---------------------------------------------------------------------------
+glm::vec3 URayTracing::TracePixelAA(int ix, int iy, int mode,
+                                      const UScene& scene, const ACamera& cam,
+                                      int N) const
+{
+    thread_local std::mt19937 rng(std::random_device{}());
+    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+
+    glm::vec3 accum(0.0f);
+    for (int s = 0; s < N; ++s) {
+        URay ray = cam.generateRayJittered(ix, iy, scene.width, scene.height,
+                                            dist(rng), dist(rng));
+        glm::vec3 c;
+        switch (mode) {
+        case 0:  c = TraceQ2(ray, scene, cam); break;
+        case 1:  c = TraceQ3(ray, scene, cam); break;
+        default: c = glm::vec3(0.0f);
+        }
+        accum += c;
+    }
+    return accum / static_cast<float>(N);  // box filter = simple average
+}
+
+// ---------------------------------------------------------------------------
+//  ApplyGamma — sRGB-style gamma correction applied in-place to outputImage
+//  output = clamp(linear, 0, 1) ^ (1/gamma)
+// ---------------------------------------------------------------------------
+void URayTracing::ApplyGamma(UScene& scene, float gamma) const
+{
+    const float invGamma = 1.0f / gamma;
+    for (float& v : scene.outputImage)
+        v = std::pow(glm::clamp(v, 0.0f, 1.0f), invGamma);
 }
 
 bool URayTracing::FindClosestHit(const URay& ray, const UScene& scene,
@@ -483,67 +557,72 @@ bool URayTracing::FindClosestHit(const URay& ray, const UScene& scene,
     return outActor != nullptr;
 }
 
-glm::vec3 URayTracing::Trace(const URay& ray, const UScene& scene,
-                              const ACamera& camera, int mode) const
-{
-    switch (mode) {
-    case 0:  return TraceQ1(ray, scene);
-    case 1:  return TraceQ2(ray, scene, camera);
-    case 2:  return TraceQ3(ray, scene, camera);
-    default: return glm::vec3(0.0f);
-    }
-}
-
-glm::vec3 URayTracing::TraceQ1(const URay& ray, const UScene& scene) const
-{
-    float t; const AActor* actor;
-    return FindClosestHit(ray, scene, t, actor) ? glm::vec3(1.0f) : glm::vec3(0.0f);
-}
-
+// ---------------------------------------------------------------------------
+//  TraceQ2 — Blinn-Phong + shadow rays, no reflection
+//  Reads PointLights from scene.Lights.
+//  Ambient: Ia = (1,1,1) white unit intensity (HW3 spec).
+// ---------------------------------------------------------------------------
 glm::vec3 URayTracing::TraceQ2(const URay& ray, const UScene& scene,
                                 const ACamera& camera) const
 {
-    const glm::vec3 lightPos(  -4.0f, 4.0f, -3.0f);
-    const glm::vec3 lightColor( 1.0f, 1.0f,  1.0f);
-    const glm::vec3 ambientLight(1.0f, 1.0f, 1.0f);
-
     float t; const AActor* actor;
     if (!FindClosestHit(ray, scene, t, actor)) return glm::vec3(0.0f);
 
-    glm::vec3 hitPoint = ray.origin + t * ray.direction;
-    glm::vec3 n        = actor->surface->getNormal(hitPoint);
-    glm::vec3 color    = actor->surface->material.ka * ambientLight;
+    glm::vec3 p   = ray.origin + t * ray.direction;
+    glm::vec3 n   = actor->surface->getNormal(p);
+    glm::vec3 v   = glm::normalize(camera.eye - p);
+    const Material& mat = actor->surface->material;
 
-    glm::vec3 toLight     = lightPos - hitPoint;
-    float     distToLight = glm::length(toLight);
-    glm::vec3 l           = toLight / distToLight;
+    // Ambient: Ia = (1,1,1)
+    glm::vec3 color = mat.ka;
 
-    URay shadowRay(hitPoint + 1e-4f * n, l);
-    bool inShadow = false;
-    for (const AActor* other : scene.Actors) {
-        float st;
-        if (other->surface->intersect(shadowRay, st) && st < distToLight)
-            { inShadow = true; break; }
-    }
+    for (const ALight* light : scene.Lights)
+    {
+        PointLight* pl = dynamic_cast<PointLight*>(light->lightComp);
+        if (!pl) continue;  // skip EnvironmentLight for Q2
 
-    if (!inShadow) {
-        float NdotL = glm::max(0.0f, glm::dot(n, l));
-        color += actor->surface->material.kd * lightColor * NdotL;
-        if (actor->surface->material.shininess > 0.0f && NdotL > 0.0f) {
-            glm::vec3 v     = glm::normalize(camera.eye - hitPoint);
-            glm::vec3 h     = glm::normalize(v + l);
+        glm::vec3 toLight = pl->LightPos - p;
+        float     dist    = glm::length(toLight);
+        glm::vec3 l       = toLight / dist;
+
+        float NdotL = glm::dot(n, l);
+        if (NdotL <= 0.0f) continue;
+
+        // Shadow ray (offset by epsilon along normal to avoid self-intersection)
+        URay shadowRay(p + 1e-4f * n, l);
+        bool inShadow = false;
+        for (const AActor* other : scene.Actors) {
+            float st;
+            if (other->surface->intersect(shadowRay, st) && st < dist)
+                { inShadow = true; break; }
+        }
+        if (inShadow) continue;
+
+        glm::vec3 Il = pl->LightColor * pl->LightIntensity;
+
+        // Diffuse
+        color += mat.kd * Il * NdotL;
+
+        // Specular — Blinn-Phong: h = normalize(l + v)
+        if (mat.shininess > 0.0f) {
+            glm::vec3 h     = glm::normalize(l + v);
             float     NdotH = glm::max(0.0f, glm::dot(n, h));
-            color += actor->surface->material.ks * lightColor
-                   * glm::pow(NdotH, actor->surface->material.shininess);
+            color += mat.ks * Il * glm::pow(NdotH, mat.shininess);
         }
     }
+
     return glm::clamp(color, 0.0f, 1.0f);
 }
 
+// ---------------------------------------------------------------------------
+//  TraceQ3 — Q2 + km mirror reflection (recursive up to MAX_DEPTH)
+//  Also supports EnvironmentLight GI via ComputePhong → illuminate().
+// ---------------------------------------------------------------------------
 glm::vec3 URayTracing::TraceQ3(const URay& ray, const UScene& scene,
                                 const ACamera& camera, int depth) const
 {
     const int MAX_DEPTH = 5;
+
     auto skyColor = [](const glm::vec3& dir) -> glm::vec3 {
         float t = 0.5f * (glm::normalize(dir).y + 1.0f);
         return glm::mix(glm::vec3(1.0f), glm::vec3(0.5f, 0.7f, 1.0f), t);
@@ -552,27 +631,38 @@ glm::vec3 URayTracing::TraceQ3(const URay& ray, const UScene& scene,
     float hitT; const AActor* actor;
     if (!FindClosestHit(ray, scene, hitT, actor)) return skyColor(ray.direction);
 
-    glm::vec3 hitPoint = ray.origin + hitT * ray.direction;
-    glm::vec3 n        = actor->surface->getNormal(hitPoint);
-    glm::vec3 color    = actor->surface->material.emissive;
-    color += ComputeLightingQ3(hitPoint, n, actor, ray, scene, camera, depth);
+    glm::vec3 p = ray.origin + hitT * ray.direction;
+    glm::vec3 n = actor->surface->getNormal(p);
+    const Material& mat = actor->surface->material;
 
-    glm::vec3 km = actor->surface->material.km;
+    // Emissive + Ambient (Ia = (1,1,1))
+    glm::vec3 color = mat.emissive + mat.ka;
+
+    // Phong + shadow from all scene lights (PointLight direct + EnvironmentLight GI)
+    color += ComputePhong(p, n, actor, ray, scene, camera, depth);
+
+    // Mirror reflection
+    glm::vec3 km = mat.km;
     if (depth < MAX_DEPTH && glm::dot(km, km) > 0.0f) {
         glm::vec3 reflDir = glm::reflect(ray.direction, n);
-        URay      reflRay(hitPoint + 1e-4f * n, reflDir);
+        URay      reflRay(p + 1e-4f * n, reflDir);
         color += km * TraceQ3(reflRay, scene, camera, depth + 1);
     }
+
     return glm::clamp(color, 0.0f, 1.0f);
 }
 
-glm::vec3 URayTracing::ComputeLightingQ3(const glm::vec3& hitPoint, const glm::vec3& normal,
-                                          const AActor* actor, const URay& ray,
-                                          const UScene& scene, const ACamera& camera,
-                                          int depth) const
+// ---------------------------------------------------------------------------
+//  ComputePhong — sums illuminate() from all lights in scene.Lights
+//  (PointLight: Blinn-Phong + soft shadow / EnvironmentLight: GI)
+// ---------------------------------------------------------------------------
+glm::vec3 URayTracing::ComputePhong(const glm::vec3& p, const glm::vec3& n,
+                                     const AActor* actor, const URay& ray,
+                                     const UScene& scene, const ACamera& camera,
+                                     int depth) const
 {
     glm::vec3 color(0.0f);
     for (const ALight* light : scene.Lights)
-        color += light->illuminate(hitPoint, normal, actor, ray, scene, camera, depth, this);
-    return glm::clamp(color, 0.0f, 1.0f);
+        color += light->illuminate(p, n, actor, ray, scene, camera, depth, this);
+    return color;
 }

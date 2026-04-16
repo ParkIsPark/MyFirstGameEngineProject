@@ -99,6 +99,33 @@
     <!-- Engine: RayTracing -->
     <ClCompile Include="$(SolutionDir)Engine\RayTracing\URayTracing.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Engine: Core headers -->
+    <ClInclude Include="$(SolutionDir)Engine\Core\UScene.h" />
+    <!-- Engine: World headers -->
+    <ClInclude Include="$(SolutionDir)Engine\World\AActor.h" />
+    <ClInclude Include="$(SolutionDir)Engine\World\ACamera.h" />
+    <ClInclude Include="$(SolutionDir)Engine\World\CubeSurface.h" />
+    <ClInclude Include="$(SolutionDir)Engine\World\PlaneSurface.h" />
+    <ClInclude Include="$(SolutionDir)Engine\World\SphereSurface.h" />
+    <ClInclude Include="$(SolutionDir)Engine\World\UPlayerCharacter.h" />
+    <ClInclude Include="$(SolutionDir)Engine\World\USurface.h" />
+    <ClInclude Include="$(SolutionDir)Engine\World\UTilemap.h" />
+    <!-- Engine: Light headers -->
+    <ClInclude Include="$(SolutionDir)Engine\Light\ALight.h" />
+    <ClInclude Include="$(SolutionDir)Engine\Light\EnvironmentLight.h" />
+    <ClInclude Include="$(SolutionDir)Engine\Light\LightComponent.h" />
+    <ClInclude Include="$(SolutionDir)Engine\Light\PointLight.h" />
+    <!-- Engine: Physics headers -->
+    <ClInclude Include="$(SolutionDir)Engine\Physics\PhysicalComponent.h" />
+    <ClInclude Include="$(SolutionDir)Engine\Physics\UPhysicsWorld.h" />
+    <!-- Engine: RayTracing headers -->
+    <ClInclude Include="$(SolutionDir)Engine\RayTracing\URayTracing.h" />
+    <ClInclude Include="$(SolutionDir)Engine\RayTracing\URay.h" />
+    <ClInclude Include="$(SolutionDir)Engine\RayTracing\IntersectionPass.h" />
+    <ClInclude Include="$(SolutionDir)Engine\RayTracing\LightingPass.h" />
+    <ClInclude Include="$(SolutionDir)Engine\RayTracing\URayTracingPass.h" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
