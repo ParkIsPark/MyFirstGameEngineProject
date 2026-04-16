@@ -139,13 +139,22 @@
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\URay.h">
       <Filter>Engine\RayTracing</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\IntersectionPass.h">
-      <Filter>Engine\RayTracing</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\LightingPass.h">
-      <Filter>Engine\RayTracing</Filter>
-    </ClInclude>
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\URayTracingPass.h">
+      <Filter>Engine\RayTracing</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Engine\RayTracing\GeometryPass.h">
+      <Filter>Engine\RayTracing</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Engine\RayTracing\MaterialPass.h">
+      <Filter>Engine\RayTracing</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Engine\RayTracing\DirectLightPass.h">
+      <Filter>Engine\RayTracing</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Engine\RayTracing\IndirectLightPass.h">
+      <Filter>Engine\RayTracing</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SolutionDir)Engine\RayTracing\PostProcessPass.h">
       <Filter>Engine\RayTracing</Filter>
     </ClInclude>
   </ItemGroup>

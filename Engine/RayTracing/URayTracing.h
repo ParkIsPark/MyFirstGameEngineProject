@@ -9,8 +9,11 @@ class ACamera;
 class AActor;
 class ALight;
 struct URay;
-class IntersectionPass;
-class LightingPass;
+class GeometryPass;
+class MaterialPass;
+class DirectLightPass;
+class IndirectLightPass;
+class PostProcessPass;
 
 // ------------------------------------------------------------------
 // Post-processing / sampling settings for CPU Render().
@@ -39,7 +42,8 @@ public:
     //   Cleanup()     — delete GL objects
     // ------------------------------------------------------------------
     void Init(const UScene& scene);
-    void RenderFrame(const UScene& scene, const ACamera& cam);
+    void RenderFrame(const UScene& scene, const ACamera& cam,
+                     const RenderSettings& s = RenderSettings{});
     void Cleanup();
 
     // ------------------------------------------------------------------
@@ -66,8 +70,11 @@ private:
     unsigned int vao_  = 0;
     unsigned int vbo_  = 0;
 
-    std::unique_ptr<IntersectionPass> intersectionPass_;
-    std::unique_ptr<LightingPass>     lightingPass_;
+    std::unique_ptr<GeometryPass>      geometryPass_;
+    std::unique_ptr<MaterialPass>      materialPass_;
+    std::unique_ptr<DirectLightPass>   directLightPass_;
+    std::unique_ptr<IndirectLightPass> indirectLightPass_;
+    std::unique_ptr<PostProcessPass>   postProcessPass_;
 
     void uploadCameraUniforms(const ACamera& cam, const UScene& scene) const;
 

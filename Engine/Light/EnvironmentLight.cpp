@@ -105,6 +105,8 @@ LightGLSLInfo EnvironmentLight::getGLSLInfo() const
     info.uniforms =
         "\nuniform vec3 uEnvEffect;\n";
 
+    // Key fix: bounce point shading now calls shadeDirect() instead of
+    // manually inlining PointLight uniforms — eliminates cross-light coupling.
     info.functions =
         "\nvec3 shadeEnvLight(vec3 p, vec3 n, int type, int idx)\n"
         "{\n"
@@ -120,30 +122,9 @@ LightGLSLInfo EnvironmentLight::getGLSLInfo() const
         "        int   hType, hIdx;\n"
         "        float t = findClosest(p + 1e-4*n, dir, hType, hIdx);\n"
         "        if (hType >= 0) {\n"
-        "            // 1-bounce indirect: evaluate PointLight direct lighting at the hit point.\n"
-        "            // EnvironmentLight is skipped here to avoid recursion.\n"
-        "            vec3  hp   = p + 1e-4*n + t*dir;\n"
-        "            vec3  hn   = getNormal(hType, hIdx, hp);\n"
-        "            vec3  orig = hp + 1e-4*hn;\n"
-        "            vec3  directCol = vec3(0.0);\n"
-        "            for (int pi = 0; pi < uNPointLight; ++pi) {\n"
-        "                vec3  toL   = uPLPos[pi] - hp;\n"
-        "                float dist  = length(toL);\n"
-        "                vec3  l     = toL / dist;\n"
-        "                float NdotL = dot(hn, l);\n"
-        "                if (NdotL <= 0.0) continue;\n"
-        "                if (occluded(orig, l, dist)) continue;\n"
-        "                vec3  eff   = uPLEffect[pi];\n"
-        "                directCol  += getDiffuse(hType, hIdx, hp) * eff * NdotL;\n"
-        "                float shiny = getShiny(hType, hIdx);\n"
-        "                if (shiny > 0.0) {\n"
-        "                    vec3 v = normalize(uEye - hp);\n"
-        "                    vec3 h = normalize(l + v);\n"
-        "                    directCol += getKs(hType, hIdx) * eff\n"
-        "                               * pow(max(0.0, dot(hn, h)), shiny);\n"
-        "                }\n"
-        "            }\n"
-        "            acc += directCol;\n"
+        "            vec3 hp = p + 1e-4*n + t*dir;\n"
+        "            vec3 hn = getNormal(hType, hIdx, hp);\n"
+        "            acc += shadeDirect(hp, hn, hType, hIdx);\n"
         "        } else {\n"
         "            float blend = 0.5 * (dir.y + 1.0);\n"
         "            acc += mix(vec3(0.3, 0.2, 0.1), vec3(0.5, 0.7, 1.0), blend);\n"
@@ -152,7 +133,8 @@ LightGLSLInfo EnvironmentLight::getGLSLInfo() const
         "    return getKa(type, idx) * uEnvEffect * (acc / float(ENV_LIGHT_SAMPLES));\n"
         "}\n";
 
-    info.shadeContrib = "    col += shadeEnvLight(p, n, type, idx);\n";
+    info.indirectContrib = "    col += shadeEnvLight(p, n, type, idx);\n";
+    // directContrib intentionally empty — EnvironmentLight is indirect-only
 
     return info;
 }
