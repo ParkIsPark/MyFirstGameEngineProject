@@ -133,6 +133,9 @@
       <Filter>Engine\Physics</Filter>
     </ClInclude>
     <!-- Engine: RayTracing headers -->
+    <ClInclude Include="$(SolutionDir)Engine\RayTracing\RenderConfig.h">
+      <Filter>Engine\RayTracing</Filter>
+    </ClInclude>
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\URayTracing.h">
       <Filter>Engine\RayTracing</Filter>
     </ClInclude>

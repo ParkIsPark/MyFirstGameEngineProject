@@ -123,6 +123,7 @@
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\URayTracing.h" />
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\URay.h" />
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\URayTracingPass.h" />
+    <ClInclude Include="$(SolutionDir)Engine\RayTracing\RenderConfig.h" />
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\GeometryPass.h" />
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\MaterialPass.h" />
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\DirectLightPass.h" />

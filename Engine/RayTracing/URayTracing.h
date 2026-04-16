@@ -4,6 +4,8 @@
 #include <memory>
 #include <vector>
 
+#include "RenderConfig.h"   // AA_ENABLE, AA_GRID, AA_MODE, GAMMA_ENABLE, GAMMA_VALUE
+
 class UScene;
 class ACamera;
 class AActor;
@@ -16,17 +18,19 @@ class IndirectLightPass;
 class PostProcessPass;
 
 // ------------------------------------------------------------------
-// Post-processing / sampling settings for CPU Render().
-// Stored here so callers only need to #include "URayTracing.h".
+// RenderSettings — CPU Render() configuration.
+// Defaults come from RenderConfig.h so CPU and GPU stay in sync.
+// Override individual fields to deviate (e.g. HW4 key-press toggles).
 // ------------------------------------------------------------------
 struct RenderSettings {
-    // Gamma correction:  output = pow(linear, 1/gamma)
-    bool  enableGamma = false;
-    float gamma       = 2.2f;   // typical sRGB gamma
+    // Gamma correction:  output = Reinhard → pow(c, 1/gamma)
+    bool  enableGamma = GAMMA_ENABLE != 0;
+    float gamma       = GAMMA_VALUE;
 
-    // Supersampling AA: cast aaSamples random rays per pixel, box-filter average
-    bool enableAA   = false;
-    int  aaSamples  = 64;       
+    // Anti-aliasing
+    bool enableAA = AA_ENABLE != 0;
+    int  aaGrid   = AA_GRID;    // grid dim: total samples = aaGrid*aaGrid
+    int  aaMode   = AA_MODE;    // 1=random  2=stratified  3=halton
 };
 
 class URayTracing
@@ -51,9 +55,7 @@ public:
     //   mode 0 = Phong + shadow  (Blinn-Phong, scene.Lights)
     //   mode 1 = Phong + shadow + mirror reflection (recursive km)
     //
-    // Post-processing applied inside Render() after all pixels are traced:
-    //   settings.enableAA    → cast N jittered rays per pixel, average (box filter)
-    //   settings.enableGamma → apply pow(c, 1/gamma) to the linear buffer
+    // AA and gamma settings come from RenderSettings (defaults = RenderConfig.h).
     // ------------------------------------------------------------------
     void Render(UScene& scene, ACamera& camera, int mode,
                 const RenderSettings& settings = RenderSettings{}) const;
@@ -94,10 +96,14 @@ private:
                            const UScene& scene, const ACamera& camera,
                            int depth) const;
 
-    // AA: casts N jittered rays through pixel (ix,iy) and returns their average
-    glm::vec3 TracePixelAA(int ix, int iy, int mode,
-                            const UScene& scene, const ACamera& cam, int N) const;
+    // AA: casts aaGrid*aaGrid rays through pixel (ix,iy) with the chosen mode
+    //   aaMode 1 = random jitter
+    //   aaMode 2 = stratified jittered grid
+    //   aaMode 3 = Halton low-discrepancy sequence
+    glm::vec3 TracePixelAA(int ix, int iy, int renderMode,
+                            const UScene& scene, const ACamera& cam,
+                            int aaGrid, int aaMode) const;
 
-    // Gamma post-process: applies pow(c, 1/gamma) to every value in outputImage
-    void ApplyGamma(UScene& scene, float gamma) const;
+    // Reinhard tone map + gamma post-process applied in-place to outputImage
+    void ApplyToneGamma(UScene& scene, float gamma) const;
 };

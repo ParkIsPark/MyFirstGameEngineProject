@@ -1,5 +1,6 @@
 #include "PointLight.h"
 #include "AActor.h"
+#include <algorithm>
 #include "UScene.h"
 #include "ACamera.h"
 #include "URay.h"
@@ -58,13 +59,15 @@ glm::vec3 PointLight::illuminate(
     glm::vec3 tangent   = glm::normalize(glm::cross(l, up));
     glm::vec3 bitangent = glm::cross(l, tangent);
 
-    const float offsets[SOFT_SHADOW_SAMPLES - 1][2] = {
+    // Fixed 8-sample disk pattern; use first (SOFT_SHADOW_SAMPLES-1) of them
+    static const float offsets[8][2] = {
         { 1.00f,  0.00f}, {-1.00f,  0.00f}, { 0.00f,  1.00f}, { 0.00f, -1.00f},
         { 0.71f,  0.71f}, {-0.71f,  0.71f}, {-0.71f, -0.71f}, { 0.71f, -0.71f}
     };
+    const int numExtra = std::min(SOFT_SHADOW_SAMPLES - 1, 8);
 
     float litFraction = 1.0f;
-    for (int s = 0; s < SOFT_SHADOW_SAMPLES - 1; ++s)
+    for (int s = 0; s < numExtra; ++s)
     {
         glm::vec3 samplePos = LightPos
             + SOFT_SHADOW_RADIUS * (offsets[s][0] * tangent + offsets[s][1] * bitangent);
@@ -85,7 +88,7 @@ glm::vec3 PointLight::illuminate(
         }
         if (!blocked) litFraction += 1.0f;
     }
-    litFraction /= static_cast<float>(SOFT_SHADOW_SAMPLES);
+    litFraction /= static_cast<float>(numExtra + 1);
 
     glm::vec3 color = actor->surface->getDiffuseColor(hitPoint) * effectiveLight * NdotL * litFraction;
 

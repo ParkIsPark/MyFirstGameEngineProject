@@ -7,6 +7,7 @@
 #include <set>
 #include <random>
 #include <cmath>
+#include <sstream>
 
 // Surface / light types used by the pass implementations
 #include "SphereSurface.h"
@@ -16,6 +17,7 @@
 #include "../Light/EnvironmentLight.h"
 
 // Pass headers (declarations only — implementations are below)
+#include "RenderConfig.h"
 #include "GeometryPass.h"
 #include "MaterialPass.h"
 #include "DirectLightPass.h"
@@ -372,23 +374,31 @@ void IndirectLightPass::uploadUniforms(unsigned int prog,
 }
 
 // ===========================================================================
-//  PostProcessPass implementation — trace loop + AA main + gamma
+//  PostProcessPass implementation
+//  AA and gamma are compile-time constants from RenderConfig.h.
+//  No per-frame uniforms — uploadUniforms is declared no-op in the header.
 // ===========================================================================
-
-void PostProcessPass::setSettings(int aaGrid, bool enableGamma, float gamma)
-{
-    aaGrid_      = (aaGrid > 0) ? aaGrid : 1;
-    enableGamma_ = enableGamma;
-    gamma_       = gamma;
-}
 
 std::string PostProcessPass::getGLSL() const
 {
     return
-        "\nuniform int   uAAGrid;\n"
-        "uniform int   uEnableGamma;\n"
-        "uniform float uGamma;\n"
+        // ── Sampling helpers ──────────────────────────────────────────────
+        "\n"
+        "float _hash(vec2 p, float s) {\n"
+        "    return fract(sin(dot(p + s, vec2(127.1, 311.7))) * 43758.5453);\n"
+        "}\n"
+        "float _halton(int idx, int base) {\n"
+        "    float f = 1.0, r = 0.0;\n"
+        "    for (int k = 0; k < 8; ++k) {\n"
+        "        if (idx == 0) break;\n"
+        "        f /= float(base);\n"
+        "        r += f * float(idx - (idx / base) * base);\n"
+        "        idx /= base;\n"
+        "    }\n"
+        "    return r;\n"
+        "}\n"
 
+        // ── trace() — reflection loop ─────────────────────────────────────
         "\nvec3 trace(vec3 ro, vec3 rd)\n"
         "{\n"
         "    vec3 accum  = vec3(0.0);\n"
@@ -410,34 +420,64 @@ std::string PostProcessPass::getGLSL() const
         "    return accum;\n"
         "}\n"
 
+        // ── main() ────────────────────────────────────────────────────────
         "\nvoid main()\n"
         "{\n"
         "    vec3 col = vec3(0.0);\n"
-        "    for (int sy = 0; sy < uAAGrid; ++sy)\n"
-        "        for (int sx = 0; sx < uAAGrid; ++sx) {\n"
-        "            float fx = floor(gl_FragCoord.x) + (float(sx) + 0.5) / float(uAAGrid);\n"
-        "            float fy = floor(gl_FragCoord.y) + (float(sy) + 0.5) / float(uAAGrid);\n"
+        "    vec2 pix = floor(gl_FragCoord.xy);\n"
+
+        // No AA — single centre sample
+        "#if AA_ENABLE == 0\n"
+        "    {\n"
+        "        float su = uL + (uR - uL) * (pix.x + 0.5) / float(uWidth);\n"
+        "        float sv = uB + (uT - uB) * (pix.y + 0.5) / float(uHeight);\n"
+        "        col = trace(uEye, normalize(-uD * uW + su * uU + sv * uV));\n"
+        "    }\n"
+
+        // Random jitter
+        "#elif AA_MODE == 1\n"
+        "    for (int i = 0; i < AA_GRID * AA_GRID; ++i) {\n"
+        "        float ox = _hash(gl_FragCoord.xy, float(i) * 1.7);\n"
+        "        float oy = _hash(gl_FragCoord.xy, float(i) * 2.3 + 50.0);\n"
+        "        float su = uL + (uR - uL) * (pix.x + ox) / float(uWidth);\n"
+        "        float sv = uB + (uT - uB) * (pix.y + oy) / float(uHeight);\n"
+        "        col += trace(uEye, normalize(-uD * uW + su * uU + sv * uV));\n"
+        "    }\n"
+        "    col /= float(AA_GRID * AA_GRID);\n"
+
+        // Stratified jittered grid (recommended)
+        "#elif AA_MODE == 2\n"
+        "    for (int sy = 0; sy < AA_GRID; ++sy)\n"
+        "        for (int sx = 0; sx < AA_GRID; ++sx) {\n"
+        "            float jx = _hash(gl_FragCoord.xy, float(sx*7 + sy*3)       ) - 0.5;\n"
+        "            float jy = _hash(gl_FragCoord.xy, float(sx*3 + sy*11)+100.0) - 0.5;\n"
+        "            float fx = pix.x + (float(sx) + 0.5 + jx) / float(AA_GRID);\n"
+        "            float fy = pix.y + (float(sy) + 0.5 + jy) / float(AA_GRID);\n"
         "            float su = uL + (uR - uL) * fx / float(uWidth);\n"
         "            float sv = uB + (uT - uB) * fy / float(uHeight);\n"
-        "            vec3 rd = normalize(-uD * uW + su * uU + sv * uV);\n"
-        "            col += trace(uEye, rd);\n"
+        "            col += trace(uEye, normalize(-uD * uW + su * uU + sv * uV));\n"
         "        }\n"
-        "    col /= float(uAAGrid * uAAGrid);\n"
-        "    col = clamp(col, 0.0, 1.0);\n"
-        "    if (uEnableGamma == 1)\n"
-        "        col = pow(col, vec3(1.0 / uGamma));\n"
+        "    col /= float(AA_GRID * AA_GRID);\n"
+
+        // Halton low-discrepancy sequence (best quality, deterministic)
+        "#elif AA_MODE == 3\n"
+        "    for (int i = 0; i < AA_GRID * AA_GRID; ++i) {\n"
+        "        float ox = _halton(i + 1, 2);\n"
+        "        float oy = _halton(i + 1, 3);\n"
+        "        float su = uL + (uR - uL) * (pix.x + ox) / float(uWidth);\n"
+        "        float sv = uB + (uT - uB) * (pix.y + oy) / float(uHeight);\n"
+        "        col += trace(uEye, normalize(-uD * uW + su * uU + sv * uV));\n"
+        "    }\n"
+        "    col /= float(AA_GRID * AA_GRID);\n"
+        "#endif\n"
+
+        // Reinhard tone mapping + optional gamma
+        "    col = col / (col + vec3(1.0));\n"
+        "#if GAMMA_ENABLE\n"
+        "    col = pow(col, vec3(1.0 / GAMMA_VALUE));\n"
+        "#endif\n"
         "    fragColor = vec4(col, 1.0);\n"
         "}\n";
-}
-
-void PostProcessPass::uploadUniforms(unsigned int prog,
-                                      const UScene& /*scene*/,
-                                      const ACamera& /*cam*/) const
-{
-    GLuint p = static_cast<GLuint>(prog);
-    glUniform1i(glGetUniformLocation(p, "uAAGrid"),      aaGrid_);
-    glUniform1i(glGetUniformLocation(p, "uEnableGamma"), enableGamma_ ? 1 : 0);
-    glUniform1f(glGetUniformLocation(p, "uGamma"),       gamma_);
 }
 
 // ===========================================================================
@@ -468,6 +508,11 @@ void URayTracing::Init(const UScene& scene)
         "#define GI_BOUNCE_DEPTH "     + std::to_string(GI_BOUNCE_DEPTH)     + "\n" +
         "#define SOFT_SHADOW_SAMPLES " + std::to_string(SOFT_SHADOW_SAMPLES) + "\n" +
         "#define SOFT_SHADOW_RADIUS "  + std::to_string(SOFT_SHADOW_RADIUS)  + "\n" +
+        "#define AA_ENABLE "           + std::to_string(AA_ENABLE)           + "\n" +
+        "#define AA_GRID "             + std::to_string(AA_GRID)             + "\n" +
+        "#define AA_MODE "             + std::to_string(AA_MODE)             + "\n" +
+        "#define GAMMA_ENABLE "        + std::to_string(GAMMA_ENABLE)        + "\n" +
+        "#define GAMMA_VALUE "         + std::to_string(GAMMA_VALUE)         + "\n" +
         "#define MAX_DEPTH 5\n"
         "out vec4 fragColor;\n"
         "uniform vec3  uEye, uU, uV, uW;\n"
@@ -478,6 +523,17 @@ void URayTracing::Init(const UScene& scene)
         + directLightPass_->getGLSL()
         + indirectLightPass_->getGLSL()
         + postProcessPass_->getGLSL();
+
+    // Dump fragment shader with line numbers for debugging
+    {
+        std::istringstream ss(fragSrc);
+        std::string line;
+        int ln = 1;
+        std::cerr << "\n===== FRAGMENT SHADER SOURCE =====\n";
+        while (std::getline(ss, line))
+            std::cerr << ln++ << ": " << line << "\n";
+        std::cerr << "===== END =====\n\n";
+    }
 
     GLuint vert = compileShader(GL_VERTEX_SHADER,   VERT_SRC);
     GLuint frag = compileShader(GL_FRAGMENT_SHADER, fragSrc.c_str());
@@ -508,14 +564,10 @@ void URayTracing::Init(const UScene& scene)
 }
 
 void URayTracing::RenderFrame(const UScene& scene, const ACamera& cam,
-                               const RenderSettings& s)
+                               const RenderSettings& /*s*/)
 {
-    // Configure AA: n×n stratified grid (total = n*n samples)
-    int n = (s.enableAA && s.aaSamples > 1)
-        ? std::max(1, (int)std::sqrt((double)s.aaSamples))
-        : 1;
-    postProcessPass_->setSettings(n, s.enableGamma, s.gamma);
-
+    // AA and gamma are compile-time constants (RenderConfig.h) baked into
+    // the shader at Init() — nothing to configure per-frame here.
     uploadCameraUniforms(cam, scene);
     geometryPass_->uploadUniforms(prog_, scene, cam);
     // materialPass_ uses base no-op (material data covered by geometry uniforms)
@@ -577,17 +629,14 @@ void URayTracing::Render(UScene& scene, ACamera& camera, int mode,
 {
     scene.outputImage.assign(scene.width * scene.height * 3, 0.0f);
 
-    // ------------------------------------------------------------------
-    // Step 1: Trace — one sample or N jittered samples per pixel
-    // ------------------------------------------------------------------
-    const bool doAA = s.enableAA && s.aaSamples > 1;
+    const bool doAA = s.enableAA && s.aaGrid > 1;
 
     for (int iy = 0; iy < scene.height; ++iy)
         for (int ix = 0; ix < scene.width; ++ix)
         {
             glm::vec3 color;
             if (doAA) {
-                color = TracePixelAA(ix, iy, mode, scene, camera, s.aaSamples);
+                color = TracePixelAA(ix, iy, mode, scene, camera, s.aaGrid, s.aaMode);
             } else {
                 URay ray = camera.generateRay(ix, iy, scene.width, scene.height);
                 switch (mode) {
@@ -602,50 +651,85 @@ void URayTracing::Render(UScene& scene, ACamera& camera, int mode,
             scene.outputImage[idx + 2] = color.b;
         }
 
-    // ------------------------------------------------------------------
-    // Step 2: Gamma correction  output = linear^(1/gamma)
-    // Applied after all pixels are traced so AA averages stay linear.
-    // ------------------------------------------------------------------
+    // Reinhard tone mapping + gamma — applied after tracing so AA averages stay linear
     if (s.enableGamma)
-        ApplyGamma(scene, s.gamma);
+        ApplyToneGamma(scene, s.gamma);
 }
 
 // ---------------------------------------------------------------------------
-//  TracePixelAA — uniform random supersampling (box filter)
-//  Shoots N rays with random sub-pixel offsets, returns their average.
-//  Thread-local RNG so the same seed gives reproducible results per thread.
+//  TracePixelAA — multi-sample AA with selectable pattern
+//
+//  aaMode 1 = Random jitter         — fast, some noise
+//  aaMode 2 = Stratified jitter     — recommended; uniform grid + random offset
+//  aaMode 3 = Halton sequence       — best quality; deterministic, low-discrepancy
+//
+//  All modes cast aaGrid*aaGrid rays; offsets are in [0,1] (pixel space).
 // ---------------------------------------------------------------------------
-glm::vec3 URayTracing::TracePixelAA(int ix, int iy, int mode,
-                                      const UScene& scene, const ACamera& cam,
-                                      int N) const
+glm::vec3 URayTracing::TracePixelAA(int ix, int iy, int renderMode,
+                                     const UScene& scene, const ACamera& cam,
+                                     int aaGrid, int aaMode) const
 {
     thread_local std::mt19937 rng(std::random_device{}());
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
 
+    // Halton helper (base 2 or 3)
+    auto halton = [](int idx, int base) -> float {
+        float f = 1.0f, r = 0.0f;
+        for (int i = idx; i > 0; i /= base) { f /= base; r += f * (i % base); }
+        return r;
+    };
+
+    const int total = aaGrid * aaGrid;
     glm::vec3 accum(0.0f);
-    for (int s = 0; s < N; ++s) {
-        URay ray = cam.generateRayJittered(ix, iy, scene.width, scene.height,
-                                            dist(rng), dist(rng));
+
+    for (int s = 0; s < total; ++s) {
+        float jx, jy;   // sub-pixel offset in [0, 1]
+
+        if (aaMode == 2) {
+            // Stratified: sample within cell (sx, sy)
+            int sx = s % aaGrid, sy = s / aaGrid;
+            jx = (float(sx) + dist(rng)) / float(aaGrid);
+            jy = (float(sy) + dist(rng)) / float(aaGrid);
+        } else if (aaMode == 3) {
+            // Halton: low-discrepancy deterministic sequence
+            jx = halton(s + 1, 2);
+            jy = halton(s + 1, 3);
+        } else {
+            // Random: uniform jitter
+            jx = dist(rng);
+            jy = dist(rng);
+        }
+
+        URay ray = cam.generateRayJittered(ix, iy, scene.width, scene.height, jx, jy);
         glm::vec3 c;
-        switch (mode) {
+        switch (renderMode) {
         case 0:  c = TraceQ2(ray, scene, cam); break;
         case 1:  c = TraceQ3(ray, scene, cam); break;
         default: c = glm::vec3(0.0f);
         }
         accum += c;
     }
-    return accum / static_cast<float>(N);  // box filter = simple average
+    return accum / float(total);
 }
 
 // ---------------------------------------------------------------------------
-//  ApplyGamma — sRGB-style gamma correction applied in-place to outputImage
-//  output = clamp(linear, 0, 1) ^ (1/gamma)
+//  ApplyToneGamma — Reinhard tone mapping + gamma correction in-place
+//  output = pow(x / (x + 1), 1/gamma)  (per channel)
 // ---------------------------------------------------------------------------
-void URayTracing::ApplyGamma(UScene& scene, float gamma) const
+void URayTracing::ApplyToneGamma(UScene& scene, float gamma) const
 {
     const float invGamma = 1.0f / gamma;
-    for (float& v : scene.outputImage)
-        v = std::pow(glm::clamp(v, 0.0f, 1.0f), invGamma);
+    for (int i = 0; i < (int)scene.outputImage.size(); i += 3) {
+        float r = scene.outputImage[i + 0];
+        float g = scene.outputImage[i + 1];
+        float b = scene.outputImage[i + 2];
+        r = r / (r + 1.0f);
+        g = g / (g + 1.0f);
+        b = b / (b + 1.0f);
+        scene.outputImage[i + 0] = std::pow(r, invGamma);
+        scene.outputImage[i + 1] = std::pow(g, invGamma);
+        scene.outputImage[i + 2] = std::pow(b, invGamma);
+    }
 }
 
 bool URayTracing::FindClosestHit(const URay& ray, const UScene& scene,
