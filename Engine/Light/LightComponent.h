@@ -15,10 +15,11 @@ struct URay;
 // ---------------------------------------------------------------------------
 struct LightGLSLInfo
 {
-    std::string constants;      // const float SOFT_OX[] / GOLDEN_ANGLE etc.
-    std::string uniforms;       // uniform declarations
-    std::string functions;      // shadePointLight / shadeEnvLight etc.
-    std::string shadeContrib;   // lines added to the shade() body
+    std::string constants;        // const float SOFT_OX[] / GOLDEN_ANGLE etc.
+    std::string uniforms;         // uniform declarations
+    std::string functions;        // shadePointLight / shadeEnvLight etc.
+    std::string directContrib;    // lines added to shadeDirect() body
+    std::string indirectContrib;  // lines added to shadeIndirect() body
 };
 
 class LightComponent

@@ -9,6 +9,7 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
+      <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalIncludeDirectories>
         $(SolutionDir)include;
         $(SolutionDir)Engine\Core;
