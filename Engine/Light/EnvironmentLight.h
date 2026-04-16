@@ -3,12 +3,12 @@
 
 // Number of hemisphere sample rays for AO + indirect GI.
 // Higher = softer/more accurate, lower = faster.
-#define ENV_LIGHT_SAMPLES 4
+#define ENV_LIGHT_SAMPLES 8
 
 // Max GI bounce depth. Each bounce spawns ENV_LIGHT_SAMPLES rays,
 // so cost = ENV_LIGHT_SAMPLES^GI_BOUNCE_DEPTH per pixel.
 // depth=1 -> 8 rays, depth=2 -> 64 rays, depth=3 -> 512 rays.
-#define GI_BOUNCE_DEPTH 1
+#define GI_BOUNCE_DEPTH 2
 
 class EnvironmentLight : public LightComponent
 {
