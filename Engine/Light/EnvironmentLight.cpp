@@ -6,7 +6,84 @@
 #include "URayTracing.h"
 #include <cfloat>
 #include <cmath>
+#include <string>
 #include <glm/gtc/constants.hpp>
+
+// ---------------------------------------------------------------------------
+// genBounceGLSL — C++ recursive helper that builds GLSL nested-loop code for
+// multi-bounce hemisphere GI without using GLSL recursion.
+//
+//   d        : current bounce index (0 = first hemisphere from primary hit)
+//   maxDepth : GI_BOUNCE_DEPTH - 1  (0 → 1 level, 1 → 2 levels, …)
+//   ind      : current GLSL indentation string
+//
+// Variables emitted per level d (all names suffixed with d to avoid clashes):
+//   up{d}, tng{d}, btn{d}   — tangent frame around source normal
+//   acc{d}                  — accumulator for this level's samples
+//   i{d}, cosT{d}, sinT{d}, phi{d}, dir{d}  — loop / sample vars
+//   hType{d}, hIdx{d}, t{d} — intersection result
+//   hp{d}, hn{d}, c{d}      — hit point / normal / color (hit branch only)
+//
+// Source point/normal for depth d:
+//   d == 0  →  "p" / "n"  (shadeEnvLight parameters)
+//   d > 0   →  "hp{d-1}" / "hn{d-1}"  (previous bounce hit)
+// ---------------------------------------------------------------------------
+static std::string genBounceGLSL(int d, int maxDepth, const std::string& ind)
+{
+    const std::string D    = std::to_string(d);
+    const std::string srcP = (d == 0) ? "p"  : ("hp" + std::to_string(d - 1));
+    const std::string srcN = (d == 0) ? "n"  : ("hn" + std::to_string(d - 1));
+    const std::string in1  = ind + "    ";
+    const std::string in2  = in1 + "    ";
+
+    std::string c;
+
+    // Tangent frame around srcN
+    c += ind + "vec3 up"  + D + "  = (abs(" + srcN + ".x) > 0.9) ? vec3(0,1,0) : vec3(1,0,0);\n";
+    c += ind + "vec3 tng" + D + " = normalize(cross(" + srcN + ", up" + D + "));\n";
+    c += ind + "vec3 btn" + D + " = cross(" + srcN + ", tng" + D + ");\n";
+    c += ind + "vec3 acc" + D + " = vec3(0.0);\n";
+
+    // Hemisphere sample loop
+    c += ind + "for (int i" + D + " = 0; i" + D + " < ENV_LIGHT_SAMPLES; ++i" + D + ") {\n";
+    c += in1 + "float cosT" + D + " = sqrt(1.0 - (float(i" + D + ") + 0.5) / float(ENV_LIGHT_SAMPLES));\n";
+    c += in1 + "float sinT" + D + " = sqrt(max(0.0, 1.0 - cosT" + D + "*cosT" + D + "));\n";
+    c += in1 + "float phi"  + D + "  = GOLDEN_ANGLE * float(i" + D + ");\n";
+    c += in1 + "vec3  dir"  + D + "  = normalize("
+               "sinT" + D + "*cos(phi" + D + ")*tng" + D + " + "
+               "sinT" + D + "*sin(phi" + D + ")*btn" + D + " + "
+               "cosT" + D + "*" + srcN + ");\n";
+    c += in1 + "int   hType" + D + ", hIdx" + D + ";\n";
+    c += in1 + "float t" + D + " = findClosest(" + srcP + " + 1e-4*" + srcN
+               + ", dir" + D + ", hType" + D + ", hIdx" + D + ");\n";
+
+    // Hit branch
+    c += in1 + "if (hType" + D + " >= 0) {\n";
+    c += in2 + "vec3 hp" + D + " = " + srcP + " + 1e-4*" + srcN + " + t" + D + "*dir" + D + ";\n";
+    c += in2 + "vec3 hn" + D + " = getNormal(hType" + D + ", hIdx" + D + ", hp" + D + ");\n";
+    c += in2 + "vec3 c"  + D + "  = getEmit(hType" + D + ", hIdx" + D + ")\n";
+    c += in2 + "         + getKa(hType"  + D + ", hIdx" + D + ")\n";
+    c += in2 + "         + shadeDirect(hp" + D + ", hn" + D + ", hType" + D + ", hIdx" + D + ");\n";
+
+    if (d < maxDepth) {
+        // Nest the next bounce level inside this hit block
+        c += genBounceGLSL(d + 1, maxDepth, in2);
+        // Add the deeper indirect contribution weighted by this surface's ka
+        c += in2 + "c" + D + " += getKa(hType" + D + ", hIdx" + D + ") * uEnvEffect"
+                 + " * (acc" + std::to_string(d + 1) + " / float(ENV_LIGHT_SAMPLES));\n";
+    }
+
+    c += in2 + "acc" + D + " += c" + D + ";\n";
+
+    // Miss branch — sky gradient
+    c += in1 + "} else {\n";
+    c += in2 + "float blend" + D + " = 0.5 * (dir" + D + ".y + 1.0);\n";
+    c += in2 + "acc" + D + " += mix(vec3(0.3, 0.2, 0.1), vec3(0.5, 0.7, 1.0), blend" + D + ");\n";
+    c += in1 + "}\n";
+    c += ind + "}\n";   // end for
+
+    return c;
+}
 
 EnvironmentLight::EnvironmentLight()
     : LightComponent(glm::vec3(1.0f), glm::vec3(1.0f))
@@ -105,37 +182,14 @@ LightGLSLInfo EnvironmentLight::getGLSLInfo() const
     info.uniforms =
         "\nuniform vec3 uEnvEffect;\n";
 
-    // Key fix: bounce point shading now calls shadeDirect() instead of
-    // manually inlining PointLight uniforms — eliminates cross-light coupling.
-    info.functions =
-        "\nvec3 shadeEnvLight(vec3 p, vec3 n, int type, int idx)\n"
-        "{\n"
-        "    vec3 up  = (abs(n.x) > 0.9) ? vec3(0,1,0) : vec3(1,0,0);\n"
-        "    vec3 tng = normalize(cross(n, up));\n"
-        "    vec3 btn = cross(n, tng);\n"
-        "    vec3 acc = vec3(0.0);\n"
-        "    for (int i = 0; i < ENV_LIGHT_SAMPLES; ++i) {\n"
-        "        float cosT = sqrt(1.0 - (float(i) + 0.5) / float(ENV_LIGHT_SAMPLES));\n"
-        "        float sinT = sqrt(max(0.0, 1.0 - cosT*cosT));\n"
-        "        float phi  = GOLDEN_ANGLE * float(i);\n"
-        "        vec3  dir  = normalize(sinT*cos(phi)*tng + sinT*sin(phi)*btn + cosT*n);\n"
-        "        int   hType, hIdx;\n"
-        "        float t = findClosest(p + 1e-4*n, dir, hType, hIdx);\n"
-        "        if (hType >= 0) {\n"
-        "            vec3 hp = p + 1e-4*n + t*dir;\n"
-        "            vec3 hn = getNormal(hType, hIdx, hp);\n"
-        "            // emissive + ambient + direct — matches CPU TraceQ3 at GI bounce\n"
-        "            // (GI_BOUNCE_DEPTH>1 multi-bounce not possible: GLSL has no recursion)\n"
-        "            acc += getEmit(hType, hIdx)\n"
-        "                 + getKa(hType, hIdx)\n"
-        "                 + shadeDirect(hp, hn, hType, hIdx);\n"
-        "        } else {\n"
-        "            float blend = 0.5 * (dir.y + 1.0);\n"
-        "            acc += mix(vec3(0.3, 0.2, 0.1), vec3(0.5, 0.7, 1.0), blend);\n"
-        "        }\n"
-        "    }\n"
-        "    return getKa(type, idx) * uEnvEffect * (acc / float(ENV_LIGHT_SAMPLES));\n"
-        "}\n";
+    // Dynamically generate shadeEnvLight with GI_BOUNCE_DEPTH levels of
+    // nested hemisphere loops — ENV_LIGHT_SAMPLES used in every loop level.
+    // GI_BOUNCE_DEPTH=1 → single loop (same as before)
+    // GI_BOUNCE_DEPTH=2 → N² rays/pixel for indirect
+    // GI_BOUNCE_DEPTH=3 → N³ rays/pixel for indirect  (N = ENV_LIGHT_SAMPLES)
+    info.functions  = "\nvec3 shadeEnvLight(vec3 p, vec3 n, int type, int idx)\n{\n";
+    info.functions += genBounceGLSL(0, GI_BOUNCE_DEPTH - 1, "    ");
+    info.functions += "    return getKa(type, idx) * uEnvEffect * (acc0 / float(ENV_LIGHT_SAMPLES));\n}\n";
 
     info.indirectContrib = "    col += shadeEnvLight(p, n, type, idx);\n";
     // directContrib intentionally empty — EnvironmentLight is indirect-only
