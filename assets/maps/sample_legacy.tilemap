@@ -1,0 +1,19 @@
+// Legacy single-char tilemap — used to test FTilemapParser_Legacy and as input to convert_tilemap.py
+// Format: SCALE / ORIGIN / DEFINE / LAYER + grid rows
+SCALE 2.0
+ORIGIN 0 0 0
+
+// Symbol definitions: char  TYPE  [key=value ...]
+DEFINE # CUBE  kd=0.7,0.7,0.7 half=1.0,0.1,1.0
+DEFINE W CUBE  kd=0.2,0.2,0.8 half=1.0,1.0,0.1 physics static=true
+DEFINE O SPHERE r=0.4 kd=0.9,0.2,0.2 physics mass=1.5 restitution=0.8 friction=0.2
+DEFINE P PLAYER
+
+// Layer 0 grid (each char is one tile, '.' = empty)
+LAYER 0
+#########
+#.......#
+#...O...#
+#...P...#
+#########
+########W

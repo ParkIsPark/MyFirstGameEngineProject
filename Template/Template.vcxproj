@@ -85,7 +85,6 @@
     <ClCompile Include="$(SolutionDir)Engine\World\CubeSurface.cpp" />
     <ClCompile Include="$(SolutionDir)Engine\World\PlaneSurface.cpp" />
     <ClCompile Include="$(SolutionDir)Engine\World\SphereSurface.cpp" />
-    <ClCompile Include="$(SolutionDir)Engine\World\UPlayerCharacter.cpp" />
     <ClCompile Include="$(SolutionDir)Engine\World\USurface.cpp" />
     <ClCompile Include="$(SolutionDir)Engine\World\UTilemap.cpp" />
     <!-- Engine: Light -->
@@ -96,6 +95,9 @@
     <!-- Engine: Physics -->
     <ClCompile Include="$(SolutionDir)Engine\Physics\PhysicalComponent.cpp" />
     <ClCompile Include="$(SolutionDir)Engine\Physics\UPhysicsWorld.cpp" />
+    <!-- Engine: Player -->
+    <ClCompile Include="$(SolutionDir)Engine\Player\UPlayerCharacter.cpp" />
+    <ClCompile Include="$(SolutionDir)Engine\Player\UPlayerController.cpp" />
     <!-- Engine: RayTracing -->
     <ClCompile Include="$(SolutionDir)Engine\RayTracing\URayTracing.cpp" />
   </ItemGroup>
