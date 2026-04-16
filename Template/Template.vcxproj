@@ -79,6 +79,7 @@
     <ClCompile Include="main.cpp" />
     <!-- Engine: Core -->
     <ClCompile Include="$(SolutionDir)Engine\Core\UScene.cpp" />
+    <ClCompile Include="$(SolutionDir)Engine\Core\UPostProcessFilter.cpp" />
     <!-- Engine: World -->
     <ClCompile Include="$(SolutionDir)Engine\World\AActor.cpp" />
     <ClCompile Include="$(SolutionDir)Engine\World\ACamera.cpp" />
@@ -104,13 +105,13 @@
   <ItemGroup>
     <!-- Engine: Core headers -->
     <ClInclude Include="$(SolutionDir)Engine\Core\UScene.h" />
+    <ClInclude Include="$(SolutionDir)Engine\Core\UPostProcessFilter.h" />
     <!-- Engine: World headers -->
     <ClInclude Include="$(SolutionDir)Engine\World\AActor.h" />
     <ClInclude Include="$(SolutionDir)Engine\World\ACamera.h" />
     <ClInclude Include="$(SolutionDir)Engine\World\CubeSurface.h" />
     <ClInclude Include="$(SolutionDir)Engine\World\PlaneSurface.h" />
     <ClInclude Include="$(SolutionDir)Engine\World\SphereSurface.h" />
-    <ClInclude Include="$(SolutionDir)Engine\World\UPlayerCharacter.h" />
     <ClInclude Include="$(SolutionDir)Engine\World\USurface.h" />
     <ClInclude Include="$(SolutionDir)Engine\World\UTilemap.h" />
     <!-- Engine: Light headers -->
@@ -121,10 +122,15 @@
     <!-- Engine: Physics headers -->
     <ClInclude Include="$(SolutionDir)Engine\Physics\PhysicalComponent.h" />
     <ClInclude Include="$(SolutionDir)Engine\Physics\UPhysicsWorld.h" />
+    <!-- Engine: Player headers -->
+    <ClInclude Include="$(SolutionDir)Engine\Player\UPlayerCharacter.h" />
+    <ClInclude Include="$(SolutionDir)Engine\Player\UPlayerController.h" />
     <!-- Engine: RayTracing headers -->
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\URayTracing.h" />
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\URay.h" />
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\URayTracingPass.h" />
+    <ClInclude Include="$(SolutionDir)Engine\RayTracing\IntersectionPass.h" />
+    <ClInclude Include="$(SolutionDir)Engine\RayTracing\LightingPass.h" />
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\RenderConfig.h" />
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\GeometryPass.h" />
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\MaterialPass.h" />
