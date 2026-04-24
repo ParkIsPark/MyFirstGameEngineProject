@@ -104,9 +104,8 @@ All engine source lives under `Engine/` and is compiled directly into each Sourc
 
 | Mode | Method | Description |
 |------|--------|-------------|
-| 0 | `TraceQ1` | Intersection test only — white(hit) / black(miss) |
-| 1 | `TraceQ2` | Phong shading + shadow rays. **Uses a hardcoded light at `(-4,4,-3)` — ignores `scene.Lights`** |
-| 2 | `TraceQ3` | Phong + recursive mirror reflection (`km`) + uses `scene.Lights` (PointLight, EnvironmentLight) |
+| 0 | `TraceQ2` | Blinn-Phong + shadow rays. `scene.Lights` (PointLight) 에서 광원 읽음. 반사 없음. |
+| 1 | `TraceQ3` | TraceQ2 + `km` 거울 반사 (재귀, MAX_DEPTH=5) + `EnvironmentLight` GI 포함. |
 
 ### GPU Rendering (fullscreen quad)
 
@@ -144,7 +143,7 @@ struct Material {
 
 | Class | Behavior |
 |-------|----------|
-| `PointLight(pos, color, intensity)` | Phong diffuse+specular; 9-sample soft shadow (1 center + 8 disk samples, radius `SOFT_SHADOW_RADIUS=0.7`) |
+| `PointLight(pos, color, intensity)` | Blinn-Phong diffuse+specular; `SOFT_SHADOW_SAMPLES`-sample soft shadow (1 center + N-1 edge, radius `SOFT_SHADOW_RADIUS=0.7`). 기본값 `SOFT_SHADOW_SAMPLES=3`. |
 | `EnvironmentLight(color, intensity)` | Hemisphere sampling (Fibonacci spiral, `ENV_LIGHT_SAMPLES=4`); 1-bounce GI via `TraceQ3` recursion |
 
 ## OpenglViewer.props Details
@@ -160,5 +159,5 @@ The shared property sheet (imported by all `.vcxproj` files):
 - **Path errors**: If includes or engine `.cpp` files are not found, you likely opened a project's own `.sln` instead of `OpenglViewer.sln`. Always use the root solution.
 - **C++17**: `URayTracing.cpp` uses structured bindings (`auto& [k, v]`). The `/std:c++17` flag is set via `OpenglViewer.props` — do not remove it.
 - **`stb_image.h`**: Required by `USurface.cpp` (`SetTexture`). The file is at `include/stb_image.h` and is tracked. Do not delete it.
-- **Mode 1 vs Mode 2**: CPU mode 1 (`TraceQ2`) has a hardcoded light and does not use `scene.Lights`. If scene lighting looks wrong in mode 1, this is expected — use mode 2 or GPU mode for scene-defined lights.
+- **Mode 0 vs Mode 1**: CPU mode 0 (`TraceQ2`) reads PointLights from `scene.Lights`; mode 1 (`TraceQ3`) additionally recurses for mirror reflection and includes EnvironmentLight GI. Both modes use `scene.Lights`.
 - **GPU mode after resize**: Resizing the window while in GPU mode falls back to CPU; re-press `G` to reinitialize the shader.
