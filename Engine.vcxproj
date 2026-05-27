@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{E461E0E5-1A4F-4F2C-9C7A-7B0E7E1C0001}</ProjectGuid>
+    <RootNamespace>Engine</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="Shared" />
+  <!-- Reuse the shared property sheet so include/lib paths match every other project. -->
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(SolutionDir)OpenglViewer.props" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(SolutionDir)OpenglViewer.props" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <!-- Engine: Core -->
+    <ClCompile Include="Engine\Core\UScene.cpp" />
+    <ClCompile Include="Engine\Core\UPostProcessFilter.cpp" />
+    <!-- Engine: World -->
+    <ClCompile Include="Engine\World\AActor.cpp" />
+    <ClCompile Include="Engine\World\ACamera.cpp" />
+    <ClCompile Include="Engine\World\CubeSurface.cpp" />
+    <ClCompile Include="Engine\World\PlaneSurface.cpp" />
+    <ClCompile Include="Engine\World\SphereSurface.cpp" />
+    <ClCompile Include="Engine\World\USurface.cpp" />
+    <ClCompile Include="Engine\World\UTilemap.cpp" />
+    <!-- Engine: Light -->
+    <ClCompile Include="Engine\Light\ALight.cpp" />
+    <ClCompile Include="Engine\Light\EnvironmentLight.cpp" />
+    <ClCompile Include="Engine\Light\LightComponent.cpp" />
+    <ClCompile Include="Engine\Light\PointLight.cpp" />
+    <!-- Engine: Physics -->
+    <ClCompile Include="Engine\Physics\PhysicalComponent.cpp" />
+    <ClCompile Include="Engine\Physics\UPhysicsWorld.cpp" />
+    <!-- Engine: Player -->
+    <ClCompile Include="Engine\Player\UPlayerCharacter.cpp" />
+    <ClCompile Include="Engine\Player\UPlayerController.cpp" />
+    <!-- Engine: RayTracing -->
+    <ClCompile Include="Engine\RayTracing\URayTracing.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Engine: Core headers -->
+    <ClInclude Include="Engine\Core\UScene.h" />
+    <ClInclude Include="Engine\Core\UPostProcessFilter.h" />
+    <!-- Engine: World headers -->
+    <ClInclude Include="Engine\World\AActor.h" />
+    <ClInclude Include="Engine\World\ACamera.h" />
+    <ClInclude Include="Engine\World\CubeSurface.h" />
+    <ClInclude Include="Engine\World\PlaneSurface.h" />
+    <ClInclude Include="Engine\World\SphereSurface.h" />
+    <ClInclude Include="Engine\World\USurface.h" />
+    <ClInclude Include="Engine\World\UTilemap.h" />
+    <!-- Engine: Light headers -->
+    <ClInclude Include="Engine\Light\ALight.h" />
+    <ClInclude Include="Engine\Light\EnvironmentLight.h" />
+    <ClInclude Include="Engine\Light\LightComponent.h" />
+    <ClInclude Include="Engine\Light\PointLight.h" />
+    <!-- Engine: Physics headers -->
+    <ClInclude Include="Engine\Physics\PhysicalComponent.h" />
+    <ClInclude Include="Engine\Physics\UPhysicsWorld.h" />
+    <!-- Engine: Player headers -->
+    <ClInclude Include="Engine\Player\UPlayerCharacter.h" />
+    <ClInclude Include="Engine\Player\UPlayerController.h" />
+    <!-- Engine: RayTracing headers -->
+    <ClInclude Include="Engine\RayTracing\URayTracing.h" />
+    <ClInclude Include="Engine\RayTracing\URay.h" />
+    <ClInclude Include="Engine\RayTracing\URayTracingPass.h" />
+    <ClInclude Include="Engine\RayTracing\RenderConfig.h" />
+    <ClInclude Include="Engine\RayTracing\GeometryPass.h" />
+    <ClInclude Include="Engine\RayTracing\MaterialPass.h" />
+    <ClInclude Include="Engine\RayTracing\DirectLightPass.h" />
+    <ClInclude Include="Engine\RayTracing\IndirectLightPass.h" />
+    <ClInclude Include="Engine\RayTracing\PostProcessPass.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

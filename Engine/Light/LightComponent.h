@@ -10,8 +10,10 @@ struct URay;
 
 // ---------------------------------------------------------------------------
 // GPU code-generation descriptor — returned by each LightComponent subclass.
-// LightingPass collects these to build the lighting functions and the shade()
-// dispatcher dynamically at shader-assembly time.
+// DirectLightPass / IndirectLightPass collect these to build the lighting
+// functions and the shadeDirect() / shadeIndirect() dispatchers at
+// shader-assembly time. `directContrib` feeds shadeDirect(), `indirectContrib`
+// feeds shadeIndirect().
 // ---------------------------------------------------------------------------
 struct LightGLSLInfo
 {

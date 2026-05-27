@@ -107,7 +107,7 @@ glm::vec2 CubeSurface::getUV(const glm::vec3& hitPoint) const
 
 void CubeSurface::uploadUniform(unsigned int /*prog*/, int /*idx*/) const
 {
-    // Cube data is now uploaded as a UBO batch by IntersectionPass — no-op here.
+    // Cube data is uploaded as a UBO batch by GeometryPass — no-op here.
 }
 
 void CubeSurface::getUBOData(float* dst) const

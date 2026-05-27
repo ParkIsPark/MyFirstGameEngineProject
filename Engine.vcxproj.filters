@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Core">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000001}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="World">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000002}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Light">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000003}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Physics">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000004}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Player">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000005}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="RayTracing">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000006}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Engine\Core\UScene.cpp"><Filter>Core</Filter></ClCompile>
+    <ClCompile Include="Engine\Core\UPostProcessFilter.cpp"><Filter>Core</Filter></ClCompile>
+    <ClCompile Include="Engine\World\AActor.cpp"><Filter>World</Filter></ClCompile>
+    <ClCompile Include="Engine\World\ACamera.cpp"><Filter>World</Filter></ClCompile>
+    <ClCompile Include="Engine\World\CubeSurface.cpp"><Filter>World</Filter></ClCompile>
+    <ClCompile Include="Engine\World\PlaneSurface.cpp"><Filter>World</Filter></ClCompile>
+    <ClCompile Include="Engine\World\SphereSurface.cpp"><Filter>World</Filter></ClCompile>
+    <ClCompile Include="Engine\World\USurface.cpp"><Filter>World</Filter></ClCompile>
+    <ClCompile Include="Engine\World\UTilemap.cpp"><Filter>World</Filter></ClCompile>
+    <ClCompile Include="Engine\Light\ALight.cpp"><Filter>Light</Filter></ClCompile>
+    <ClCompile Include="Engine\Light\EnvironmentLight.cpp"><Filter>Light</Filter></ClCompile>
+    <ClCompile Include="Engine\Light\LightComponent.cpp"><Filter>Light</Filter></ClCompile>
+    <ClCompile Include="Engine\Light\PointLight.cpp"><Filter>Light</Filter></ClCompile>
+    <ClCompile Include="Engine\Physics\PhysicalComponent.cpp"><Filter>Physics</Filter></ClCompile>
+    <ClCompile Include="Engine\Physics\UPhysicsWorld.cpp"><Filter>Physics</Filter></ClCompile>
+    <ClCompile Include="Engine\Player\UPlayerCharacter.cpp"><Filter>Player</Filter></ClCompile>
+    <ClCompile Include="Engine\Player\UPlayerController.cpp"><Filter>Player</Filter></ClCompile>
+    <ClCompile Include="Engine\RayTracing\URayTracing.cpp"><Filter>RayTracing</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Engine\Core\UScene.h"><Filter>Core</Filter></ClInclude>
+    <ClInclude Include="Engine\Core\UPostProcessFilter.h"><Filter>Core</Filter></ClInclude>
+    <ClInclude Include="Engine\World\AActor.h"><Filter>World</Filter></ClInclude>
+    <ClInclude Include="Engine\World\ACamera.h"><Filter>World</Filter></ClInclude>
+    <ClInclude Include="Engine\World\CubeSurface.h"><Filter>World</Filter></ClInclude>
+    <ClInclude Include="Engine\World\PlaneSurface.h"><Filter>World</Filter></ClInclude>
+    <ClInclude Include="Engine\World\SphereSurface.h"><Filter>World</Filter></ClInclude>
+    <ClInclude Include="Engine\World\USurface.h"><Filter>World</Filter></ClInclude>
+    <ClInclude Include="Engine\World\UTilemap.h"><Filter>World</Filter></ClInclude>
+    <ClInclude Include="Engine\Light\ALight.h"><Filter>Light</Filter></ClInclude>
+    <ClInclude Include="Engine\Light\EnvironmentLight.h"><Filter>Light</Filter></ClInclude>
+    <ClInclude Include="Engine\Light\LightComponent.h"><Filter>Light</Filter></ClInclude>
+    <ClInclude Include="Engine\Light\PointLight.h"><Filter>Light</Filter></ClInclude>
+    <ClInclude Include="Engine\Physics\PhysicalComponent.h"><Filter>Physics</Filter></ClInclude>
+    <ClInclude Include="Engine\Physics\UPhysicsWorld.h"><Filter>Physics</Filter></ClInclude>
+    <ClInclude Include="Engine\Player\UPlayerCharacter.h"><Filter>Player</Filter></ClInclude>
+    <ClInclude Include="Engine\Player\UPlayerController.h"><Filter>Player</Filter></ClInclude>
+    <ClInclude Include="Engine\RayTracing\URayTracing.h"><Filter>RayTracing</Filter></ClInclude>
+    <ClInclude Include="Engine\RayTracing\URay.h"><Filter>RayTracing</Filter></ClInclude>
+    <ClInclude Include="Engine\RayTracing\URayTracingPass.h"><Filter>RayTracing</Filter></ClInclude>
+    <ClInclude Include="Engine\RayTracing\RenderConfig.h"><Filter>RayTracing</Filter></ClInclude>
+    <ClInclude Include="Engine\RayTracing\GeometryPass.h"><Filter>RayTracing</Filter></ClInclude>
+    <ClInclude Include="Engine\RayTracing\MaterialPass.h"><Filter>RayTracing</Filter></ClInclude>
+    <ClInclude Include="Engine\RayTracing\DirectLightPass.h"><Filter>RayTracing</Filter></ClInclude>
+    <ClInclude Include="Engine\RayTracing\IndirectLightPass.h"><Filter>RayTracing</Filter></ClInclude>
+    <ClInclude Include="Engine\RayTracing\PostProcessPass.h"><Filter>RayTracing</Filter></ClInclude>
+  </ItemGroup>
+</Project>

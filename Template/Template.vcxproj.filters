@@ -162,12 +162,6 @@
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\URayTracingPass.h">
       <Filter>Engine\RayTracing</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\IntersectionPass.h">
-      <Filter>Engine\RayTracing</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\LightingPass.h">
-      <Filter>Engine\RayTracing</Filter>
-    </ClInclude>
     <ClInclude Include="$(SolutionDir)Engine\RayTracing\GeometryPass.h">
       <Filter>Engine\RayTracing</Filter>
     </ClInclude>

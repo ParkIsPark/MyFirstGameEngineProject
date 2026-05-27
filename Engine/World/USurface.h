@@ -6,7 +6,7 @@
 
 // ---------------------------------------------------------------------------
 // GPU code-generation descriptor — returned by each Surface subclass.
-// IntersectionPass collects these at shader-assembly time to build the
+// GeometryPass collects these at shader-assembly time to build the
 // intersection / normal / shading dispatch functions dynamically.
 // ---------------------------------------------------------------------------
 struct SurfaceGLSLInfo
@@ -83,6 +83,6 @@ public:
     virtual SurfaceGLSLInfo getGLSLInfo() const = 0;
 
     // Uploads this surface's data to the GPU uniform arrays at the given index.
-    // Called every frame by IntersectionPass::uploadUniforms().
+    // Called every frame by GeometryPass::uploadUniforms().
     virtual void uploadUniform(unsigned int prog, int idx) const = 0;
 };

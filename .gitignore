@@ -1,10 +1,4 @@
 # -------------------------------------------------------
-# User homework projects — work here freely, not tracked
-# -------------------------------------------------------
-Source/*
-!Source/.gitkeep
-
-# -------------------------------------------------------
 # Visual Studio
 # -------------------------------------------------------
 .vs/
@@ -23,6 +17,9 @@ ipch/
 bin/*.exe
 bin/*.pdb
 bin/*.ilk
+bin/*.lib
+bin/*.idb
+bin/*.exp
 
 # Intermediate / object files
 x64/
