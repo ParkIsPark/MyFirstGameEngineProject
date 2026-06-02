@@ -27,6 +27,7 @@
         $(EngineRootDir)Engine\RayTracing;
         $(EngineRootDir)Engine\Render;
         $(EngineRootDir)Engine\Import;
+        $(EngineRootDir)Engine\Acceleration;
         $(EngineRootDir)Engine\Editor;
         $(EngineRootDir)Engine\Editor\External\imgui;
         $(EngineRootDir)Engine\Editor\External\imgui\backends;

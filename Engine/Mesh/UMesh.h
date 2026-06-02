@@ -1,12 +1,14 @@
 #pragma once
 #include <vector>
 #include <cstdint>
+#include <memory>
 #include <glm/glm.hpp>
 
 #include "Vertex.h"
 #include "Material.h"   // per-asset default material (moved out of deleted USurface)
 
 struct URay;
+class  BVH;
 
 // ---------------------------------------------------------------------------
 // UMesh — triangle mesh asset (Unreal StaticMesh analogue).
@@ -25,7 +27,15 @@ public:
     std::vector<uint32_t> indices;   // 3 indices per triangle
     Material              material;   // per-asset default material
 
+    UMesh();
+    ~UMesh();                        // both out-of-line for unique_ptr<BVH> (incomplete)
+
     int triangleCount() const { return static_cast<int>(indices.size()) / 3; }
+
+    // Optional acceleration structure. BuildBVH() builds it; intersect() then
+    // traverses it instead of brute-forcing all triangles.
+    std::unique_ptr<BVH> bvh;
+    void BuildBVH();
 
     // -------- static generators (analytic-shape replacements) --------
     // GenerateSphere reproduces the EXACT vertex order / index rules of the

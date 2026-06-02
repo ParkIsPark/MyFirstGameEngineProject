@@ -1,10 +1,20 @@
 #include "UMesh.h"
 #include "URay.h"
+#include "BVH.h"
 
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 #include <limits>
+
+UMesh::UMesh()  = default;          // out-of-line: BVH is complete here
+UMesh::~UMesh() = default;
+
+void UMesh::BuildBVH()
+{
+    bvh = std::make_unique<BVH>();
+    bvh->Build(*this);
+}
 
 // ---------------------------------------------------------------------------
 // GenerateSphere — same vertex order + index rule as course sphere_scene.cpp.
@@ -166,6 +176,13 @@ bool UMesh::intersect(const URay& ray, const glm::mat4& worldMat,
     const glm::mat4 inv = glm::inverse(worldMat);
     const glm::vec3 ro  = glm::vec3(inv * glm::vec4(ray.origin,    1.0f));
     const glm::vec3 rd  = glm::vec3(inv * glm::vec4(ray.direction, 0.0f));
+
+    // Accelerated path: traverse the BVH (mesh-local space) when built.
+    if (bvh && !bvh->empty())
+    {
+        const URay localRay(ro, rd);
+        return bvh->Intersect(localRay, *this, outT, outTri, outU, outV);
+    }
 
     float closest = std::numeric_limits<float>::max();
     bool  hit     = false;

@@ -77,6 +77,8 @@
     <!-- Engine: Render -->
     <ClCompile Include="Engine\Render\URenderer.cpp" />
     <ClCompile Include="Engine\Render\UHybridPass.cpp" />
+    <!-- Engine: Acceleration -->
+    <ClCompile Include="Engine\Acceleration\BVH.cpp" />
     <!-- Engine: Import -->
     <ClCompile Include="Engine\Import\UObjImporter.cpp" />
     <ClCompile Include="Engine\Import\UFbxImporter.cpp" />
@@ -130,6 +132,8 @@
     <!-- Engine: Render headers -->
     <ClInclude Include="Engine\Render\URenderer.h" />
     <ClInclude Include="Engine\Render\UHybridPass.h" />
+    <!-- Engine: Acceleration headers -->
+    <ClInclude Include="Engine\Acceleration\BVH.h" />
     <!-- Engine: Import headers -->
     <ClInclude Include="Engine\Import\UObjImporter.h" />
     <ClInclude Include="Engine\Import\UFbxImporter.h" />
