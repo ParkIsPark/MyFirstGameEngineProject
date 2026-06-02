@@ -70,6 +70,7 @@
     <ClCompile Include="Engine\Core\UPostProcessFilter.cpp" />
     <!-- Engine: Mesh -->
     <ClCompile Include="Engine\Mesh\UMesh.cpp" />
+    <ClCompile Include="Engine\Mesh\UMeshComponent.cpp" />
     <!-- Engine: World -->
     <ClCompile Include="Engine\World\AActor.cpp" />
     <ClCompile Include="Engine\World\ACamera.cpp" />
@@ -99,6 +100,7 @@
     <!-- Engine: Mesh headers -->
     <ClInclude Include="Engine\Mesh\Vertex.h" />
     <ClInclude Include="Engine\Mesh\UMesh.h" />
+    <ClInclude Include="Engine\Mesh\UMeshComponent.h" />
     <!-- Engine: World headers -->
     <ClInclude Include="Engine\World\AActor.h" />
     <ClInclude Include="Engine\World\ACamera.h" />

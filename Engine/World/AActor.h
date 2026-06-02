@@ -3,6 +3,7 @@
 #include <glm/glm.hpp>
 
 class PhysicalComponent;
+class UMeshComponent;
 
 class AActor
 {
@@ -11,7 +12,10 @@ public:
     ~AActor();
 
     glm::vec3        position = glm::vec3(0.0f);
-    USurface*        surface  = nullptr;
+    glm::vec3        rotation = glm::vec3(0.0f); // Euler XYZ (degrees)
+    glm::vec3        scale    = glm::vec3(1.0f);
+    USurface*        surface  = nullptr;         // legacy analytic shape (removed in mesh-first Stage 5)
+    UMeshComponent*  mesh     = nullptr;         // mesh-first instance (coexists with surface in Stage 2)
     PhysicalComponent* physics = nullptr;
 
     glm::vec3 GetPosition() const { return position; }
