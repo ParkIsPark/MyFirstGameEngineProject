@@ -22,10 +22,10 @@ public:
         depth.assign(static_cast<size_t>(nx) * ny, 1.0f);
     }
 
-    void Clear(const glm::vec3& bg, float far = 1.0f)
+    void Clear(const glm::vec3& bg, float farDepth = 1.0f)   // 'far' is a Windows macro
     {
         std::fill(color.begin(), color.end(), bg);
-        std::fill(depth.begin(), depth.end(), far);
+        std::fill(depth.begin(), depth.end(), farDepth);
     }
 
     // Depth test (smaller = nearer). On pass, writes color + depth.
