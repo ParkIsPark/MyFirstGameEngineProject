@@ -47,4 +47,30 @@ public:
             out[3 * i + 2] = color[i].b;
         }
     }
+
+    // Grayscale depth visualization (REQUIRED Q1 deliverable: demonstrates the
+    // depth buffer / occlusion -- the white silhouette alone can't). Background
+    // (depth == farDepth) is black; the written depth range is normalized so the
+    // occlusion gradient is visible, with the NEAREST surface the BRIGHTEST
+    // (sphere center brightest). Interleaved RGB, same layout as ToOutputImage.
+    void ToDepthImage(std::vector<float>& out, float farDepth = 1.0f) const
+    {
+        float mn = farDepth, mx = 0.0f;
+        bool any = false;
+        for (float d : depth)
+            if (d < farDepth) { mn = std::min(mn, d); mx = std::max(mx, d); any = true; }
+        const float range = (any && mx > mn) ? (mx - mn) : 1.0f;
+
+        out.resize(static_cast<size_t>(nx) * ny * 3);
+        for (int i = 0; i < nx * ny; ++i)
+        {
+            float g = 0.0f;                              // background -> black
+            if (depth[i] < farDepth)
+            {
+                const float t = (depth[i] - mn) / range; // 0 = nearest, 1 = farthest
+                g = 1.0f - 0.85f * t;                     // nearest brightest
+            }
+            out[3 * i + 0] = out[3 * i + 1] = out[3 * i + 2] = g;
+        }
+    }
 };
