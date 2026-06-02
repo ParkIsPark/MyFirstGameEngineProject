@@ -91,33 +91,43 @@ void URenderer::RasterWorld(UScene& scene, const ACamera& cam, int nx, int ny)
     const glm::vec3 ambient(0.16f);
     const glm::vec3 bg(0.10f, 0.11f, 0.13f);
     const int n = nx * ny;
-    for (int i = 0; i < n; ++i)
+
+    // Per-pixel shading is embarrassingly parallel (each pixel independent and
+    // writes a disjoint slot) -> split across the worker pool. Bit-equal to the
+    // serial path, which `multithread = false` selects for the equivalence test.
+    auto shadeRange = [&](int begin, int end)
     {
-        glm::vec3 col;
-        if (gbuffer_.depth[i] >= 1.0f)
+        for (int i = begin; i < end; ++i)
         {
-            col = bg;
-        }
-        else
-        {
-            const glm::vec3 P   = gbuffer_.worldPos[i];
-            const glm::vec3 N   = glm::normalize(gbuffer_.normal[i]);
-            const glm::vec3 alb = gbuffer_.albedo[i];
-            col = alb * ambient;
-            for (const PL& L : lights)
+            glm::vec3 col;
+            if (gbuffer_.depth[i] >= 1.0f)
             {
-                glm::vec3 l = L.pos - P;
-                const float d = glm::length(l);
-                if (d < 1e-5f) continue;
-                l /= d;
-                col += alb * L.col * glm::max(glm::dot(N, l), 0.0f);
+                col = bg;
             }
-            col = glm::min(col, glm::vec3(1.0f));
+            else
+            {
+                const glm::vec3 P   = gbuffer_.worldPos[i];
+                const glm::vec3 N   = glm::normalize(gbuffer_.normal[i]);
+                const glm::vec3 alb = gbuffer_.albedo[i];
+                col = alb * ambient;
+                for (const PL& L : lights)
+                {
+                    glm::vec3 l = L.pos - P;
+                    const float d = glm::length(l);
+                    if (d < 1e-5f) continue;
+                    l /= d;
+                    col += alb * L.col * glm::max(glm::dot(N, l), 0.0f);
+                }
+                col = glm::min(col, glm::vec3(1.0f));
+            }
+            scene.outputImage[3 * i + 0] = col.r;
+            scene.outputImage[3 * i + 1] = col.g;
+            scene.outputImage[3 * i + 2] = col.b;
         }
-        scene.outputImage[3 * i + 0] = col.r;
-        scene.outputImage[3 * i + 1] = col.g;
-        scene.outputImage[3 * i + 2] = col.b;
-    }
+    };
+
+    if (multithread) pool_.ParallelForChunks(n, shadeRange);
+    else             shadeRange(0, n);
 }
 
 void URenderer::GBufferWorld(UScene& scene, const ACamera& cam, int nx, int ny)

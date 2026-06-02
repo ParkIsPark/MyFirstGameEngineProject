@@ -4,6 +4,7 @@
 #include "URasterizer.h"
 #include "UFrameBuffer.h"
 #include "UGBuffer.h"
+#include "ThreadPool.h"
 
 class UWorld;
 class UScene;
@@ -47,5 +48,9 @@ private:
     URasterizer  raster_;
     UFrameBuffer fb_;
     UGBuffer     gbuffer_;
+    ThreadPool   pool_;                       // worker pool for the lit shading pass
     std::vector<ERenderStage> lastPlan_;
+
+public:
+    bool multithread = true;                  // toggle for the single-vs-MT test
 };

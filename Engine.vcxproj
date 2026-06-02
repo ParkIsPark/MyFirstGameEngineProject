@@ -134,6 +134,8 @@
     <ClInclude Include="Engine\Render\UHybridPass.h" />
     <!-- Engine: Acceleration headers -->
     <ClInclude Include="Engine\Acceleration\BVH.h" />
+    <!-- Engine: Threading headers (header-only) -->
+    <ClInclude Include="Engine\Threading\ThreadPool.h" />
     <!-- Engine: Import headers -->
     <ClInclude Include="Engine\Import\UObjImporter.h" />
     <ClInclude Include="Engine\Import\UFbxImporter.h" />
