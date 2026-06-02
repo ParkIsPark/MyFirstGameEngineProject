@@ -1,19 +1,22 @@
 #pragma once
 #include "Engine.h"
-#include "ACamera.h"
-#include "UMeshRayTracer.h"
+#include "UWorld.h"
+#include "URenderer.h"
+
+#include <vector>
+#include <string>
 
 class UMesh;
+class AActor;
 
 // ---------------------------------------------------------------------------
 // EditorEngine (page 7) — an Engine variant that overlays a Dear ImGui editor
-// (Unreal-style: Toolbar / World Outliner / Details / Viewport). It reuses the
-// base Engine's window + GL context + main loop; OnStartup() boots ImGui and
-// Render() draws the panels each frame.
+// (Unreal-style: Toolbar / World Outliner / Details / Viewport) over a live
+// UWorld. Reuses the base Engine's window + GL context + main loop.
 //
-// MVP is incremental: Stage 1 = ImGui shell + panel layout. Later stages add
-// the FBO viewport, outliner/details bound to a UWorld, picking, and the
-// Editor<->PIE (Play-in-Editor) world switch.
+//   Stage 1  ImGui shell + panel layout
+//   Stage 2  Viewport renders the scene into an FBO -> ImGui::Image
+//   Stage 3  Outliner/Details bound to a real UWorld; editing reflects live
 // ---------------------------------------------------------------------------
 class EditorEngine : public Engine
 {
@@ -25,24 +28,27 @@ protected:
     void Render()    override;
 
 private:
+    void BuildEditorWorld();
     void DrawUI();
-    void DrawViewport();                 // FBO scene render + ImGui::Image
-    void EnsureFBO(int w, int h);        // (re)allocate the viewport framebuffer
+    void DrawToolbar();
+    void DrawOutliner();
+    void DrawDetails();
+    void DrawViewport();
+    void EnsureViewportTex(int w, int h);
 
-    bool imguiReady_  = false;
-    bool showDemo_    = false;
-    int  renderMode_  = 1;       // 0=Rasterizer 1=GPU RT 2=Hybrid
-    bool playing_     = false;   // Editor vs PIE (Stage 5)
-    int  selected_    = -1;      // selected outliner row (Stage 3)
+    bool imguiReady_ = false;
+    bool showDemo_   = false;
+    int  renderMode_ = 0;        // 0=Rasterizer 1=GPU RT 2=Hybrid
+    bool playing_    = false;    // Editor vs PIE (Stage 5)
+    int  selected_   = -1;       // index into editorWorld_ actors
 
-    // --- viewport scene (Stage 2: one GPU-ray-traced mesh into an FBO) ---
-    UMesh*         vpMesh_   = nullptr;
-    UMeshRayTracer vpTracer_;
-    ACamera        vpCam_;
-    unsigned int   fbo_      = 0;
-    unsigned int   fboTex_   = 0;
-    unsigned int   fboDepth_ = 0;
-    int            fboW_      = 0;
-    int            fboH_      = 0;
-    float          vpSpin_    = 0.0f;
+    UWorld    editorWorld_;
+    URenderer renderer_;
+
+    std::vector<UMesh*>      meshAssets_;   // owned shared mesh assets
+    std::vector<std::string> actorNames_;   // parallel to scene.Actors
+
+    unsigned int vpTex_  = 0;    // viewport texture (outputImage upload)
+    int          vpTexW_ = 0;
+    int          vpTexH_ = 0;
 };

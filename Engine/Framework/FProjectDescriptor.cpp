@@ -22,25 +22,25 @@ namespace
         return s;
     }
 
-    ERenderMode parseMode(const std::string& v)
+    EProjectRenderMode parseMode(const std::string& v)
     {
         const std::string m = lower(v);
-        if (m == "gpu_rt")     return ERenderMode::GPU_RT;
-        if (m == "rasterizer") return ERenderMode::Rasterizer;
-        if (m == "hybrid")     return ERenderMode::Hybrid;
-        if (m == "cpu_rt")     return ERenderMode::GPU_RT;   // CPU RT removed -> GPU
-        return ERenderMode::GPU_RT;                          // unknown -> default
+        if (m == "gpu_rt")     return EProjectRenderMode::GPU_RT;
+        if (m == "rasterizer") return EProjectRenderMode::Rasterizer;
+        if (m == "hybrid")     return EProjectRenderMode::Hybrid;
+        if (m == "cpu_rt")     return EProjectRenderMode::GPU_RT;   // CPU RT removed -> GPU
+        return EProjectRenderMode::GPU_RT;                          // unknown -> default
     }
 }
 
-const char* FProjectDescriptor::RenderModeName(ERenderMode m)
+const char* FProjectDescriptor::RenderModeName(EProjectRenderMode m)
 {
     switch (m)
     {
-        case ERenderMode::CPU_RT:     return "CPU_RT";
-        case ERenderMode::GPU_RT:     return "GPU_RT";
-        case ERenderMode::Rasterizer: return "Rasterizer";
-        case ERenderMode::Hybrid:     return "Hybrid";
+        case EProjectRenderMode::CPU_RT:     return "CPU_RT";
+        case EProjectRenderMode::GPU_RT:     return "GPU_RT";
+        case EProjectRenderMode::Rasterizer: return "Rasterizer";
+        case EProjectRenderMode::Hybrid:     return "Hybrid";
     }
     return "GPU_RT";
 }
