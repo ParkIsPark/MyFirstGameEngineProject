@@ -67,6 +67,36 @@ namespace
         }
     };
 
+    std::string dirOf(const std::string& p)
+    {
+        const size_t s = p.find_last_of("/\\");
+        return (s == std::string::npos) ? std::string() : p.substr(0, s + 1);
+    }
+
+    // Parse a .mtl: each `newmtl` opens a block; Ka/Kd/Ks/Ns fill the Material.
+    // map_Kd (texture) is recorded only as a path is not loaded here (GL upload
+    // is a later concern). Missing file -> leaves `out` unchanged.
+    void LoadMtl(const std::string& path, std::unordered_map<std::string, Material>& out)
+    {
+        std::ifstream f(path);
+        if (!f.is_open()) return;
+
+        std::string line, cur;
+        while (std::getline(f, line))
+        {
+            if (line.empty() || line[0] == '#') continue;
+            std::istringstream iss(line);
+            std::string tag; iss >> tag;
+
+            if (tag == "newmtl") { iss >> cur; out[cur] = Material(); }
+            else if (cur.empty()) continue;
+            else if (tag == "Ka") { glm::vec3 c(0.0f); iss >> c.x >> c.y >> c.z; out[cur].ka = c; }
+            else if (tag == "Kd") { glm::vec3 c(0.0f); iss >> c.x >> c.y >> c.z; out[cur].kd = c; }
+            else if (tag == "Ks") { glm::vec3 c(0.0f); iss >> c.x >> c.y >> c.z; out[cur].ks = c; }
+            else if (tag == "Ns") { float s = 0.0f; iss >> s; out[cur].shininess = s; }
+        }
+    }
+
     void ComputeMissingNormals(UMesh& m)
     {
         std::vector<glm::vec3> accum(m.vertices.size(), glm::vec3(0.0f));
@@ -168,4 +198,97 @@ UMesh* UObjImporter::Load(const char* path)
         ComputeMissingNormals(*mesh);
 
     return mesh;
+}
+
+// ---------------------------------------------------------------------------
+// Material-aware load: split faces into one UMesh per active usemtl group.
+// ---------------------------------------------------------------------------
+std::vector<UMesh*> UObjImporter::LoadMulti(const char* path)
+{
+    if (!path) return {};
+    std::ifstream f(path);
+    if (!f.is_open()) return {};
+
+    std::vector<glm::vec3> positions;
+    std::vector<glm::vec2> uvs;
+    std::vector<glm::vec3> normals;
+    std::unordered_map<std::string, Material> matMap;
+    const std::string baseDir = dirOf(path);
+
+    struct Group
+    {
+        std::string mat;
+        UMesh*      mesh;
+        std::unordered_map<IndexTriple, uint32_t, TripleHash, TripleEq> cache;
+        bool        anyNormal;
+    };
+    std::vector<Group> groups;
+
+    auto getGroup = [&](const std::string& mat) -> Group&
+    {
+        for (Group& g : groups) if (g.mat == mat) return g;
+        groups.push_back(Group{ mat, new UMesh(), {}, false });
+        return groups.back();
+    };
+
+    std::string curMat;     // "" until the first usemtl
+
+    std::string line;
+    while (std::getline(f, line))
+    {
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream iss(line);
+        std::string tag; iss >> tag;
+
+        if      (tag == "v")  { glm::vec3 p(0.0f); iss >> p.x >> p.y >> p.z; positions.push_back(p); }
+        else if (tag == "vt") { glm::vec2 t(0.0f); iss >> t.x >> t.y;        uvs.push_back(t); }
+        else if (tag == "vn") { glm::vec3 n(0.0f); iss >> n.x >> n.y >> n.z; normals.push_back(n); }
+        else if (tag == "mtllib") { std::string mtl; iss >> mtl; LoadMtl(baseDir + mtl, matMap); }
+        else if (tag == "usemtl") { iss >> curMat; }
+        else if (tag == "f")
+        {
+            Group& g = getGroup(curMat);
+            std::vector<uint32_t> faceIdx;
+            std::string tok;
+            while (iss >> tok)
+            {
+                const IndexTriple it = ParseFaceToken(
+                    tok, (int)positions.size(), (int)uvs.size(), (int)normals.size());
+                if (it.p < 0 || it.p >= (int)positions.size()) continue;
+
+                auto found = g.cache.find(it);
+                uint32_t vidx;
+                if (found != g.cache.end()) { vidx = found->second; }
+                else
+                {
+                    Vertex v;
+                    v.position = positions[it.p];
+                    v.uv       = (it.t >= 0 && it.t < (int)uvs.size())     ? uvs[it.t]     : glm::vec2(0.0f);
+                    v.normal   = (it.n >= 0 && it.n < (int)normals.size()) ? normals[it.n] : glm::vec3(0.0f);
+                    if (it.n >= 0) g.anyNormal = true;
+                    vidx = (uint32_t)g.mesh->vertices.size();
+                    g.mesh->vertices.push_back(v);
+                    g.cache[it] = vidx;
+                }
+                faceIdx.push_back(vidx);
+            }
+            for (size_t i = 1; i + 1 < faceIdx.size(); ++i)
+            {
+                g.mesh->indices.push_back(faceIdx[0]);
+                g.mesh->indices.push_back(faceIdx[i]);
+                g.mesh->indices.push_back(faceIdx[i + 1]);
+            }
+        }
+    }
+
+    std::vector<UMesh*> out;
+    out.reserve(groups.size());
+    for (Group& g : groups)
+    {
+        auto it = matMap.find(g.mat);
+        if (it != matMap.end()) g.mesh->material = it->second;
+        if (!g.anyNormal) ComputeMissingNormals(*g.mesh);
+        out.push_back(g.mesh);
+    }
+    return out;
 }
