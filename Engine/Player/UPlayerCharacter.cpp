@@ -1,6 +1,6 @@
 #include "UPlayerCharacter.h"
 #include "CubeSurface.h"
-#include "PhysicalComponent.h"
+#include "UBoxComponent.h"
 
 #include <glm/glm.hpp>
 
@@ -14,7 +14,9 @@ UPlayerCharacter::UPlayerCharacter()
     cube->material.km        = glm::vec3(0.05f);
     SetSurface(cube);
 
-    auto* phys = new PhysicalComponent(this);
+    // Box collider matching the visual cube half-extents (capsule comes in P6).
+    auto* phys = new UBoxComponent(this);
+    phys->halfExtents        = glm::vec3(0.4f, 0.9f, 0.4f);
     phys->mass               = 70.0f;
     phys->restitution        = 0.05f;
     phys->friction           = 0.8f;

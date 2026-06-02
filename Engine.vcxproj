@@ -90,7 +90,6 @@
     <ClCompile Include="Engine\Light\LightComponent.cpp" />
     <ClCompile Include="Engine\Light\PointLight.cpp" />
     <!-- Engine: Physics -->
-    <ClCompile Include="Engine\Physics\PhysicalComponent.cpp" />
     <ClCompile Include="Engine\Physics\UPrimitiveComponent.cpp" />
     <ClCompile Include="Engine\Physics\USphereComponent.cpp" />
     <ClCompile Include="Engine\Physics\UBoxComponent.cpp" />
@@ -129,7 +128,6 @@
     <ClInclude Include="Engine\Light\LightComponent.h" />
     <ClInclude Include="Engine\Light\PointLight.h" />
     <!-- Engine: Physics headers -->
-    <ClInclude Include="Engine\Physics\PhysicalComponent.h" />
     <ClInclude Include="Engine\Physics\UPrimitiveComponent.h" />
     <ClInclude Include="Engine\Physics\UShapeComponent.h" />
     <ClInclude Include="Engine\Physics\USphereComponent.h" />

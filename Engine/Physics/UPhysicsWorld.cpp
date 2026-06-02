@@ -1,10 +1,9 @@
 #include "UPhysicsWorld.h"
-#include "PhysicalComponent.h"
+#include "UPrimitiveComponent.h"
+#include "USphereComponent.h"
+#include "UBoxComponent.h"
 #include "../Core/UScene.h"
 #include "../World/AActor.h"
-#include "../World/SphereSurface.h"
-#include "../World/CubeSurface.h"
-#include "../World/PlaneSurface.h"
 
 #include <glm/glm.hpp>
 
@@ -16,6 +15,16 @@ static bool isDynamic(const AActor* a)
     return a->physics && !a->physics->IsStatic();
 }
 
+// Shape parameter accessors — only valid for the matching GetShape() kind.
+static float sphereRadius(const UPrimitiveComponent* p)
+{
+    return static_cast<const USphereComponent*>(p)->radius;
+}
+static glm::vec3 boxHalf(const UPrimitiveComponent* p)
+{
+    return static_cast<const UBoxComponent*>(p)->halfExtents;
+}
+
 // ---------------------------------------------------------------------------
 void UPhysicsWorld::Tick(float dt, UScene& scene)
 {
@@ -25,7 +34,7 @@ void UPhysicsWorld::Tick(float dt, UScene& scene)
     // ------------------------------------------------------------------
     for (AActor* actor : scene.Actors)
     {
-        PhysicalComponent* phys = actor->physics;
+        UPrimitiveComponent* phys = actor->physics;
         if (!phys || phys->IsStatic()) continue;
 
         if (phys->bAffectedByGravity)
@@ -38,52 +47,56 @@ void UPhysicsWorld::Tick(float dt, UScene& scene)
 
     // ------------------------------------------------------------------
     // 2. Dynamic vs static/dynamic — iterate every ordered pair once.
+    //    Collision shape comes from the primitive component (GetShape),
+    //    not from the legacy surface.  Actors without a primitive are
+    //    skipped (no collider).
     // ------------------------------------------------------------------
     const size_t n = scene.Actors.size();
     for (size_t i = 0; i < n; ++i)
     {
         AActor* a = scene.Actors[i];
-        SphereSurface* sa = dynamic_cast<SphereSurface*>(a->surface);
-        CubeSurface*   ca = dynamic_cast<CubeSurface*>  (a->surface);
+        UPrimitiveComponent* pa = a->physics;
+        if (!pa) continue;
+        const EShape sa = pa->GetShape();
 
         for (size_t j = i + 1; j < n; ++j)
         {
             AActor* b = scene.Actors[j];
+            UPrimitiveComponent* pb = b->physics;
+            if (!pb) continue;
 
             // Both static: no collision response needed
             if (!isDynamic(a) && !isDynamic(b)) continue;
 
-            // Skip plane-plane or plane-something handled separately
-            if (dynamic_cast<PlaneSurface*>(a->surface) ||
-                dynamic_cast<PlaneSurface*>(b->surface)) continue;
+            const EShape sb = pb->GetShape();
 
-            SphereSurface* sb = dynamic_cast<SphereSurface*>(b->surface);
-            CubeSurface*   cb = dynamic_cast<CubeSurface*>  (b->surface);
-
-            if      (sa && sb) resolveSphereSphere(a, sa->radius, b, sb->radius);
-            else if (ca && cb) resolveAABBvsAABB  (a, ca->halfVec, b, cb->halfVec);
-            else if (sa && cb) resolveSphereAABB  (a, sa->radius,  b, cb->halfVec);
-            else if (ca && sb) resolveSphereAABB  (b, sb->radius,  a, ca->halfVec);
+            if      (sa == EShape::Sphere && sb == EShape::Sphere)
+                resolveSphereSphere(a, sphereRadius(pa), b, sphereRadius(pb));
+            else if (sa == EShape::Box && sb == EShape::Box)
+                resolveAABBvsAABB  (a, boxHalf(pa), b, boxHalf(pb));
+            else if (sa == EShape::Sphere && sb == EShape::Box)
+                resolveSphereAABB  (a, sphereRadius(pa), b, boxHalf(pb));
+            else if (sa == EShape::Box && sb == EShape::Sphere)
+                resolveSphereAABB  (b, sphereRadius(pb), a, boxHalf(pa));
+            // (Capsule combinations land in P6.)
         }
     }
 
     // ------------------------------------------------------------------
-    // 3. Dynamic vs horizontal planes (floor).
-    //    Done last so floor always wins over lateral pushes.
+    // 3. Dynamic vs floor (a world plane at floorY, not an actor).
+    //    Done last so the floor always wins over lateral pushes.
     // ------------------------------------------------------------------
-    for (AActor* actor : scene.Actors)
+    if (enableFloor)
     {
-        if (!isDynamic(actor)) continue;
-
-        SphereSurface* ss = dynamic_cast<SphereSurface*>(actor->surface);
-        CubeSurface*   cs = dynamic_cast<CubeSurface*>  (actor->surface);
-
-        for (AActor* plane : scene.Actors)
+        for (AActor* actor : scene.Actors)
         {
-            if (!dynamic_cast<PlaneSurface*>(plane->surface)) continue;
+            if (!isDynamic(actor)) continue;
+            UPrimitiveComponent* p = actor->physics;
 
-            if (ss) resolveSphereFloor(actor, ss->radius,  plane->position.y);
-            if (cs) resolveCubeFloor  (actor, cs->halfVec, plane->position.y);
+            if      (p->GetShape() == EShape::Sphere)
+                resolveSphereFloor(actor, sphereRadius(p), floorY);
+            else if (p->GetShape() == EShape::Box)
+                resolveCubeFloor  (actor, boxHalf(p),      floorY);
         }
     }
 }
@@ -245,7 +258,7 @@ void UPhysicsWorld::resolveSphereFloor(AActor* sphere, float radius, float floor
 
     sphere->position.y = floorY + radius;
 
-    PhysicalComponent* phys = sphere->physics;
+    UPrimitiveComponent* phys = sphere->physics;
     if (!phys) return;
 
     phys->isGrounded = true;
@@ -263,7 +276,7 @@ void UPhysicsWorld::resolveCubeFloor(AActor* cube, const glm::vec3& half, float 
 
     cube->position.y = floorY + half.y;
 
-    PhysicalComponent* phys = cube->physics;
+    UPrimitiveComponent* phys = cube->physics;
     if (!phys) return;
 
     phys->isGrounded = true;

@@ -4,7 +4,8 @@
 #include "CubeSurface.h"
 #include "UPlayerCharacter.h"
 #include "../Core/UScene.h"
-#include "../Physics/PhysicalComponent.h"
+#include "../Physics/USphereComponent.h"
+#include "../Physics/UBoxComponent.h"
 
 #include <fstream>
 #include <sstream>
@@ -220,12 +221,36 @@ public:
 
             if (def.physics.hasPhysics)
             {
-                auto* phys               = new PhysicalComponent(actor);
-                phys->mass               = def.physics.mass;
-                phys->restitution        = def.physics.restitution;
-                phys->friction           = def.physics.friction;
-                phys->bAffectedByGravity = def.physics.affectedByGravity;
-                actor->SetPhysics(phys);
+                // Collision shape follows the tile geometry (shape != render mesh):
+                // Cube tile -> box collider, Sphere tile -> sphere collider.
+                UShapeComponent* phys = nullptr;
+                if (def.type == ETileType::Cube)
+                {
+                    glm::vec3 h = def.geometry.halfExplicit
+                                ? def.geometry.halfVec
+                                : glm::vec3(tilehalf);
+                    auto* box        = new UBoxComponent(actor);
+                    box->halfExtents = h;
+                    phys             = box;
+                }
+                else if (def.type == ETileType::Sphere)
+                {
+                    float r = def.geometry.radExplicit
+                            ? def.geometry.radius
+                            : tilehalf;
+                    auto* sph  = new USphereComponent(actor);
+                    sph->radius = r;
+                    phys        = sph;
+                }
+
+                if (phys)
+                {
+                    phys->mass               = def.physics.mass;
+                    phys->restitution        = def.physics.restitution;
+                    phys->friction           = def.physics.friction;
+                    phys->bAffectedByGravity = def.physics.affectedByGravity;
+                    actor->SetPhysics(phys);
+                }
             }
 
             scene.Actors.push_back(actor);

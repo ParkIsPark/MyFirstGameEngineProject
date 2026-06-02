@@ -1,5 +1,5 @@
 #include "AActor.h"
-#include "../Physics/PhysicalComponent.h"
+#include "../Physics/UPrimitiveComponent.h"
 
 AActor::AActor()
 {
@@ -11,7 +11,7 @@ void AActor::SetSurface(USurface* s)
     if (s) s->owner = this;
 }
 
-void AActor::SetPhysics(PhysicalComponent* p)
+void AActor::SetPhysics(UPrimitiveComponent* p)
 {
     physics = p;
     if (p) p->owner = this;
