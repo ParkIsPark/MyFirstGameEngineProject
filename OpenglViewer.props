@@ -15,6 +15,7 @@
         $(EngineRootDir)Engine\Core;
         $(EngineRootDir)Engine\Mesh;
         $(EngineRootDir)Engine\Rasterizer;
+        $(EngineRootDir)Engine\Framework;
         $(EngineRootDir)Engine\World;
         $(EngineRootDir)Engine\Light;
         $(EngineRootDir)Engine\Physics;

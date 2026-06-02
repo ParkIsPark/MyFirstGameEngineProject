@@ -74,6 +74,8 @@
     <!-- Engine: Rasterizer -->
     <ClCompile Include="Engine\Rasterizer\FTransform.cpp" />
     <ClCompile Include="Engine\Rasterizer\URasterizer.cpp" />
+    <!-- Engine: Framework -->
+    <ClCompile Include="Engine\Framework\Engine.cpp" />
     <!-- Engine: World -->
     <ClCompile Include="Engine\World\AActor.cpp" />
     <ClCompile Include="Engine\World\ACamera.cpp" />
@@ -108,6 +110,8 @@
     <ClInclude Include="Engine\Rasterizer\UFrameBuffer.h" />
     <ClInclude Include="Engine\Rasterizer\FTransform.h" />
     <ClInclude Include="Engine\Rasterizer\URasterizer.h" />
+    <!-- Engine: Framework headers -->
+    <ClInclude Include="Engine\Framework\Engine.h" />
     <!-- Engine: World headers -->
     <ClInclude Include="Engine\World\AActor.h" />
     <ClInclude Include="Engine\World\ACamera.h" />
