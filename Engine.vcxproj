@@ -76,6 +76,7 @@
     <ClCompile Include="Engine\Rasterizer\URasterizer.cpp" />
     <!-- Engine: Render -->
     <ClCompile Include="Engine\Render\URenderer.cpp" />
+    <ClCompile Include="Engine\Render\UHybridPass.cpp" />
     <!-- Engine: Framework -->
     <ClCompile Include="Engine\Framework\Engine.cpp" />
     <ClCompile Include="Engine\Framework\FProjectDescriptor.cpp" />
@@ -116,6 +117,7 @@
     <ClInclude Include="Engine\Rasterizer\UGBuffer.h" />
     <!-- Engine: Render headers -->
     <ClInclude Include="Engine\Render\URenderer.h" />
+    <ClInclude Include="Engine\Render\UHybridPass.h" />
     <!-- Engine: Framework headers -->
     <ClInclude Include="Engine\Framework\Engine.h" />
     <ClInclude Include="Engine\Framework\FProjectDescriptor.h" />
