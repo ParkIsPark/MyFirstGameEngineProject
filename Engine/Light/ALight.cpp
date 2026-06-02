@@ -1,9 +1,7 @@
 #include "ALight.h"
-#include "UScene.h"
-#include "ACamera.h"
-#include "URay.h"
-// (legacy GPU/CPU ray tracer removed; URayTracing is only a forward-declared
-//  pass-through pointer type, declared in LightComponent.h)
+
+// CPU illuminate() removed with the CPU ray tracer (GPU-only lighting now);
+// ALight is just an actor that owns a LightComponent for GPU shader assembly.
 
 ALight::ALight()
     : lightComp(nullptr)
@@ -18,19 +16,4 @@ ALight::ALight(LightComponent* comp)
 ALight::~ALight()
 {
     delete lightComp;
-}
-
-glm::vec3 ALight::illuminate(
-    const glm::vec3&   hitPoint,
-    const glm::vec3&   normal,
-    const AActor*      actor,
-    const URay&        ray,
-    const UScene&      scene,
-    const ACamera&     camera,
-    int                depth,
-    const URayTracing* tracer) const
-{
-    if (lightComp)
-        return lightComp->illuminate(hitPoint, normal, actor, ray, scene, camera, depth, tracer);
-    return glm::vec3(0.0f);
 }

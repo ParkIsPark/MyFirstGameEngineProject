@@ -10,7 +10,6 @@ UScene::~UScene()
 {
     for (AActor* actor : Actors)
     {
-        delete actor->surface;
         delete actor;
     }
 }

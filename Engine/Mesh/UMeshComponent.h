@@ -1,6 +1,6 @@
 #pragma once
 #include <glm/glm.hpp>
-#include "USurface.h"   // Material (per-instance override)
+#include "Material.h"   // per-instance material override
 
 class UMesh;
 class AActor;

@@ -2,12 +2,6 @@
 #include <glm/glm.hpp>
 #include <string>
 
-class AActor;
-class UScene;
-class ACamera;
-class URayTracing;
-struct URay;
-
 // ---------------------------------------------------------------------------
 // GPU code-generation descriptor — returned by each LightComponent subclass.
 // DirectLightPass / IndirectLightPass collect these to build the lighting
@@ -33,17 +27,8 @@ public:
     LightComponent(glm::vec3 color = glm::vec3(1.0f), glm::vec3 intensity = glm::vec3(1.0f));
     virtual ~LightComponent() = default;
 
-    virtual glm::vec3 illuminate(
-        const glm::vec3&    hitPoint,
-        const glm::vec3&    normal,
-        const AActor*       actor,
-        const URay&         ray,
-        const UScene&       scene,
-        const ACamera&      camera,
-        int                 depth,
-        const URayTracing*  tracer) const = 0;
-
     // Returns GPU code-generation info for this light type.
-    // Called once at shader-assembly time (URayTracing::Init).
+    // (The CPU illuminate() path was removed with the CPU ray tracer; lighting
+    //  is GPU-only now. This descriptor feeds the GPU shader assembler.)
     virtual LightGLSLInfo getGLSLInfo() const = 0;
 };

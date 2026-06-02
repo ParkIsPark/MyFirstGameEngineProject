@@ -1,16 +1,8 @@
 #include "EnvironmentLight.h"
-#include "AActor.h"
-#include "UScene.h"
-#include "ACamera.h"
-#include "URay.h"
-// (legacy ray tracer removed; URayTracing is a forward-declared pass-through
-//  pointer type from LightComponent.h -- never dereferenced here anymore)
-#include <cfloat>
-#include <cmath>
+// CPU illuminate() (hemisphere GI) removed with the CPU ray tracer; the GPU
+// IndirectLightPass below assembles the equivalent hemisphere sampling shader.
 #include <string>
 #include <algorithm>
-#include <glm/gtc/constants.hpp>
-#include <glm/gtc/type_ptr.hpp>
 
 // ---------------------------------------------------------------------------
 // genBounceGLSL — C++ recursive helper that builds GLSL nested-loop code for
@@ -95,74 +87,6 @@ EnvironmentLight::EnvironmentLight()
 EnvironmentLight::EnvironmentLight(glm::vec3 color, glm::vec3 intensity)
     : LightComponent(color, intensity)
 {
-}
-
-glm::vec3 EnvironmentLight::illuminate(
-    const glm::vec3&   hitPoint,
-    const glm::vec3&   normal,
-    const AActor*      actor,
-    const URay&        ray,
-    const UScene&      scene,
-    const ACamera&     camera,
-    int                depth,
-    const URayTracing* tracer) const
-{
-    glm::vec3 effectiveLight = LightColor * LightIntensity;
-
-    // Build orthonormal basis (tangent frame) around the surface normal
-    glm::vec3 up        = (std::abs(normal.x) > 0.9f) ? glm::vec3(0,1,0) : glm::vec3(1,0,0);
-    glm::vec3 tangent   = glm::normalize(glm::cross(normal, up));
-    glm::vec3 bitangent = glm::cross(normal, tangent);
-
-    // Fibonacci spiral gives a well-distributed hemisphere sample set
-    const float goldenAngle = glm::pi<float>() * (3.0f - std::sqrt(5.0f));
-
-    glm::vec3 accumulated(0.0f);
-    for (int i = 0; i < ENV_LIGHT_SAMPLES; ++i)
-    {
-        // cosTheta uniformly distributed in [0,1] -> uniform solid-angle hemisphere
-        float cosTheta = std::sqrt(1.0f - (float(i) + 0.5f) / float(ENV_LIGHT_SAMPLES));
-        float sinTheta = std::sqrt(1.0f - cosTheta * cosTheta);
-        float phi      = goldenAngle * float(i);
-
-        glm::vec3 dir = sinTheta * std::cos(phi) * tangent
-                      + sinTheta * std::sin(phi) * bitangent
-                      + cosTheta * normal;
-        dir = glm::normalize(dir);
-
-        URay sampleRay(hitPoint + 1e-4f * normal, dir);
-
-        // Find closest blocker
-        float         minT     = FLT_MAX;
-        const AActor* hitActor = nullptr;
-        for (const AActor* other : scene.Actors)
-        {
-            float t;
-            if (other->surface->intersect(sampleRay, t) && t < minT)
-            {
-                minT     = t;
-                hitActor = other;
-            }
-        }
-
-        if (hitActor)
-        {
-            // CPU ray tracer removed: no recursive GI bounce -- use raw diffuse color.
-            glm::vec3 hp = sampleRay.origin + minT * sampleRay.direction;
-            accumulated += hitActor->surface->getDiffuseColor(hp);
-        }
-        else
-        {
-            // Unoccluded: use sky gradient defined by this light's color fields
-            float blend = glm::clamp(dir.y * 0.5f + 0.5f, 0.0f, 1.0f);
-            accumulated += glm::mix(horizonColor, zenithColor, std::pow(blend, skyExp));
-        }
-    }
-
-    // Average over all samples — AO falls out naturally:
-    // fully occluded surfaces get dark occluder colors, open surfaces get bright sky
-    glm::vec3 avgColor = accumulated / float(ENV_LIGHT_SAMPLES);
-    return actor->surface->material.ka * effectiveLight * avgColor;
 }
 
 LightGLSLInfo EnvironmentLight::getGLSLInfo() const

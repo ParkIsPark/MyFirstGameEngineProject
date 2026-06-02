@@ -4,7 +4,7 @@
 #include <glm/glm.hpp>
 
 #include "Vertex.h"
-#include "USurface.h"   // Material struct (reused; moved to UMesh in legacy Stage 5)
+#include "Material.h"   // per-asset default material (moved out of deleted USurface)
 
 struct URay;
 

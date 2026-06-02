@@ -79,11 +79,6 @@
     <!-- Engine: World -->
     <ClCompile Include="Engine\World\AActor.cpp" />
     <ClCompile Include="Engine\World\ACamera.cpp" />
-    <ClCompile Include="Engine\World\CubeSurface.cpp" />
-    <ClCompile Include="Engine\World\PlaneSurface.cpp" />
-    <ClCompile Include="Engine\World\SphereSurface.cpp" />
-    <ClCompile Include="Engine\World\USurface.cpp" />
-    <ClCompile Include="Engine\World\UTilemap.cpp" />
     <!-- Engine: Light -->
     <ClCompile Include="Engine\Light\ALight.cpp" />
     <ClCompile Include="Engine\Light\EnvironmentLight.cpp" />
@@ -106,6 +101,7 @@
     <ClInclude Include="Engine\Core\UPostProcessFilter.h" />
     <!-- Engine: Mesh headers -->
     <ClInclude Include="Engine\Mesh\Vertex.h" />
+    <ClInclude Include="Engine\Mesh\Material.h" />
     <ClInclude Include="Engine\Mesh\UMesh.h" />
     <ClInclude Include="Engine\Mesh\UMeshComponent.h" />
     <!-- Engine: Rasterizer headers -->
@@ -117,11 +113,6 @@
     <!-- Engine: World headers -->
     <ClInclude Include="Engine\World\AActor.h" />
     <ClInclude Include="Engine\World\ACamera.h" />
-    <ClInclude Include="Engine\World\CubeSurface.h" />
-    <ClInclude Include="Engine\World\PlaneSurface.h" />
-    <ClInclude Include="Engine\World\SphereSurface.h" />
-    <ClInclude Include="Engine\World\USurface.h" />
-    <ClInclude Include="Engine\World\UTilemap.h" />
     <!-- Engine: Light headers -->
     <ClInclude Include="Engine\Light\ALight.h" />
     <ClInclude Include="Engine\Light\EnvironmentLight.h" />

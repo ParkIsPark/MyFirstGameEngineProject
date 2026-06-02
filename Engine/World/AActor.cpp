@@ -5,12 +5,6 @@ AActor::AActor()
 {
 }
 
-void AActor::SetSurface(USurface* s)
-{
-    surface = s;
-    if (s) s->owner = this;
-}
-
 void AActor::SetPhysics(UPrimitiveComponent* p)
 {
     physics = p;

@@ -1,9 +1,4 @@
 #include "PointLight.h"
-#include "AActor.h"
-#include <algorithm>
-#include "UScene.h"
-#include "ACamera.h"
-#include "URay.h"
 #include <glm/glm.hpp>
 
 PointLight::PointLight()
@@ -16,91 +11,6 @@ PointLight::PointLight(glm::vec3 pos, glm::vec3 color, glm::vec3 intensity)
     : LightComponent(color, intensity)
     , LightPos(pos)
 {
-}
-
-glm::vec3 PointLight::illuminate(
-    const glm::vec3&   hitPoint,
-    const glm::vec3&   normal,
-    const AActor*      actor,
-    const URay&        ray,
-    const UScene&      scene,
-    const ACamera&     camera,
-    int                depth,
-    const URayTracing* tracer) const
-{
-    glm::vec3 effectiveLight = LightColor * LightIntensity;
-
-    glm::vec3 toLight    = LightPos - hitPoint;
-    float     distToLight = glm::length(toLight);
-    glm::vec3 l          = toLight / distToLight;
-
-    // Early exit: surface faces away from the light — no contribution possible.
-    float NdotL = glm::dot(normal, l);
-    if (NdotL <= 0.0f)
-        return glm::vec3(0.0f);
-
-    // Center probe: cast one shadow ray toward the light center first.
-    // If it is blocked we treat the point as fully in shadow and skip the
-    // remaining 8 area-light samples entirely.
-    {
-        URay shadowRay(hitPoint + 1e-4f * normal, l);
-        for (const AActor* other : scene.Actors)
-        {
-            float st;
-            if (other->surface->intersect(shadowRay, st) && st < distToLight)
-                return glm::vec3(0.0f);
-        }
-    }
-
-    // Center was lit — sample the remaining 8 area-light positions to get
-    // a soft-shadow fraction.  litFraction starts at 1 (center already lit).
-    // Tangent frame for area-light disk sampling
-    glm::vec3 up        = (glm::abs(l.x) > 0.9f) ? glm::vec3(0,1,0) : glm::vec3(1,0,0);
-    glm::vec3 tangent   = glm::normalize(glm::cross(l, up));
-    glm::vec3 bitangent = glm::cross(l, tangent);
-
-    // Fixed 8-sample disk pattern; use first (SOFT_SHADOW_SAMPLES-1) of them
-    static const float offsets[8][2] = {
-        { 1.00f,  0.00f}, {-1.00f,  0.00f}, { 0.00f,  1.00f}, { 0.00f, -1.00f},
-        { 0.71f,  0.71f}, {-0.71f,  0.71f}, {-0.71f, -0.71f}, { 0.71f, -0.71f}
-    };
-    const int numExtra = std::min(SOFT_SHADOW_SAMPLES - 1, 8);
-
-    float litFraction = 1.0f;
-    for (int s = 0; s < numExtra; ++s)
-    {
-        glm::vec3 samplePos = LightPos
-            + SOFT_SHADOW_RADIUS * (offsets[s][0] * tangent + offsets[s][1] * bitangent);
-        glm::vec3 toSample = samplePos - hitPoint;
-        float     sDist    = glm::length(toSample);
-        glm::vec3 sl       = toSample / sDist;
-
-        URay shadowRay(hitPoint + 1e-4f * normal, sl);
-        bool blocked = false;
-        for (const AActor* other : scene.Actors)
-        {
-            float st;
-            if (other->surface->intersect(shadowRay, st) && st < sDist)
-            {
-                blocked = true;
-                break;
-            }
-        }
-        if (!blocked) litFraction += 1.0f;
-    }
-    litFraction /= static_cast<float>(numExtra + 1);
-
-    glm::vec3 color = actor->surface->getDiffuseColor(hitPoint) * effectiveLight * NdotL * litFraction;
-
-    if (actor->surface->material.shininess > 0.0f)
-    {
-        glm::vec3 v     = glm::normalize(camera.eye - hitPoint);
-        glm::vec3 h     = glm::normalize(l + v);
-        float     NdotH = glm::max(0.0f, glm::dot(normal, h));
-        color += actor->surface->material.ks * effectiveLight * glm::pow(NdotH, actor->surface->material.shininess) * litFraction;
-    }
-
-    return color;
 }
 
 LightGLSLInfo PointLight::getGLSLInfo() const
