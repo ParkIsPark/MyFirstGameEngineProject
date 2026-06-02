@@ -4,6 +4,7 @@
 class UMesh;
 struct FTransform;
 class UFrameBuffer;
+class UGBuffer;
 
 // ---------------------------------------------------------------------------
 // URasterizer — general-purpose software rasterizer (NOT Q1-specific).
@@ -28,4 +29,13 @@ public:
     // Transform + rasterize every triangle of a mesh.
     void DrawMesh(const UMesh& mesh, const FTransform& xf,
                   const glm::vec3& color, UFrameBuffer& fb) const;
+
+    // ---- G-buffer (deferred primary visibility for the hybrid renderer) ----
+    // Rasterize a mesh writing per-pixel world position / world normal /
+    // albedo with perspective-correct interpolation (1/w weighting). albedo is
+    // the mesh material's kd unless overridden by `albedo`.
+    void DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
+                         UGBuffer& gb) const;
+    void DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
+                         const glm::vec3& albedo, UGBuffer& gb) const;
 };

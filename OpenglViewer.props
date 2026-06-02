@@ -21,6 +21,7 @@
         $(EngineRootDir)Engine\Physics;
         $(EngineRootDir)Engine\Player;
         $(EngineRootDir)Engine\RayTracing;
+        $(EngineRootDir)Engine\Render;
         %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
     </ClCompile>

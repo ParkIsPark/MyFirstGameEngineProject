@@ -74,6 +74,8 @@
     <!-- Engine: Rasterizer -->
     <ClCompile Include="Engine\Rasterizer\FTransform.cpp" />
     <ClCompile Include="Engine\Rasterizer\URasterizer.cpp" />
+    <!-- Engine: Render -->
+    <ClCompile Include="Engine\Render\URenderer.cpp" />
     <!-- Engine: Framework -->
     <ClCompile Include="Engine\Framework\Engine.cpp" />
     <ClCompile Include="Engine\Framework\FProjectDescriptor.cpp" />
@@ -111,6 +113,9 @@
     <ClInclude Include="Engine\Rasterizer\UFrameBuffer.h" />
     <ClInclude Include="Engine\Rasterizer\FTransform.h" />
     <ClInclude Include="Engine\Rasterizer\URasterizer.h" />
+    <ClInclude Include="Engine\Rasterizer\UGBuffer.h" />
+    <!-- Engine: Render headers -->
+    <ClInclude Include="Engine\Render\URenderer.h" />
     <!-- Engine: Framework headers -->
     <ClInclude Include="Engine\Framework\Engine.h" />
     <ClInclude Include="Engine\Framework\FProjectDescriptor.h" />
