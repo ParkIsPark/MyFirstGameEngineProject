@@ -34,16 +34,18 @@ public:
     bool ready() const { return prog_ != 0; }
 
 private:
-    void bakeMesh(const UMesh& mesh, const glm::mat4& model,
-                  const glm::vec3& albedo, std::vector<glm::vec4>& out);
     void uploadTexels(const std::vector<glm::vec4>& texels);
+    void uploadBVH(const class BVH& bvh);
 
     unsigned int prog_  = 0;
     unsigned int vao_   = 0;
     unsigned int vbo_   = 0;
-    unsigned int tbo_   = 0;   // buffer object holding triangle texels
-    unsigned int tex_   = 0;   // GL_TEXTURE_BUFFER view onto tbo_
-    int          numTris_ = 0;
+    unsigned int tbo_   = 0;   // triangle texels (7/tri)
+    unsigned int tex_   = 0;
+    unsigned int nodeTbo_ = 0, nodeTex_ = 0;   // BVH nodes (2 texels/node)
+    unsigned int idxTbo_  = 0, idxTex_  = 0;   // BVH leaf -> triangle index (R32F)
+    int          numTris_  = 0;
+    int          numNodes_ = 0;
     Material     mat_;         // material (ks/shininess) of the uploaded mesh
     glm::vec3    lightPos_   = glm::vec3(6.0f, 8.0f, 2.0f);
     glm::vec3    lightColor_ = glm::vec3(1.0f);

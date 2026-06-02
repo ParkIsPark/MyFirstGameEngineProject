@@ -7,6 +7,7 @@
 #include "UMeshRayTracer.h"
 #include "UMesh.h"
 #include "ACamera.h"
+#include "BVH.h"
 
 // Triangles are passed to the shader through a *texture buffer object* (TBO,
 // core since GL 3.1 / GLSL 1.40), NOT an SSBO. SSBOs need GL 4.3, which we must
@@ -33,6 +34,9 @@ uniform vec3  uLightPos, uLightColor;
 uniform vec3  uKs;                    // specular coefficient (per-tri albedo = diffuse)
 uniform float uShininess;             // Phong exponent
 uniform samplerBuffer uTris;          // 7 texels per triangle (see C++ side)
+uniform samplerBuffer uNodes;         // BVH: 2 texels per node (bbMin|left, bbMax|count)
+uniform samplerBuffer uTriIdx;        // BVH leaf -> triangle index (R32F)
+uniform int uNumNodes;
 
 vec3 triTexel(int tri, int slot) { return texelFetch(uTris, tri * 7 + slot).xyz; }
 
@@ -56,6 +60,44 @@ vec3 skyColor(vec3 rd) {
     return mix(vec3(0.10, 0.12, 0.16), vec3(0.40, 0.55, 0.80), k);
 }
 
+// Ray vs AABB slab (camera/shadow rays are ~never axis-parallel through a face).
+bool slab(vec3 ro, vec3 invD, vec3 mn, vec3 mx, float tMax) {
+    vec3 t0 = (mn - ro) * invD;
+    vec3 t1 = (mx - ro) * invD;
+    vec3 te = min(t0, t1), tx = max(t0, t1);
+    float enter = max(max(te.x, te.y), max(te.z, 0.0));
+    float exit  = min(min(tx.x, tx.y), min(tx.z, tMax));
+    return enter <= exit;
+}
+
+// Stack-based BVH closest-hit traversal (1:1 port of the CPU BVH).
+bool traceClosest(vec3 ro, vec3 rd, out float t, out int tri, out float u, out float v) {
+    vec3 invD = 1.0 / rd;
+    int stack[64]; int sp = 0; stack[sp++] = 0;
+    t = 1e30; tri = -1;
+    while (sp > 0) {
+        int ni = stack[--sp];
+        vec4 a = texelFetch(uNodes, ni * 2 + 0);
+        vec4 b = texelFetch(uNodes, ni * 2 + 1);
+        if (!slab(ro, invD, a.xyz, b.xyz, t)) continue;
+        int rc = int(b.w);
+        if (rc > 0) {                                   // leaf
+            int start = int(a.w);
+            for (int i = 0; i < rc; ++i) {
+                int ti = int(texelFetch(uTriIdx, start + i).x);
+                float tt, uu, vv;
+                if (rayTri(ro, rd, triTexel(ti,0), triTexel(ti,1), triTexel(ti,2), tt, uu, vv) && tt < t) {
+                    t = tt; tri = ti; u = uu; v = vv;
+                }
+            }
+        } else if (sp + 2 <= 64) {                      // inner
+            stack[sp++] = int(a.w);                      // left child
+            stack[sp++] = -rc;                           // right child
+        }
+    }
+    return tri >= 0;
+}
+
 // Reinhard tone map + gamma: compress accumulated light instead of clipping to
 // flat white when ambient + diffuse + specular (and multiple lights) stack up.
 vec3 tonemap(vec3 c) {
@@ -70,20 +112,10 @@ void main() {
     vec3 rd = normalize(-uD * uW + su * uU + sv * uV);   // ACamera convention
     vec3 ro = uEye;
 
-    float closest = 1e30;
-    int   hit = -1;
-    float hu = 0.0, hv = 0.0;
-    for (int i = 0; i < uNumTris; ++i) {
-        vec3 v0 = triTexel(i, 0);
-        vec3 v1 = triTexel(i, 1);
-        vec3 v2 = triTexel(i, 2);
-        float t, u, v;
-        if (rayTri(ro, rd, v0, v1, v2, t, u, v) && t < closest) {
-            closest = t; hit = i; hu = u; hv = v;
-        }
+    float closest; int hit; float hu, hv;
+    if (!traceClosest(ro, rd, closest, hit, hu, hv)) {
+        FragColor = vec4(tonemap(skyColor(rd)), 1.0); return;
     }
-
-    if (hit < 0) { FragColor = vec4(tonemap(skyColor(rd)), 1.0); return; }
 
     vec3 n0 = triTexel(hit, 3);
     vec3 n1 = triTexel(hit, 4);
@@ -143,35 +175,8 @@ void UMeshRayTracer::Init()
 
 void UMeshRayTracer::UploadMesh(const UMesh& mesh, const glm::mat4& model)
 {
-    mat_ = mesh.material;                      // ks/shininess for the demo path
-
-    std::vector<glm::vec4> texels;
-    texels.reserve(static_cast<size_t>(mesh.triangleCount()) * TEXELS_PER_TRI);
-    bakeMesh(mesh, model, mesh.material.kd, texels);
-    numTris_ = mesh.triangleCount();
-
-    uploadTexels(texels);
-}
-
-// Bake one mesh's triangles (world space) + a per-instance albedo into `out`.
-void UMeshRayTracer::bakeMesh(const UMesh& mesh, const glm::mat4& model,
-                              const glm::vec3& albedo, std::vector<glm::vec4>& out)
-{
-    const glm::mat3 nrmM = glm::inverseTranspose(glm::mat3(model));
-    const int nTri = mesh.triangleCount();
-    for (int i = 0; i < nTri; ++i)
-    {
-        const Vertex& a = mesh.vertices[mesh.indices[3 * i + 0]];
-        const Vertex& b = mesh.vertices[mesh.indices[3 * i + 1]];
-        const Vertex& c = mesh.vertices[mesh.indices[3 * i + 2]];
-        out.emplace_back(glm::vec3(model * glm::vec4(a.position, 1.0f)), 0.0f);
-        out.emplace_back(glm::vec3(model * glm::vec4(b.position, 1.0f)), 0.0f);
-        out.emplace_back(glm::vec3(model * glm::vec4(c.position, 1.0f)), 0.0f);
-        out.emplace_back(glm::normalize(nrmM * a.normal), 0.0f);
-        out.emplace_back(glm::normalize(nrmM * b.normal), 0.0f);
-        out.emplace_back(glm::normalize(nrmM * c.normal), 0.0f);
-        out.emplace_back(albedo, 0.0f);
-    }
+    UploadWorld({ &mesh }, { model }, { mesh.material.kd }, lightPos_, lightColor_);
+    mat_ = mesh.material;                      // restore ks/shininess for the demo path
 }
 
 void UMeshRayTracer::uploadTexels(const std::vector<glm::vec4>& texels)
@@ -182,10 +187,43 @@ void UMeshRayTracer::uploadTexels(const std::vector<glm::vec4>& texels)
                  static_cast<GLsizeiptr>(texels.size() * sizeof(glm::vec4)),
                  texels.data(), GL_STATIC_DRAW);
     glBindBuffer(GL_TEXTURE_BUFFER, 0);
-
     if (!tex_) glGenTextures(1, &tex_);
     glBindTexture(GL_TEXTURE_BUFFER, tex_);
     glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, tbo_);
+    glBindTexture(GL_TEXTURE_BUFFER, 0);
+}
+
+void UMeshRayTracer::uploadBVH(const BVH& bvh)
+{
+    // nodes: 2 RGBA32F texels (bbMin | float(left), bbMax | float(count)).
+    std::vector<glm::vec4> nodeTexels;
+    nodeTexels.reserve(bvh.nodes.size() * 2);
+    for (const BVHNode& n : bvh.nodes)
+    {
+        nodeTexels.emplace_back(n.bbMin, static_cast<float>(n.leftOrTriStart));
+        nodeTexels.emplace_back(n.bbMax, static_cast<float>(n.rightOrTriCount));
+    }
+    numNodes_ = static_cast<int>(bvh.nodes.size());
+    if (!nodeTbo_) glGenBuffers(1, &nodeTbo_);
+    glBindBuffer(GL_TEXTURE_BUFFER, nodeTbo_);
+    glBufferData(GL_TEXTURE_BUFFER, static_cast<GLsizeiptr>(nodeTexels.size() * sizeof(glm::vec4)),
+                 nodeTexels.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_TEXTURE_BUFFER, 0);
+    if (!nodeTex_) glGenTextures(1, &nodeTex_);
+    glBindTexture(GL_TEXTURE_BUFFER, nodeTex_);
+    glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, nodeTbo_);
+    glBindTexture(GL_TEXTURE_BUFFER, 0);
+
+    // leaf -> triangle index (R32F).
+    std::vector<float> idx(bvh.triIndices.begin(), bvh.triIndices.end());
+    if (!idxTbo_) glGenBuffers(1, &idxTbo_);
+    glBindBuffer(GL_TEXTURE_BUFFER, idxTbo_);
+    glBufferData(GL_TEXTURE_BUFFER, static_cast<GLsizeiptr>(idx.size() * sizeof(float)),
+                 idx.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_TEXTURE_BUFFER, 0);
+    if (!idxTex_) glGenTextures(1, &idxTex_);
+    glBindTexture(GL_TEXTURE_BUFFER, idxTex_);
+    glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, idxTbo_);
     glBindTexture(GL_TEXTURE_BUFFER, 0);
 }
 
@@ -195,18 +233,46 @@ void UMeshRayTracer::UploadWorld(const std::vector<const UMesh*>& meshes,
                                  const glm::vec3& lightPos, const glm::vec3& lightColor)
 {
     lightPos_ = lightPos; lightColor_ = lightColor;
-    mat_.ks = glm::vec3(0.35f); mat_.shininess = 32.0f;     // default specular for the scene
+    mat_.ks = glm::vec3(0.35f); mat_.shininess = 32.0f;
 
-    std::vector<glm::vec4> texels;
-    int total = 0;
+    // Combine all instances into one world-space mesh (+ per-triangle albedo),
+    // then build a BVH over it for accelerated GPU traversal.
+    UMesh combined;
+    std::vector<glm::vec3> triAlbedo;
     for (size_t i = 0; i < meshes.size(); ++i)
     {
         if (!meshes[i]) continue;
-        bakeMesh(*meshes[i], models[i], albedos[i], texels);
-        total += meshes[i]->triangleCount();
+        const UMesh& m = *meshes[i];
+        const glm::mat3 nrmM = glm::inverseTranspose(glm::mat3(models[i]));
+        const uint32_t base = static_cast<uint32_t>(combined.vertices.size());
+        for (const Vertex& v : m.vertices)
+        {
+            Vertex w;
+            w.position = glm::vec3(models[i] * glm::vec4(v.position, 1.0f));
+            w.normal   = glm::normalize(nrmM * v.normal);
+            w.uv       = v.uv;
+            combined.vertices.push_back(w);
+        }
+        for (uint32_t idx : m.indices) combined.indices.push_back(base + idx);
+        for (int t = 0; t < m.triangleCount(); ++t) triAlbedo.push_back(albedos[i]);
     }
-    numTris_ = total;
+    numTris_ = combined.triangleCount();
+    combined.BuildBVH();
+
+    // Bake 7 texels per triangle (combined order; BVH leaves index into this).
+    std::vector<glm::vec4> texels;
+    texels.reserve(static_cast<size_t>(numTris_) * TEXELS_PER_TRI);
+    for (int t = 0; t < numTris_; ++t)
+    {
+        const Vertex& a = combined.vertices[combined.indices[3 * t + 0]];
+        const Vertex& b = combined.vertices[combined.indices[3 * t + 1]];
+        const Vertex& c = combined.vertices[combined.indices[3 * t + 2]];
+        texels.emplace_back(a.position, 0.0f); texels.emplace_back(b.position, 0.0f); texels.emplace_back(c.position, 0.0f);
+        texels.emplace_back(a.normal,   0.0f); texels.emplace_back(b.normal,   0.0f); texels.emplace_back(c.normal,   0.0f);
+        texels.emplace_back(triAlbedo[t], 0.0f);
+    }
     uploadTexels(texels);
+    uploadBVH(*combined.bvh);
 }
 
 void UMeshRayTracer::RenderFrame(const ACamera& cam, int width, int height) const
@@ -224,26 +290,35 @@ void UMeshRayTracer::RenderFrame(const ACamera& cam, int width, int height) cons
     glUniform1i (glGetUniformLocation(prog_, "uWidth"),  width);
     glUniform1i (glGetUniformLocation(prog_, "uHeight"), height);
     glUniform1i (glGetUniformLocation(prog_, "uNumTris"), numTris_);
+    glUniform1i (glGetUniformLocation(prog_, "uNumNodes"), numNodes_);
     glUniform3fv(glGetUniformLocation(prog_, "uLightPos"),   1, glm::value_ptr(lightPos_));
     glUniform3fv(glGetUniformLocation(prog_, "uLightColor"), 1, glm::value_ptr(lightColor_));
     glUniform3fv(glGetUniformLocation(prog_, "uKs"), 1, glm::value_ptr(mat_.ks));
     glUniform1f (glGetUniformLocation(prog_, "uShininess"), mat_.shininess);
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_BUFFER, tex_);
-    glUniform1i(glGetUniformLocation(prog_, "uTris"), 0);   // sampler unit 0
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_BUFFER, tex_);
+    glUniform1i(glGetUniformLocation(prog_, "uTris"), 0);
+    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_BUFFER, nodeTex_);
+    glUniform1i(glGetUniformLocation(prog_, "uNodes"), 1);
+    glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_BUFFER, idxTex_);
+    glUniform1i(glGetUniformLocation(prog_, "uTriIdx"), 2);
 
     glBindVertexArray(vao_);
     glDrawArrays(GL_TRIANGLES, 0, 6);
     glBindVertexArray(0);
+    glActiveTexture(GL_TEXTURE0);
     glUseProgram(0);
 }
 
 void UMeshRayTracer::Cleanup()
 {
-    if (tex_)  { glDeleteTextures(1, &tex_); tex_ = 0; }
-    if (tbo_)  { glDeleteBuffers(1, &tbo_);  tbo_ = 0; }
-    if (vbo_)  { glDeleteBuffers(1, &vbo_);  vbo_  = 0; }
-    if (vao_)  { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
-    if (prog_) { glDeleteProgram(prog_); prog_ = 0; }
+    if (tex_)     { glDeleteTextures(1, &tex_); tex_ = 0; }
+    if (tbo_)     { glDeleteBuffers(1, &tbo_);  tbo_ = 0; }
+    if (nodeTex_) { glDeleteTextures(1, &nodeTex_); nodeTex_ = 0; }
+    if (nodeTbo_) { glDeleteBuffers(1, &nodeTbo_);  nodeTbo_ = 0; }
+    if (idxTex_)  { glDeleteTextures(1, &idxTex_); idxTex_ = 0; }
+    if (idxTbo_)  { glDeleteBuffers(1, &idxTbo_);  idxTbo_ = 0; }
+    if (vbo_)     { glDeleteBuffers(1, &vbo_);  vbo_  = 0; }
+    if (vao_)     { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
+    if (prog_)    { glDeleteProgram(prog_); prog_ = 0; }
 }
