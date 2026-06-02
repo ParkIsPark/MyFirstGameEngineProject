@@ -50,19 +50,8 @@ public:
                      const RenderSettings& s = RenderSettings{});
     void Cleanup();
 
-    // ------------------------------------------------------------------
-    // CPU ray tracer
-    //   mode 0 = Phong + shadow  (Blinn-Phong, scene.Lights)
-    //   mode 1 = Phong + shadow + mirror reflection (recursive km)
-    //
-    // AA and gamma settings come from RenderSettings (defaults = RenderConfig.h).
-    // ------------------------------------------------------------------
-    void Render(UScene& scene, ACamera& camera, int mode,
-                const RenderSettings& settings = RenderSettings{}) const;
-
-    // Public: used by EnvironmentLight for GI bounce
-    glm::vec3 TraceQ3(const URay& ray, const UScene& scene,
-        const ACamera& camera, int depth = 0) const;
+    // CPU ray tracer removed -- URayTracing is now a GPU-only renderer
+    // (mesh-first: ray tracing moves to GLSL compute over a triangle SSBO).
 
 private:
     // ------------------------------------------------------------------
@@ -80,30 +69,5 @@ private:
 
     void uploadCameraUniforms(const ACamera& cam, const UScene& scene) const;
 
-    // ------------------------------------------------------------------
-    // CPU ray tracing internals
-    // ------------------------------------------------------------------
-    bool      FindClosestHit(const URay& ray, const UScene& scene,
-                             float& outT, const AActor*& outActor) const;
-
-    // Blinn-Phong shading from scene.Lights (no reflection)
-    glm::vec3 TraceQ2(const URay& ray, const UScene& scene,
-                      const ACamera& camera) const;
-
-    // Per-point Phong+shadow contribution from all scene lights (used by Q3)
-    glm::vec3 ComputePhong(const glm::vec3& p, const glm::vec3& n,
-                           const AActor* actor, const URay& ray,
-                           const UScene& scene, const ACamera& camera,
-                           int depth) const;
-
-    // AA: casts aaGrid*aaGrid rays through pixel (ix,iy) with the chosen mode
-    //   aaMode 1 = random jitter
-    //   aaMode 2 = stratified jittered grid
-    //   aaMode 3 = Halton low-discrepancy sequence
-    glm::vec3 TracePixelAA(int ix, int iy, int renderMode,
-                            const UScene& scene, const ACamera& cam,
-                            int aaGrid, int aaMode) const;
-
-    // Reinhard tone map + gamma post-process applied in-place to outputImage
-    void ApplyToneGamma(UScene& scene, float gamma) const;
+    // (CPU ray tracing internals removed -- GPU-only RT)
 };

@@ -146,17 +146,9 @@ glm::vec3 EnvironmentLight::illuminate(
 
         if (hitActor)
         {
-            if (tracer && depth < GI_BOUNCE_DEPTH)
-            {
-                // GI: recursively shade the hit point (multi-bounce indirect light)
-                accumulated += tracer->TraceQ3(sampleRay, scene, camera, depth + 1);
-            }
-            else
-            {
-                // Depth limit reached: fall back to raw diffuse color
-                glm::vec3 hp = sampleRay.origin + minT * sampleRay.direction;
-                accumulated += hitActor->surface->getDiffuseColor(hp);
-            }
+            // CPU ray tracer removed: no recursive GI bounce -- use raw diffuse color.
+            glm::vec3 hp = sampleRay.origin + minT * sampleRay.direction;
+            accumulated += hitActor->surface->getDiffuseColor(hp);
         }
         else
         {
