@@ -3,7 +3,8 @@
 #include "UScene.h"
 #include "ACamera.h"
 #include "URay.h"
-#include "URayTracing.h"
+// (legacy ray tracer removed; URayTracing is a forward-declared pass-through
+//  pointer type from LightComponent.h -- never dereferenced here anymore)
 #include <cfloat>
 #include <cmath>
 #include <string>

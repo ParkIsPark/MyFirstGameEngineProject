@@ -2,7 +2,8 @@
 #include "UScene.h"
 #include "ACamera.h"
 #include "URay.h"
-#include "URayTracing.h"
+// (legacy GPU/CPU ray tracer removed; URayTracing is only a forward-declared
+//  pass-through pointer type, declared in LightComponent.h)
 
 ALight::ALight()
     : lightComp(nullptr)

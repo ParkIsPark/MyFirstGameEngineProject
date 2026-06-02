@@ -96,7 +96,6 @@
     <ClCompile Include="Engine\Player\UPlayerCharacter.cpp" />
     <ClCompile Include="Engine\Player\UPlayerController.cpp" />
     <!-- Engine: RayTracing -->
-    <ClCompile Include="Engine\RayTracing\URayTracing.cpp" />
     <ClCompile Include="Engine\RayTracing\UMeshRayTracer.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -133,16 +132,8 @@
     <ClInclude Include="Engine\Player\UPlayerCharacter.h" />
     <ClInclude Include="Engine\Player\UPlayerController.h" />
     <!-- Engine: RayTracing headers -->
-    <ClInclude Include="Engine\RayTracing\URayTracing.h" />
     <ClInclude Include="Engine\RayTracing\UMeshRayTracer.h" />
     <ClInclude Include="Engine\RayTracing\URay.h" />
-    <ClInclude Include="Engine\RayTracing\URayTracingPass.h" />
-    <ClInclude Include="Engine\RayTracing\RenderConfig.h" />
-    <ClInclude Include="Engine\RayTracing\GeometryPass.h" />
-    <ClInclude Include="Engine\RayTracing\MaterialPass.h" />
-    <ClInclude Include="Engine\RayTracing\DirectLightPass.h" />
-    <ClInclude Include="Engine\RayTracing\IndirectLightPass.h" />
-    <ClInclude Include="Engine\RayTracing\PostProcessPass.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
