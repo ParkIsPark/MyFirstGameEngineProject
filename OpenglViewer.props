@@ -10,6 +10,10 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <!-- ImGui's GLFW backend includes <GLFW/glfw3native.h>; the bundled GLFW
+           header requires a context-API macro alongside the window-API one,
+           so expose WGL globally (only the imgui_impl_glfw TU includes it). -->
+      <PreprocessorDefinitions>GLFW_EXPOSE_NATIVE_WGL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>
         $(EngineRootDir)include;
         $(EngineRootDir)Engine\Core;
@@ -23,12 +27,15 @@
         $(EngineRootDir)Engine\RayTracing;
         $(EngineRootDir)Engine\Render;
         $(EngineRootDir)Engine\Import;
+        $(EngineRootDir)Engine\Editor;
+        $(EngineRootDir)Engine\Editor\External\imgui;
+        $(EngineRootDir)Engine\Editor\External\imgui\backends;
         %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(EngineRootDir)lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>glew32.lib;freeglut.lib;glfw3.lib;glfw3dll.lib;opengl32.lib;glu32.lib;assimp-vc143-mt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>glew32.lib;freeglut.lib;glfw3dll.lib;opengl32.lib;glu32.lib;assimp-vc143-mt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup />

@@ -80,6 +80,15 @@
     <!-- Engine: Import -->
     <ClCompile Include="Engine\Import\UObjImporter.cpp" />
     <ClCompile Include="Engine\Import\UFbxImporter.cpp" />
+    <!-- Engine: Editor + ImGui -->
+    <ClCompile Include="Engine\Editor\EditorEngine.cpp" />
+    <ClCompile Include="Engine\Editor\External\imgui\imgui.cpp" />
+    <ClCompile Include="Engine\Editor\External\imgui\imgui_draw.cpp" />
+    <ClCompile Include="Engine\Editor\External\imgui\imgui_tables.cpp" />
+    <ClCompile Include="Engine\Editor\External\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="Engine\Editor\External\imgui\imgui_demo.cpp" />
+    <ClCompile Include="Engine\Editor\External\imgui\backends\imgui_impl_glfw.cpp" />
+    <ClCompile Include="Engine\Editor\External\imgui\backends\imgui_impl_opengl3.cpp" />
     <!-- Engine: Framework -->
     <ClCompile Include="Engine\Framework\Engine.cpp" />
     <ClCompile Include="Engine\Framework\FProjectDescriptor.cpp" />
@@ -124,6 +133,8 @@
     <!-- Engine: Import headers -->
     <ClInclude Include="Engine\Import\UObjImporter.h" />
     <ClInclude Include="Engine\Import\UFbxImporter.h" />
+    <!-- Engine: Editor headers -->
+    <ClInclude Include="Engine\Editor\EditorEngine.h" />
     <!-- Engine: Framework headers -->
     <ClInclude Include="Engine\Framework\Engine.h" />
     <ClInclude Include="Engine\Framework\FProjectDescriptor.h" />
