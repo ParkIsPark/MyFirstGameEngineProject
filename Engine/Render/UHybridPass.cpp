@@ -66,6 +66,14 @@ vec3 skyColor(vec3 rd) {
     return mix(vec3(0.10, 0.12, 0.16), vec3(0.40, 0.55, 0.80), k);
 }
 
+// Reinhard tone map + gamma. Reinhard maps [0,inf) -> [0,1) so accumulated
+// light (ambient + diffuse + specular, multiple lights) never blows out to a
+// flat white -- it compresses highlights instead of clipping.
+vec3 tonemap(vec3 c) {
+    c = c / (c + vec3(1.0));
+    return pow(c, vec3(1.0 / 2.2));
+}
+
 void main() {
     ivec2 px = ivec2(gl_FragCoord.xy);
     float depth = texelFetch(uDepth, px, 0).r;
@@ -76,7 +84,7 @@ void main() {
         float su = (uL + (uR - uL) * (gl_FragCoord.x / float(uWidth))) * aspect;
         float sv =  uB + (uT - uB) * (gl_FragCoord.y / float(uHeight));
         vec3 rd = normalize(-uD * uW + su * uU + sv * uV);
-        FragColor = vec4(skyColor(rd), 1.0);
+        FragColor = vec4(tonemap(skyColor(rd)), 1.0);
         return;
     }
 
@@ -102,7 +110,7 @@ void main() {
     vec3 spec    = (NdotL > 0.0) ? uKs * pow(NdotH, max(uShininess, 1.0)) : vec3(0.0);
     vec3 col = ambient + (diffuse + spec) * uLightColor * shadow;
 
-    FragColor = vec4(col, 1.0);
+    FragColor = vec4(tonemap(col), 1.0);
 }
 )GLSL";
 

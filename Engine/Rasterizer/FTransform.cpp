@@ -35,13 +35,19 @@ glm::mat4 FTransform::MakeProjFCG(float l, float r, float b, float t, float n, f
     return P;
 }
 
-// NDC -> screen: x = (ndc.x+1)*nx/2, y = (ndc.y+1)*ny/2, z = (ndc.z+1)*0.5.
+// NDC -> screen: x = (ndc.x+1)*nx/2, y = (ndc.y+1)*ny/2, z = (1-ndc.z)*0.5.
+// This FCG projection gives ndc.z = +1 at the near plane and -1 at far, so the
+// z map is (1-ndc.z)/2 -> near=0, far=1. That makes SMALLER screen depth =
+// NEARER, matching the rasterizer / G-buffer test (`z < depth`, cleared to 1.0).
+// (The earlier (ndc.z+1)/2 map inverted this: far surfaces won the depth test --
+//  invisible for a single convex silhouette, but it hid nearer objects behind
+//  farther ones in multi-object scenes.)
 glm::mat4 FTransform::MakeViewport(int nx, int ny)
 {
     glm::mat4 VP(1.0f);
     VP[0][0] = nx * 0.5f;
     VP[1][1] = ny * 0.5f;
-    VP[2][2] = 0.5f;
+    VP[2][2] = -0.5f;
     VP[3][0] = nx * 0.5f;
     VP[3][1] = ny * 0.5f;
     VP[3][2] = 0.5f;

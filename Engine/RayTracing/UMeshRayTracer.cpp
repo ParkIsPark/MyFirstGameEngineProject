@@ -56,6 +56,13 @@ vec3 skyColor(vec3 rd) {
     return mix(vec3(0.10, 0.12, 0.16), vec3(0.40, 0.55, 0.80), k);
 }
 
+// Reinhard tone map + gamma: compress accumulated light instead of clipping to
+// flat white when ambient + diffuse + specular (and multiple lights) stack up.
+vec3 tonemap(vec3 c) {
+    c = c / (c + vec3(1.0));
+    return pow(c, vec3(1.0 / 2.2));
+}
+
 void main() {
     float aspect = float(uWidth) / float(uHeight);
     float su = (uL + (uR - uL) * (gl_FragCoord.x / float(uWidth))) * aspect;
@@ -76,7 +83,7 @@ void main() {
         }
     }
 
-    if (hit < 0) { FragColor = vec4(skyColor(rd), 1.0); return; }
+    if (hit < 0) { FragColor = vec4(tonemap(skyColor(rd)), 1.0); return; }
 
     vec3 n0 = triTexel(hit, 3);
     vec3 n1 = triTexel(hit, 4);
@@ -96,7 +103,7 @@ void main() {
     vec3 diffuse = uKd * NdotL;
     vec3 spec    = (NdotL > 0.0) ? uKs * pow(NdotH, max(uShininess, 1.0)) : vec3(0.0);
     vec3 col = ambient + (diffuse + spec) * uLightColor;
-    FragColor = vec4(col, 1.0);
+    FragColor = vec4(tonemap(col), 1.0);
 }
 )GLSL";
 
