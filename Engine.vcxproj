@@ -71,6 +71,9 @@
     <!-- Engine: Mesh -->
     <ClCompile Include="Engine\Mesh\UMesh.cpp" />
     <ClCompile Include="Engine\Mesh\UMeshComponent.cpp" />
+    <!-- Engine: Rasterizer -->
+    <ClCompile Include="Engine\Rasterizer\FTransform.cpp" />
+    <ClCompile Include="Engine\Rasterizer\URasterizer.cpp" />
     <!-- Engine: World -->
     <ClCompile Include="Engine\World\AActor.cpp" />
     <ClCompile Include="Engine\World\ACamera.cpp" />
@@ -101,6 +104,10 @@
     <ClInclude Include="Engine\Mesh\Vertex.h" />
     <ClInclude Include="Engine\Mesh\UMesh.h" />
     <ClInclude Include="Engine\Mesh\UMeshComponent.h" />
+    <!-- Engine: Rasterizer headers -->
+    <ClInclude Include="Engine\Rasterizer\UFrameBuffer.h" />
+    <ClInclude Include="Engine\Rasterizer\FTransform.h" />
+    <ClInclude Include="Engine\Rasterizer\URasterizer.h" />
     <!-- Engine: World headers -->
     <ClInclude Include="Engine\World\AActor.h" />
     <ClInclude Include="Engine\World\ACamera.h" />
