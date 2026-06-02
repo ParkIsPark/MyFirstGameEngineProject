@@ -15,6 +15,10 @@
 #include "ACamera.h"
 #include "UScene.h"
 #include "URay.h"
+#include "UPrimitiveComponent.h"
+#include "USphereComponent.h"
+#include "UBoxComponent.h"
+#include "UPhysicsWorld.h"
 
 #include <cstdio>
 
@@ -61,12 +65,71 @@ void EditorEngine::BuildEditorWorld()
         actorNames_.push_back(name);
     };
 
-    spawnMesh("Sphere_Ball", sphere, glm::vec3(-2.6f, 0.0f, -9.0f), glm::vec3(0.45f, 0.55f, 0.90f));
+    spawnMesh("Sphere_Ball", sphere, glm::vec3(-2.6f, 2.5f, -9.0f), glm::vec3(0.45f, 0.55f, 0.90f));
     spawnMesh("Cube_Box",    cube,   glm::vec3( 2.6f, 0.0f, -9.0f), glm::vec3(0.90f, 0.55f, 0.28f));
     spawnEmpty("DirectionalLight", glm::vec3(5.0f, 5.0f, -3.0f));
     spawnEmpty("PlayerStart",      glm::vec3(0.0f, -1.0f, -6.0f));
 
+    // Give the ball a dynamic sphere collider so it falls under gravity in PIE.
+    {
+        AActor* ball = editorWorld_.GetScene().Actors[0];
+        USphereComponent* sc = new USphereComponent(ball);
+        sc->radius = 1.6f; sc->mass = 1.0f; sc->restitution = 0.4f;
+        ball->SetPhysics(sc);
+    }
+
     selected_ = 0;
+}
+
+UWorld* EditorEngine::CopyWorld(UWorld& src)
+{
+    UWorld* dst = new UWorld();
+    for (AActor* sa : src.GetScene().Actors)
+    {
+        AActor* da = new AActor();
+        da->position = sa->position;
+        da->rotation = sa->rotation;
+        da->scale    = sa->scale;
+
+        if (sa->mesh)
+        {
+            UMeshComponent* mc = new UMeshComponent();
+            *mc = *sa->mesh;                 // shares the UMesh asset; copies override + rel xform
+            da->mesh = mc;
+        }
+        if (sa->physics)
+        {
+            UPrimitiveComponent* p = nullptr;
+            if (sa->physics->GetShape() == EShape::Sphere)
+            { auto* s = new USphereComponent(da); s->radius = static_cast<USphereComponent*>(sa->physics)->radius; p = s; }
+            else if (sa->physics->GetShape() == EShape::Box)
+            { auto* b = new UBoxComponent(da); b->halfExtents = static_cast<UBoxComponent*>(sa->physics)->halfExtents; p = b; }
+            if (p)
+            {
+                p->mass = sa->physics->mass; p->restitution = sa->physics->restitution;
+                p->friction = sa->physics->friction; p->bAffectedByGravity = sa->physics->bAffectedByGravity;
+                p->velocity = glm::vec3(0.0f);          // PIE starts at rest
+                da->SetPhysics(p);
+            }
+        }
+        dst->Spawn(da);
+    }
+    return dst;
+}
+
+void EditorEngine::OnPlay()
+{
+    pieWorld_ = CopyWorld(editorWorld_);               // deep copy (UMesh shared)
+    pieWorld_->GetPhysics().enableFloor = true;
+    pieWorld_->GetPhysics().floorY      = -2.5f;       // ball lands here
+    pieWorld_->BeginPlay();
+    playing_ = true;
+}
+
+void EditorEngine::OnStop()
+{
+    if (pieWorld_) { pieWorld_->EndPlay(); delete pieWorld_; pieWorld_ = nullptr; }
+    playing_ = false;
 }
 
 void EditorEngine::OnStartup()
@@ -88,6 +151,8 @@ void EditorEngine::Render()
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
+    if (playing_ && pieWorld_)
+        pieWorld_->Tick(ImGui::GetIO().DeltaTime);     // PIE: physics + actor ticks
     DrawUI();
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -126,8 +191,8 @@ void EditorEngine::DrawUI()
 
 void EditorEngine::DrawToolbar()
 {
-    if (!playing_) { if (ImGui::Button("|>  Play")) playing_ = true; }
-    else           { if (ImGui::Button("[]  Stop")) playing_ = false; }
+    if (!playing_) { if (ImGui::Button("|>  Play")) OnPlay(); }
+    else           { if (ImGui::Button("[]  Stop")) OnStop(); }
     ImGui::SameLine(0, 16);
     ImGui::TextDisabled("Render Mode"); ImGui::SameLine();
     for (int i = 0; i < 3; ++i) { if (i) ImGui::SameLine(); if (ImGui::RadioButton(kModes[i], renderMode_ == i)) renderMode_ = i; }
@@ -139,7 +204,7 @@ void EditorEngine::DrawToolbar()
 
 void EditorEngine::DrawOutliner()
 {
-    auto& actors = editorWorld_.GetScene().Actors;
+    auto& actors = ActiveWorld().GetScene().Actors;
     ImGui::TextDisabled("%d actors", (int)actors.size());
     ImGui::Separator();
     for (int i = 0; i < (int)actors.size(); ++i)
@@ -153,7 +218,7 @@ void EditorEngine::DrawOutliner()
 
 void EditorEngine::DrawDetails()
 {
-    auto& actors = editorWorld_.GetScene().Actors;
+    auto& actors = ActiveWorld().GetScene().Actors;
     if (selected_ < 0 || selected_ >= (int)actors.size())
     { ImGui::TextDisabled("Select an actor in the World Outliner."); return; }
 
@@ -163,6 +228,7 @@ void EditorEngine::DrawDetails()
     if (playing_)
         ImGui::TextColored(ImVec4(0.88f, 0.66f, 0.35f, 1), "PIE mode -- read-only");
 
+    ImGui::BeginDisabled(playing_);          // properties are read-only during PIE
     ImGui::SeparatorText("Transform");
     ImGui::DragFloat3("Position", &a->position.x, 0.05f);
     ImGui::DragFloat3("Rotation", &a->rotation.x, 1.0f);
@@ -182,6 +248,7 @@ void EditorEngine::DrawDetails()
         ImGui::SeparatorText("Component");
         ImGui::TextDisabled("(no mesh component)");
     }
+    ImGui::EndDisabled();
 }
 
 void EditorEngine::EnsureViewportTex(int w, int h)
@@ -206,16 +273,17 @@ void EditorEngine::DrawViewport()
     const int w = (int)avail.x, h = (int)avail.y;
     if (w < 16 || h < 16) return;
 
-    // Apply the editor fly-camera to the world camera for this frame's render.
-    ACamera& cam = editorWorld_.GetCamera();
+    // Apply the editor fly-camera to the active world's camera for this render.
+    UWorld& world = ActiveWorld();
+    ACamera& cam = world.GetCamera();
     cam.eye = camEye_;
     cam.SetOrientation(camYaw_, camPitch_);
     cam.SetFOV(60.0f, (float)w / (float)h);
 
     // Render the world (CPU rasterizer for now; GPU RT / Hybrid in a later stage).
-    UScene& scene = editorWorld_.GetScene();
+    UScene& scene = world.GetScene();
     scene.width = w; scene.height = h;
-    renderer_.Render(editorWorld_, ERenderMode::RasterOnly);   // -> scene.outputImage
+    renderer_.Render(world, ERenderMode::RasterOnly);   // -> scene.outputImage
 
     if (!scene.outputImage.empty())
     {
@@ -270,10 +338,10 @@ void EditorEngine::PickActor(int w, int h)
     const int px = (int)(fx * w);
     const int py = (int)((1.0f - fy) * h);              // FBO/ray origin = bottom-left
 
-    const ACamera& cam = editorWorld_.GetCamera();
+    const ACamera& cam = ActiveWorld().GetCamera();
     const URay ray = cam.generateRay(px, py, w, h);
 
-    auto& actors = editorWorld_.GetScene().Actors;
+    auto& actors = ActiveWorld().GetScene().Actors;
     float best = 1e30f; int bestIdx = -1;
     for (int i = 0; i < (int)actors.size(); ++i)
     {

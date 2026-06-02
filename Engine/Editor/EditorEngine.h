@@ -29,6 +29,10 @@ protected:
 
 private:
     void BuildEditorWorld();
+    void OnPlay();                       // Editor -> PIE: deep-copy + BeginPlay
+    void OnStop();                       // PIE -> Editor
+    UWorld* CopyWorld(UWorld& src);      // deep copy (shares UMesh assets)
+    UWorld& ActiveWorld() { return (playing_ && pieWorld_) ? *pieWorld_ : editorWorld_; }
     void DrawUI();
     void DrawToolbar();
     void DrawOutliner();
@@ -45,6 +49,7 @@ private:
     int  selected_   = -1;       // index into editorWorld_ actors
 
     UWorld    editorWorld_;
+    UWorld*   pieWorld_ = nullptr;      // spawned on Play (deep copy of editorWorld_)
     URenderer renderer_;
 
     std::vector<UMesh*>      meshAssets_;   // owned shared mesh assets
