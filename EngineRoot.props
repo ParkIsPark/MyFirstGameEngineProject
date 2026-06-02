@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    EngineRoot.props
+    ================
+    Defines the $(EngineRootDir) macro used by OpenglViewer.props and every
+    .vcxproj to locate the engine sources (Engine\, include\, lib\).
+
+    Three states:
+      1. Inside this engine repo (Engine.sln, Test\Test.vcxproj):
+           EngineRootDir = $(SolutionDir)
+         — engine paths resolve to the repo root.
+
+      2. Generated project (linked mode):
+           EngineRootDir = <absolute path to engine repo>\
+         — engine edits propagate immediately; project carries no engine copy.
+
+      3. Generated project after Package.bat (packaged mode):
+           EngineRootDir = $(SolutionDir)
+         — engine sources are copied alongside the project; fully self-contained.
+
+    Each generated project ships with its OWN EngineRoot.props that overrides
+    this file. Only state #1 uses this default.
+-->
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="UserMacros">
+    <EngineRootDir>$(SolutionDir)</EngineRootDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <BuildMacro Include="EngineRootDir">
+      <Value>$(EngineRootDir)</Value>
+    </BuildMacro>
+  </ItemGroup>
+</Project>

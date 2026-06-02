@@ -3,7 +3,7 @@
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
-    <!-- Always output to the repo-root bin\ so DLLs are co-located with the exe -->
+    <!-- Output to the consuming solution's bin\ (project-local), not the engine's. -->
     <OutDir>$(SolutionDir)bin\</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup>
@@ -11,18 +11,19 @@
       <WarningLevel>Level3</WarningLevel>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalIncludeDirectories>
-        $(SolutionDir)include;
-        $(SolutionDir)Engine\Core;
-        $(SolutionDir)Engine\World;
-        $(SolutionDir)Engine\Light;
-        $(SolutionDir)Engine\Physics;
-        $(SolutionDir)Engine\Player;
-        $(SolutionDir)Engine\RayTracing;
+        $(EngineRootDir)include;
+        $(EngineRootDir)Engine\Core;
+        $(EngineRootDir)Engine\Mesh;
+        $(EngineRootDir)Engine\World;
+        $(EngineRootDir)Engine\Light;
+        $(EngineRootDir)Engine\Physics;
+        $(EngineRootDir)Engine\Player;
+        $(EngineRootDir)Engine\RayTracing;
         %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>$(SolutionDir)lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(EngineRootDir)lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>glew32.lib;freeglut.lib;glfw3.lib;glfw3dll.lib;opengl32.lib;glu32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>

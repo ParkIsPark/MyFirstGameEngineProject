@@ -37,10 +37,12 @@
   <!-- Reuse the shared property sheet so include/lib paths match every other project. -->
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(SolutionDir)EngineRoot.props" />
     <Import Project="$(SolutionDir)OpenglViewer.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(SolutionDir)EngineRoot.props" />
     <Import Project="$(SolutionDir)OpenglViewer.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
@@ -66,6 +68,8 @@
     <!-- Engine: Core -->
     <ClCompile Include="Engine\Core\UScene.cpp" />
     <ClCompile Include="Engine\Core\UPostProcessFilter.cpp" />
+    <!-- Engine: Mesh -->
+    <ClCompile Include="Engine\Mesh\UMesh.cpp" />
     <!-- Engine: World -->
     <ClCompile Include="Engine\World\AActor.cpp" />
     <ClCompile Include="Engine\World\ACamera.cpp" />
@@ -92,6 +96,9 @@
     <!-- Engine: Core headers -->
     <ClInclude Include="Engine\Core\UScene.h" />
     <ClInclude Include="Engine\Core\UPostProcessFilter.h" />
+    <!-- Engine: Mesh headers -->
+    <ClInclude Include="Engine\Mesh\Vertex.h" />
+    <ClInclude Include="Engine\Mesh\UMesh.h" />
     <!-- Engine: World headers -->
     <ClInclude Include="Engine\World\AActor.h" />
     <ClInclude Include="Engine\World\ACamera.h" />
