@@ -8,6 +8,10 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include "UMesh.h"
+
 #include <cstdio>
 
 // Placeholder scene for the Stage-1 shell (a real UWorld is bound in Stage 3).
@@ -46,6 +50,37 @@ void EditorEngine::OnStartup()
     ImGui_ImplGlfw_InitForOpenGL(window_, true);
     ImGui_ImplOpenGL3_Init("#version 330");
     imguiReady_ = true;
+
+    // Viewport scene: a single shaded sphere, GPU ray traced into the FBO.
+    vpMesh_ = UMesh::GenerateSphere(2.0f, 32, 16);
+    vpMesh_->material.ka        = glm::vec3(0.20f, 0.22f, 0.28f);
+    vpMesh_->material.kd        = glm::vec3(0.55f, 0.60f, 0.85f);
+    vpMesh_->material.ks        = glm::vec3(0.55f);
+    vpMesh_->material.shininess = 48.0f;
+    vpTracer_.Init();
+}
+
+void EditorEngine::EnsureFBO(int w, int h)
+{
+    if (w == fboW_ && h == fboH_ && fbo_) return;
+    fboW_ = w; fboH_ = h;
+
+    if (!fbo_)      glGenFramebuffers(1, &fbo_);
+    if (!fboTex_)   glGenTextures(1, &fboTex_);
+    if (!fboDepth_) glGenRenderbuffers(1, &fboDepth_);
+
+    glBindTexture(GL_TEXTURE_2D, fboTex_);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    glBindRenderbuffer(GL_RENDERBUFFER, fboDepth_);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fboTex_, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, fboDepth_);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void EditorEngine::Render()
@@ -117,8 +152,7 @@ void EditorEngine::DrawUI()
     {
         ImGui::TextDisabled("[%s] %s", kModes[renderMode_], playing_ ? "Playing (PIE)" : "Editor World");
         ImGui::Separator();
-        ImGui::TextWrapped("Scene render-to-FBO is wired in Stage 2 (this panel will show "
-                           "the URenderer output via ImGui::Image).");
+        DrawViewport();
     }
     ImGui::End();
 
@@ -144,4 +178,31 @@ void EditorEngine::DrawUI()
     ImGui::End();
 
     if (showDemo_) ImGui::ShowDemoWindow(&showDemo_);
+}
+
+void EditorEngine::DrawViewport()
+{
+    const ImVec2 avail = ImGui::GetContentRegionAvail();
+    const int w = (int)avail.x, h = (int)avail.y;
+    if (w < 16 || h < 16) return;
+
+    EnsureFBO(w, h);
+
+    // Spin the mesh so the editor viewport is visibly live.
+    vpSpin_ += 0.3f;                                   // GLM rotate = degrees
+    glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(0, 0, -7));
+    model = glm::rotate(model, vpSpin_, glm::vec3(0, 1, 0));
+    vpTracer_.UploadMesh(*vpMesh_, model);
+
+    // Render the scene into the viewport FBO.
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
+    glViewport(0, 0, w, h);
+    glClearColor(0.10f, 0.11f, 0.13f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    vpTracer_.RenderFrame(vpCam_, w, h);              // (render mode wired in Stage 3 via URenderer)
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, Width(), Height());
+
+    // Display it (flip V: FBO origin is bottom-left, ImGui is top-left).
+    ImGui::Image((ImTextureID)(intptr_t)fboTex_, avail, ImVec2(0, 1), ImVec2(1, 0));
 }
