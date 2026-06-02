@@ -14,6 +14,7 @@
 #include "AActor.h"
 #include "ACamera.h"
 #include "UScene.h"
+#include "URay.h"
 
 #include <cstdio>
 
@@ -197,12 +198,19 @@ void EditorEngine::EnsureViewportTex(int w, int h)
 
 void EditorEngine::DrawViewport()
 {
-    ImGui::TextDisabled("[%s] %s", kModes[renderMode_], playing_ ? "Playing (PIE)" : "Editor World");
+    ImGui::TextDisabled("[%s] %s   (RMB-drag + WASD/QE to fly, LMB to pick)",
+                        kModes[renderMode_], playing_ ? "Playing (PIE)" : "Editor World");
     ImGui::Separator();
 
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     const int w = (int)avail.x, h = (int)avail.y;
     if (w < 16 || h < 16) return;
+
+    // Apply the editor fly-camera to the world camera for this frame's render.
+    ACamera& cam = editorWorld_.GetCamera();
+    cam.eye = camEye_;
+    cam.SetOrientation(camYaw_, camPitch_);
+    cam.SetFOV(60.0f, (float)w / (float)h);
 
     // Render the world (CPU rasterizer for now; GPU RT / Hybrid in a later stage).
     UScene& scene = editorWorld_.GetScene();
@@ -216,5 +224,63 @@ void EditorEngine::DrawViewport()
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGB, GL_FLOAT, scene.outputImage.data());
         glBindTexture(GL_TEXTURE_2D, 0);
         ImGui::Image((ImTextureID)(intptr_t)vpTex_, avail, ImVec2(0, 1), ImVec2(1, 0));
+
+        // Latch fly-mode while RMB is held (so hover flicker during a drag does
+        // not interrupt simultaneous rotate + WASD movement).
+        if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+            flying_ = true;
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Right))
+            flying_ = false;
+
+        if (flying_)
+            UpdateEditorCamera(w, h);
+        else if (!playing_ && ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            PickActor(w, h);
     }
+}
+
+void EditorEngine::UpdateEditorCamera(int /*w*/, int /*h*/)
+{
+    ImGuiIO& io = ImGui::GetIO();
+
+    // RMB drag -> yaw/pitch (yaw matches cursor direction).
+    camYaw_   += io.MouseDelta.x * 0.15f;
+    camPitch_ -= io.MouseDelta.y * 0.15f;
+    camPitch_  = (camPitch_ >  89.0f) ?  89.0f : (camPitch_ < -89.0f ? -89.0f : camPitch_);
+
+    // WASD/QE fly along the current basis -- applied together with rotation.
+    ACamera& cam = editorWorld_.GetCamera();
+    cam.SetOrientation(camYaw_, camPitch_);
+    const glm::vec3 fwd = -cam.w, right = cam.u, up = cam.v;
+    const float speed = (io.KeyShift ? 14.0f : 5.0f) * io.DeltaTime;
+    if (ImGui::IsKeyDown(ImGuiKey_W)) camEye_ += fwd   * speed;
+    if (ImGui::IsKeyDown(ImGuiKey_S)) camEye_ -= fwd   * speed;
+    if (ImGui::IsKeyDown(ImGuiKey_D)) camEye_ += right * speed;
+    if (ImGui::IsKeyDown(ImGuiKey_A)) camEye_ -= right * speed;
+    if (ImGui::IsKeyDown(ImGuiKey_E)) camEye_ += up    * speed;
+    if (ImGui::IsKeyDown(ImGuiKey_Q)) camEye_ -= up    * speed;
+}
+
+void EditorEngine::PickActor(int w, int h)
+{
+    const ImVec2 mn = ImGui::GetItemRectMin();
+    const ImVec2 mp = ImGui::GetIO().MousePos;
+    const float fx = (mp.x - mn.x) / (float)w;          // 0..1 left->right
+    const float fy = (mp.y - mn.y) / (float)h;          // 0..1 top->bottom
+    const int px = (int)(fx * w);
+    const int py = (int)((1.0f - fy) * h);              // FBO/ray origin = bottom-left
+
+    const ACamera& cam = editorWorld_.GetCamera();
+    const URay ray = cam.generateRay(px, py, w, h);
+
+    auto& actors = editorWorld_.GetScene().Actors;
+    float best = 1e30f; int bestIdx = -1;
+    for (int i = 0; i < (int)actors.size(); ++i)
+    {
+        UMeshComponent* mc = actors[i]->mesh;
+        if (!mc || !mc->mesh) continue;
+        float t, u, v; int tri;
+        if (mc->intersect(ray, *actors[i], t, tri, u, v) && t < best) { best = t; bestIdx = i; }
+    }
+    if (bestIdx >= 0) selected_ = bestIdx;
 }

@@ -35,6 +35,8 @@ private:
     void DrawDetails();
     void DrawViewport();
     void EnsureViewportTex(int w, int h);
+    void UpdateEditorCamera(int w, int h);   // RMB-fly + WASD (when viewport active)
+    void PickActor(int w, int h);            // left-click ray pick
 
     bool imguiReady_ = false;
     bool showDemo_   = false;
@@ -51,4 +53,10 @@ private:
     unsigned int vpTex_  = 0;    // viewport texture (outputImage upload)
     int          vpTexW_ = 0;
     int          vpTexH_ = 0;
+
+    // editor fly-camera state (applied to editorWorld_'s camera each frame)
+    glm::vec3 camEye_   = glm::vec3(0.0f, 0.0f, 0.0f);
+    float     camYaw_   = 0.0f;   // degrees; 0 looks into -Z
+    float     camPitch_ = 0.0f;
+    bool      flying_   = false;  // RMB held since pressed over the viewport
 };
