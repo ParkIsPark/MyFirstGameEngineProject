@@ -1,5 +1,6 @@
 #pragma once
 #include <glm/glm.hpp>
+#include "Material.h"
 
 class UMesh;
 class ACamera;
@@ -31,4 +32,5 @@ private:
     unsigned int tbo_   = 0;   // buffer object holding triangle texels
     unsigned int tex_   = 0;   // GL_TEXTURE_BUFFER view onto tbo_
     int          numTris_ = 0;
+    Material     mat_;         // Blinn-Phong material of the uploaded mesh
 };

@@ -29,7 +29,9 @@ out vec4 FragColor;
 uniform vec3  uEye, uU, uV, uW;
 uniform float uL, uR, uB, uT, uD;
 uniform int   uWidth, uHeight, uNumTris;
-uniform vec3  uLightDir;
+uniform vec3  uLightDir, uLightColor;
+uniform vec3  uKa, uKd, uKs;          // Blinn-Phong material (ambient/diffuse/specular)
+uniform float uShininess;             // Phong exponent
 uniform samplerBuffer uTris;          // 6 texels per triangle (see C++ side)
 
 vec3 triTexel(int tri, int slot) { return texelFetch(uTris, tri * 6 + slot).xyz; }
@@ -79,9 +81,21 @@ void main() {
     vec3 n0 = triTexel(hit, 3);
     vec3 n1 = triTexel(hit, 4);
     vec3 n2 = triTexel(hit, 5);
-    vec3 n = normalize((1.0 - hu - hv) * n0 + hu * n1 + hv * n2);
-    float diff = max(dot(n, uLightDir), 0.0);
-    vec3 col = vec3(0.15) + vec3(0.85) * diff;           // ambient + diffuse (white)
+    vec3 n  = normalize((1.0 - hu - hv) * n0 + hu * n1 + hv * n2);
+    vec3 hitPos = ro + closest * rd;
+
+    // Blinn-Phong direct light + Unreal-style sky ambient (env light approximated
+    // by the hemisphere sky in the surface-normal direction).
+    vec3 L = normalize(uLightDir);
+    vec3 Vv = normalize(uEye - hitPos);
+    vec3 H = normalize(L + Vv);
+    float NdotL = max(dot(n, L), 0.0);
+    float NdotH = max(dot(n, H), 0.0);
+
+    vec3 ambient = uKa * skyColor(n);
+    vec3 diffuse = uKd * NdotL;
+    vec3 spec    = (NdotL > 0.0) ? uKs * pow(NdotH, max(uShininess, 1.0)) : vec3(0.0);
+    vec3 col = ambient + (diffuse + spec) * uLightColor;
     FragColor = vec4(col, 1.0);
 }
 )GLSL";
@@ -124,6 +138,7 @@ void UMeshRayTracer::UploadMesh(const UMesh& mesh, const glm::mat4& model)
 {
     const glm::mat3 nrmM = glm::inverseTranspose(glm::mat3(model));
     const int nTri = mesh.triangleCount();
+    mat_ = mesh.material;                      // captured for Blinn-Phong shading
 
     // Flat RGBA32F texel stream: 6 texels per triangle (v0 v1 v2 n0 n1 n2).
     std::vector<glm::vec4> texels;
@@ -172,6 +187,14 @@ void UMeshRayTracer::RenderFrame(const ACamera& cam, int width, int height) cons
     glUniform1i (glGetUniformLocation(prog_, "uNumTris"), numTris_);
     glm::vec3 lightDir = glm::normalize(glm::vec3(0.5f, 0.7f, 0.4f));
     glUniform3fv(glGetUniformLocation(prog_, "uLightDir"), 1, glm::value_ptr(lightDir));
+    glm::vec3 lightColor(1.0f);
+    glUniform3fv(glGetUniformLocation(prog_, "uLightColor"), 1, glm::value_ptr(lightColor));
+
+    // Blinn-Phong material (engine's existing shading model)
+    glUniform3fv(glGetUniformLocation(prog_, "uKa"), 1, glm::value_ptr(mat_.ka));
+    glUniform3fv(glGetUniformLocation(prog_, "uKd"), 1, glm::value_ptr(mat_.kd));
+    glUniform3fv(glGetUniformLocation(prog_, "uKs"), 1, glm::value_ptr(mat_.ks));
+    glUniform1f (glGetUniformLocation(prog_, "uShininess"), mat_.shininess);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_BUFFER, tex_);
