@@ -2,6 +2,10 @@
 #include "Engine.h"
 #include "UWorld.h"
 #include "URenderer.h"
+#include "UMeshRayTracer.h"
+#include "UHybridPass.h"
+#include "UGBuffer.h"
+#include "URasterizer.h"
 
 #include <vector>
 #include <string>
@@ -34,11 +38,17 @@ private:
     UWorld* CopyWorld(UWorld& src);      // deep copy (shares UMesh assets)
     UWorld& ActiveWorld() { return (playing_ && pieWorld_) ? *pieWorld_ : editorWorld_; }
     void DrawUI();
+    void DrawMenuBar();
     void DrawToolbar();
     void DrawOutliner();
     void DrawDetails();
     void DrawViewport();
+    void DrawContentBrowser();
+    void DrawStatusBar(float x, float y, float w, float h);
+    void ScanContent();
     void EnsureViewportTex(int w, int h);
+    void EnsureFBO(int w, int h);                 // FBO for the GPU render modes
+    void RenderWorldGPU(int w, int h, int mode);  // mode 1=GPU RT, 2=Hybrid -> fbo_
     void UpdateEditorCamera(int w, int h);   // RMB-fly + WASD (when viewport active)
     void PickActor(int w, int h);            // left-click ray pick
 
@@ -55,9 +65,22 @@ private:
     std::vector<UMesh*>      meshAssets_;   // owned shared mesh assets
     std::vector<std::string> actorNames_;   // parallel to scene.Actors
 
-    unsigned int vpTex_  = 0;    // viewport texture (outputImage upload)
+    struct ContentEntry { std::string name; const char* cat; const char* icon; };
+    std::vector<ContentEntry> content_;     // scanned Content/ assets
+    int  cbFilter_ = 0;                     // 0=All 1=World 2=Mesh 3=Texture
+
+    unsigned int vpTex_  = 0;    // viewport texture (CPU outputImage upload, raster)
     int          vpTexW_ = 0;
     int          vpTexH_ = 0;
+
+    // GPU render modes (PIE): render the world into this FBO, then ImGui::Image it
+    UMeshRayTracer worldRT_;     // GPU RT play mode
+    UHybridPass    hybrid_;      // Hybrid play mode (G-buffer + shadow)
+    URasterizer    rast_;        // builds the hybrid G-buffer
+    UGBuffer       gbuf_;
+    unsigned int   fbo_ = 0, fboTex_ = 0, fboDepth_ = 0;
+    int            fboW_ = 0, fboH_ = 0;
+    bool           gpuReady_ = false;
 
     // editor fly-camera state (applied to editorWorld_'s camera each frame)
     glm::vec3 camEye_   = glm::vec3(0.0f, 0.0f, 0.0f);

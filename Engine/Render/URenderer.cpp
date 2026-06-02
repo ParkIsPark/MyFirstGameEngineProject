@@ -6,6 +6,11 @@
 #include "ACamera.h"
 #include "UScene.h"
 #include "UWorld.h"
+#include "ALight.h"
+#include "PointLight.h"
+
+#include <vector>
+#include <algorithm>
 
 namespace
 {
@@ -69,22 +74,50 @@ void URenderer::Render(UWorld& world, ERenderMode mode)
 
 void URenderer::RasterWorld(UScene& scene, const ACamera& cam, int nx, int ny)
 {
-    fb_.Init(nx, ny);
-    fb_.Clear(glm::vec3(0.0f));
+    // Primary visibility into the G-buffer (world pos / normal / albedo / depth).
+    GBufferWorld(scene, cam, nx, ny);
 
-    for (AActor* actor : scene.Actors)
+    // Gather the scene's point lights (from the light actors).
+    struct PL { glm::vec3 pos; glm::vec3 col; };
+    std::vector<PL> lights;
+    for (AActor* a : scene.Actors)
+        if (ALight* L = dynamic_cast<ALight*>(a))
+            if (PointLight* pl = dynamic_cast<PointLight*>(L->lightComp))
+                lights.push_back({ pl->LightPos, pl->LightColor * pl->LightIntensity });
+
+    // Deferred Lambert diffuse + ambient (Blinn-Phong specular + shadows are the
+    // GPU / Hybrid path). Editing a light or material in the editor shows live.
+    scene.outputImage.resize(static_cast<size_t>(nx) * ny * 3);
+    const glm::vec3 ambient(0.16f);
+    const glm::vec3 bg(0.10f, 0.11f, 0.13f);
+    const int n = nx * ny;
+    for (int i = 0; i < n; ++i)
     {
-        UMeshComponent* comp = actor ? actor->mesh : nullptr;
-        if (!comp || !comp->mesh) continue;
-
-        const glm::vec3 albedo = comp->hasMaterialOverride
-            ? comp->materialOverride.kd : comp->mesh->material.kd;
-
-        const FTransform xf = ActorTransform(comp->GetWorldMatrix(*actor), cam, nx, ny);
-        raster_.DrawMesh(*comp->mesh, xf, albedo, fb_);
+        glm::vec3 col;
+        if (gbuffer_.depth[i] >= 1.0f)
+        {
+            col = bg;
+        }
+        else
+        {
+            const glm::vec3 P   = gbuffer_.worldPos[i];
+            const glm::vec3 N   = glm::normalize(gbuffer_.normal[i]);
+            const glm::vec3 alb = gbuffer_.albedo[i];
+            col = alb * ambient;
+            for (const PL& L : lights)
+            {
+                glm::vec3 l = L.pos - P;
+                const float d = glm::length(l);
+                if (d < 1e-5f) continue;
+                l /= d;
+                col += alb * L.col * glm::max(glm::dot(N, l), 0.0f);
+            }
+            col = glm::min(col, glm::vec3(1.0f));
+        }
+        scene.outputImage[3 * i + 0] = col.r;
+        scene.outputImage[3 * i + 1] = col.g;
+        scene.outputImage[3 * i + 2] = col.b;
     }
-
-    fb_.ToOutputImage(scene.outputImage);
 }
 
 void URenderer::GBufferWorld(UScene& scene, const ACamera& cam, int nx, int ny)

@@ -10,6 +10,7 @@
 
 #include <glm/glm.hpp>
 #include "UMesh.h"
+#include "FTransform.h"
 #include "UMeshComponent.h"
 #include "AActor.h"
 #include "ACamera.h"
@@ -19,8 +20,13 @@
 #include "USphereComponent.h"
 #include "UBoxComponent.h"
 #include "UPhysicsWorld.h"
+#include "ALight.h"
+#include "PointLight.h"
+#include "LightComponent.h"
 
 #include <cstdio>
+#include <cctype>
+#include <filesystem>
 
 namespace { const char* kModes[] = { "Rasterizer", "GPU RT", "Hybrid" }; }
 
@@ -67,15 +73,29 @@ void EditorEngine::BuildEditorWorld()
 
     spawnMesh("Sphere_Ball", sphere, glm::vec3(-2.6f, 2.5f, -9.0f), glm::vec3(0.45f, 0.55f, 0.90f));
     spawnMesh("Cube_Box",    cube,   glm::vec3( 2.6f, 0.0f, -9.0f), glm::vec3(0.90f, 0.55f, 0.28f));
-    spawnEmpty("DirectionalLight", glm::vec3(5.0f, 5.0f, -3.0f));
-    spawnEmpty("PlayerStart",      glm::vec3(0.0f, -1.0f, -6.0f));
 
-    // Give the ball a dynamic sphere collider so it falls under gravity in PIE.
+    // A real light actor (ALight owns a LightComponent) -- inspectable in Details.
+    {
+        ALight* light = new ALight(new PointLight(glm::vec3(5, 5, -3), glm::vec3(1.0f), glm::vec3(1.0f)));
+        light->position = glm::vec3(5.0f, 5.0f, -3.0f);
+        editorWorld_.Spawn(light);
+        actorNames_.push_back("PointLight");
+    }
+    spawnEmpty("PlayerStart", glm::vec3(0.0f, -1.0f, -6.0f));
+
+    // Ball: dynamic sphere collider (falls under gravity in PIE).
     {
         AActor* ball = editorWorld_.GetScene().Actors[0];
         USphereComponent* sc = new USphereComponent(ball);
         sc->radius = 1.6f; sc->mass = 1.0f; sc->restitution = 0.4f;
         ball->SetPhysics(sc);
+    }
+    // Cube: static box collider (mass 0) -- inspectable, doesn't move.
+    {
+        AActor* box = editorWorld_.GetScene().Actors[1];
+        UBoxComponent* bc = new UBoxComponent(box);
+        bc->halfExtents = glm::vec3(1.4f); bc->mass = 0.0f;
+        box->SetPhysics(bc);
     }
 
     selected_ = 0;
@@ -142,7 +162,119 @@ void EditorEngine::OnStartup()
     ImGui_ImplOpenGL3_Init("#version 330");
     imguiReady_ = true;
 
+    worldRT_.Init();           // GPU ray tracer (PIE: GPU RT mode)
+    hybrid_.Init();            // hybrid shadow pass (PIE: Hybrid mode)
+    gpuReady_ = true;
+
     BuildEditorWorld();
+    ScanContent();
+}
+
+void EditorEngine::EnsureFBO(int w, int h)
+{
+    if (w == fboW_ && h == fboH_ && fbo_) return;
+    fboW_ = w; fboH_ = h;
+    if (!fbo_)      glGenFramebuffers(1, &fbo_);
+    if (!fboTex_)   glGenTextures(1, &fboTex_);
+    if (!fboDepth_) glGenRenderbuffers(1, &fboDepth_);
+    glBindTexture(GL_TEXTURE_2D, fboTex_);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindRenderbuffer(GL_RENDERBUFFER, fboDepth_);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fboTex_, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, fboDepth_);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void EditorEngine::RenderWorldGPU(int w, int h, int mode)
+{
+    UWorld& world  = ActiveWorld();
+    UScene& scene  = world.GetScene();
+    ACamera& cam   = world.GetCamera();
+
+    // Gather the world's mesh instances (+ per-instance albedo) and the light.
+    std::vector<const UMesh*> meshes;
+    std::vector<glm::mat4>    models;
+    std::vector<glm::vec3>    albedos;
+    glm::vec3 lightPos(6, 8, 2), lightColor(1.0f);
+    for (AActor* a : scene.Actors)
+    {
+        if (UMeshComponent* mc = a->mesh)
+            if (mc->mesh)
+            {
+                meshes.push_back(mc->mesh);
+                models.push_back(mc->GetWorldMatrix(*a));
+                albedos.push_back(mc->hasMaterialOverride ? mc->materialOverride.kd : mc->mesh->material.kd);
+            }
+        if (ALight* L = dynamic_cast<ALight*>(a))
+            if (PointLight* pl = dynamic_cast<PointLight*>(L->lightComp))
+            { lightPos = pl->LightPos; lightColor = pl->LightColor * pl->LightIntensity; }
+    }
+
+    EnsureFBO(w, h);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
+    glViewport(0, 0, w, h);
+    glClearColor(0.10f, 0.11f, 0.13f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    if (mode == 1)                                   // GPU RT
+    {
+        worldRT_.UploadWorld(meshes, models, albedos, lightPos, lightColor);
+        worldRT_.RenderFrame(cam, w, h);
+    }
+    else                                             // Hybrid: CPU G-buffer + GPU shadow
+    {
+        gbuf_.Init(w, h); gbuf_.Clear();
+        std::vector<glm::vec3> tris;
+        for (size_t i = 0; i < meshes.size(); ++i)
+        {
+            FTransform xf;
+            xf.model    = models[i];
+            xf.view     = FTransform::MakeView(cam);
+            xf.proj     = FTransform::MakeProjFCG(cam.l, cam.r, cam.b, cam.t, -cam.d, -1000.0f);
+            xf.viewport = FTransform::MakeViewport(w, h);
+            rast_.DrawMeshGBuffer(*meshes[i], xf, albedos[i], gbuf_);
+            const int nt = meshes[i]->triangleCount();
+            for (int t = 0; t < nt; ++t)
+                for (int k = 0; k < 3; ++k)
+                    tris.push_back(glm::vec3(models[i] * glm::vec4(meshes[i]->vertices[meshes[i]->indices[3*t+k]].position, 1.0f)));
+        }
+        hybrid_.UploadSceneTriangles(tris);
+        hybrid_.UploadGBuffer(gbuf_);
+        hybrid_.Render(cam, lightPos, lightColor, w, h);
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, Width(), Height());
+}
+
+void EditorEngine::ScanContent()
+{
+    namespace fs = std::filesystem;
+    const char* dirs[] = { "Content", "bin/Content", "../bin/Content" };
+    for (const char* d : dirs)
+    {
+        std::error_code ec;
+        if (!fs::is_directory(d, ec)) continue;
+        for (const auto& e : fs::directory_iterator(d, ec))
+        {
+            if (!e.is_regular_file()) continue;
+            std::string name = e.path().filename().string();
+            std::string ext  = e.path().extension().string();
+            for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+
+            const char* cat = "Other"; const char* icon = "[?]";
+            if      (ext == ".world")                         { cat = "World";   icon = "[W]"; }
+            else if (ext == ".obj" || ext == ".fbx")          { cat = "Mesh";    icon = "[M]"; }
+            else if (ext == ".png" || ext == ".jpg")          { cat = "Texture"; icon = "[T]"; }
+            else if (ext == ".hdr")                           { cat = "HDRI";    icon = "[H]"; }
+            content_.push_back({ name, cat, icon });
+        }
+        break;                                   // first existing dir wins
+    }
 }
 
 void EditorEngine::Render()
@@ -161,9 +293,11 @@ void EditorEngine::Render()
 // ---------------------------------------------------------------------------
 void EditorEngine::DrawUI()
 {
+    DrawMenuBar();   // BeginMainMenuBar shrinks the viewport work area below
+
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     const ImVec2 pos = vp->WorkPos, sz = vp->WorkSize;
-    const float toolH = 40.0f, leftW = 230.0f, rightW = 300.0f;
+    const float toolH = 40.0f, statusH = 24.0f, leftW = 230.0f, rightW = 300.0f, cbH = 168.0f;
     const ImGuiWindowFlags fixed = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus;
 
@@ -171,14 +305,22 @@ void EditorEngine::DrawUI()
     if (ImGui::Begin("##Toolbar", nullptr, fixed | ImGuiWindowFlags_NoTitleBar)) DrawToolbar();
     ImGui::End();
 
-    const float by = pos.y + toolH, bh = sz.y - toolH;
+    const float by = pos.y + toolH;
+    const float bh = sz.y - toolH - statusH;
+    const float centerW = sz.x - leftW - rightW;
+
     ImGui::SetNextWindowPos(ImVec2(pos.x, by)); ImGui::SetNextWindowSize(ImVec2(leftW, bh));
     if (ImGui::Begin("World Outliner", nullptr, fixed)) DrawOutliner();
     ImGui::End();
 
     ImGui::SetNextWindowPos(ImVec2(pos.x + leftW, by));
-    ImGui::SetNextWindowSize(ImVec2(sz.x - leftW - rightW, bh));
+    ImGui::SetNextWindowSize(ImVec2(centerW, bh - cbH));
     if (ImGui::Begin("Viewport", nullptr, fixed)) DrawViewport();
+    ImGui::End();
+
+    ImGui::SetNextWindowPos(ImVec2(pos.x + leftW, by + bh - cbH));
+    ImGui::SetNextWindowSize(ImVec2(centerW, cbH));
+    if (ImGui::Begin("Content Browser", nullptr, fixed)) DrawContentBrowser();
     ImGui::End();
 
     ImGui::SetNextWindowPos(ImVec2(pos.x + sz.x - rightW, by));
@@ -186,7 +328,76 @@ void EditorEngine::DrawUI()
     if (ImGui::Begin("Details", nullptr, fixed)) DrawDetails();
     ImGui::End();
 
+    DrawStatusBar(pos.x, by + bh, sz.x, statusH);
+
     if (showDemo_) ImGui::ShowDemoWindow(&showDemo_);
+}
+
+void EditorEngine::DrawMenuBar()
+{
+    if (!ImGui::BeginMainMenuBar()) return;
+    if (ImGui::BeginMenu("File"))
+    {
+        ImGui::MenuItem("New World");
+        ImGui::MenuItem("Save World");
+        ImGui::Separator();
+        if (ImGui::MenuItem("Quit")) glfwSetWindowShouldClose(window_, GL_TRUE);
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Edit"))   { ImGui::MenuItem("Undo"); ImGui::MenuItem("Redo"); ImGui::EndMenu(); }
+    if (ImGui::BeginMenu("World"))  { ImGui::MenuItem("World Settings"); ImGui::EndMenu(); }
+    if (ImGui::BeginMenu("Build"))  { ImGui::MenuItem("Build Lighting"); ImGui::EndMenu(); }
+    if (ImGui::BeginMenu("Window")) { ImGui::MenuItem("Reset Layout"); ImGui::EndMenu(); }
+    if (ImGui::BeginMenu("Help"))   { ImGui::MenuItem("About"); ImGui::EndMenu(); }
+
+    const char* title = "MyEngine Editor -- DefaultWorld.world";
+    ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::CalcTextSize(title).x - 16);
+    ImGui::TextDisabled("%s", title);
+    ImGui::EndMainMenuBar();
+}
+
+void EditorEngine::DrawContentBrowser()
+{
+    const char* tabs[] = { "All", "World", "Mesh", "Texture" };
+    for (int i = 0; i < 4; ++i) { if (i) ImGui::SameLine(); if (ImGui::RadioButton(tabs[i], cbFilter_ == i)) cbFilter_ = i; }
+    ImGui::SameLine(); ImGui::TextDisabled("   Content/");
+    ImGui::Separator();
+
+    const float cell = 96.0f;
+    const int cols = (int)(ImGui::GetContentRegionAvail().x / cell);
+    int shown = 0;
+    for (const ContentEntry& e : content_)
+    {
+        if (cbFilter_ != 0 && std::string(e.cat) != tabs[cbFilter_]) continue;
+        if (shown % (cols < 1 ? 1 : cols) != 0) ImGui::SameLine();
+        ImGui::BeginGroup();
+        ImGui::Button((std::string(e.icon) + "##" + e.name).c_str(), ImVec2(74, 52));
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 80);
+        ImGui::TextWrapped("%s", e.name.c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::EndGroup();
+        ++shown;
+    }
+    if (shown == 0) ImGui::TextDisabled("(no assets in this filter)");
+}
+
+void EditorEngine::DrawStatusBar(float x, float y, float w, float h)
+{
+    const ImGuiWindowFlags f = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoScrollbar |
+        ImGuiWindowFlags_NoBringToFrontOnFocus;
+    ImGui::SetNextWindowPos(ImVec2(x, y)); ImGui::SetNextWindowSize(ImVec2(w, h));
+    if (ImGui::Begin("##StatusBar", nullptr, f))
+    {
+        ImGui::TextColored(playing_ ? ImVec4(0.88f, 0.55f, 0.20f, 1) : ImVec4(0.30f, 0.78f, 0.42f, 1),
+                           playing_ ? "Play-In-Editor" : "Editor Mode");
+        ImGui::SameLine(); ImGui::TextDisabled("|  Selected: %s",
+            (selected_ >= 0 && selected_ < (int)actorNames_.size()) ? actorNames_[selected_].c_str() : "(none)");
+        ImGui::SameLine(); ImGui::TextDisabled("|  Mode: %s", kModes[renderMode_]);
+        ImGui::SameLine(ImGui::GetWindowWidth() - 150);
+        ImGui::TextDisabled("Alt+P Play  *  %.0f FPS", ImGui::GetIO().Framerate);
+    }
+    ImGui::End();
 }
 
 void EditorEngine::DrawToolbar()
@@ -234,20 +445,63 @@ void EditorEngine::DrawDetails()
     ImGui::DragFloat3("Rotation", &a->rotation.x, 1.0f);
     ImGui::DragFloat3("Scale",    &a->scale.x,    0.05f, 0.01f, 100.0f);
 
+    // ---- UMeshComponent ----
     if (a->mesh && a->mesh->mesh)
     {
         Material& m = a->mesh->hasMaterialOverride ? a->mesh->materialOverride
                                                    : a->mesh->mesh->material;
-        ImGui::SeparatorText("Material");
+        ImGui::SeparatorText("Mesh Component");
+        ImGui::Text("Triangles: %d", a->mesh->mesh->triangleCount());
         ImGui::ColorEdit3("Diffuse",   &m.kd.x);
         ImGui::ColorEdit3("Specular",  &m.ks.x);
         ImGui::DragFloat ("Shininess", &m.shininess, 1.0f, 0.0f, 256.0f);
     }
-    else
+
+    // ---- UPrimitiveComponent (collision shape + rigid body) ----
+    if (UPrimitiveComponent* p = a->physics)
     {
-        ImGui::SeparatorText("Component");
-        ImGui::TextDisabled("(no mesh component)");
+        const char* shape = p->GetShape() == EShape::Sphere ? "Sphere Collision"
+                          : p->GetShape() == EShape::Box    ? "Box Collision"
+                                                            : "Capsule Collision";
+        ImGui::SeparatorText(shape);
+        ImGui::TextDisabled("UPrimitiveComponent");
+        ImGui::DragFloat("Mass",        &p->mass,        0.1f,  0.0f, 100.0f);
+        ImGui::DragFloat("Restitution", &p->restitution, 0.01f, 0.0f, 1.0f);
+        ImGui::DragFloat("Friction",    &p->friction,    0.01f, 0.0f, 1.0f);
+        ImGui::Checkbox ("Affected by Gravity", &p->bAffectedByGravity);
+        if (p->GetShape() == EShape::Sphere)
+            ImGui::DragFloat ("Radius",       &static_cast<USphereComponent*>(p)->radius, 0.05f, 0.01f, 100.0f);
+        else if (p->GetShape() == EShape::Box)
+            ImGui::DragFloat3("Half Extents", &static_cast<UBoxComponent*>(p)->halfExtents.x, 0.05f, 0.01f, 100.0f);
     }
+
+    // ---- LightComponent (ALight) ----
+    if (ALight* light = dynamic_cast<ALight*>(a))
+    {
+        if (LightComponent* lc = light->lightComp)
+        {
+            ImGui::SeparatorText("Light Component");
+            ImGui::ColorEdit3("Light Color",  &lc->LightColor.x);
+            ImGui::DragFloat3("Intensity",    &lc->LightIntensity.x, 0.05f, 0.0f, 50.0f);
+            if (PointLight* pl = dynamic_cast<PointLight*>(lc))
+                ImGui::DragFloat3("Light Pos", &pl->LightPos.x, 0.1f);
+        }
+    }
+
+    // ---- Add Component ----
+    ImGui::Spacing();
+    if (ImGui::Button("+ Add Component"))
+        ImGui::OpenPopup("AddComponent");
+    if (ImGui::BeginPopup("AddComponent"))
+    {
+        if (!a->physics && ImGui::MenuItem("Sphere Collision"))
+        { auto* s = new USphereComponent(a); s->radius = 1.0f; a->SetPhysics(s); }
+        if (!a->physics && ImGui::MenuItem("Box Collision"))
+        { auto* b = new UBoxComponent(a); b->halfExtents = glm::vec3(1.0f); a->SetPhysics(b); }
+        if (a->physics) ImGui::TextDisabled("(already has a collider)");
+        ImGui::EndPopup();
+    }
+
     ImGui::EndDisabled();
 }
 
@@ -280,19 +534,35 @@ void EditorEngine::DrawViewport()
     cam.SetOrientation(camYaw_, camPitch_);
     cam.SetFOV(60.0f, (float)w / (float)h);
 
-    // Render the world (CPU rasterizer for now; GPU RT / Hybrid in a later stage).
-    UScene& scene = world.GetScene();
-    scene.width = w; scene.height = h;
-    renderer_.Render(world, ERenderMode::RasterOnly);   // -> scene.outputImage
+    // Editor world: always lit rasterizer (fast editing preview).
+    // PIE (playing): render per the toolbar Render Mode (Rasterizer/GPU RT/Hybrid).
+    const int effMode = playing_ ? renderMode_ : 0;
 
-    if (!scene.outputImage.empty())
+    bool shown = false;
+    if (effMode == 0)                                  // CPU lit rasterizer -> texture
     {
-        EnsureViewportTex(w, h);
-        glBindTexture(GL_TEXTURE_2D, vpTex_);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGB, GL_FLOAT, scene.outputImage.data());
-        glBindTexture(GL_TEXTURE_2D, 0);
-        ImGui::Image((ImTextureID)(intptr_t)vpTex_, avail, ImVec2(0, 1), ImVec2(1, 0));
+        UScene& scene = world.GetScene();
+        scene.width = w; scene.height = h;
+        renderer_.Render(world, ERenderMode::RasterOnly);
+        if (!scene.outputImage.empty())
+        {
+            EnsureViewportTex(w, h);
+            glBindTexture(GL_TEXTURE_2D, vpTex_);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGB, GL_FLOAT, scene.outputImage.data());
+            glBindTexture(GL_TEXTURE_2D, 0);
+            ImGui::Image((ImTextureID)(intptr_t)vpTex_, avail, ImVec2(0, 1), ImVec2(1, 0));
+            shown = true;
+        }
+    }
+    else                                               // GPU RT / Hybrid -> FBO
+    {
+        RenderWorldGPU(w, h, effMode);
+        ImGui::Image((ImTextureID)(intptr_t)fboTex_, avail, ImVec2(0, 1), ImVec2(1, 0));
+        shown = true;
+    }
 
+    if (shown)
+    {
         // Latch fly-mode while RMB is held (so hover flicker during a drag does
         // not interrupt simultaneous rotate + WASD movement).
         if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right))

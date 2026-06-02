@@ -12,9 +12,9 @@
 // core since GL 3.1 / GLSL 1.40), NOT an SSBO. SSBOs need GL 4.3, which we must
 // not assume on the target (grading) machine -- the rest of the engine's GPU
 // shaders already target #version 330, so 3.3 is our baseline. Each triangle is
-// 6 RGBA32F texels: v0,v1,v2,n0,n1,n2 (w unused). RGBA32F is a mandatory
+// 7 RGBA32F texels: v0,v1,v2,n0,n1,n2,albedo (w unused). RGBA32F is a mandatory
 // texture-buffer format in 3.1+, unlike RGB32F.
-static const int TEXELS_PER_TRI = 6;
+static const int TEXELS_PER_TRI = 7;
 
 static const char* VERT_SRC = R"GLSL(
 #version 330 core
@@ -29,12 +29,12 @@ out vec4 FragColor;
 uniform vec3  uEye, uU, uV, uW;
 uniform float uL, uR, uB, uT, uD;
 uniform int   uWidth, uHeight, uNumTris;
-uniform vec3  uLightDir, uLightColor;
-uniform vec3  uKa, uKd, uKs;          // Blinn-Phong material (ambient/diffuse/specular)
+uniform vec3  uLightPos, uLightColor;
+uniform vec3  uKs;                    // specular coefficient (per-tri albedo = diffuse)
 uniform float uShininess;             // Phong exponent
-uniform samplerBuffer uTris;          // 6 texels per triangle (see C++ side)
+uniform samplerBuffer uTris;          // 7 texels per triangle (see C++ side)
 
-vec3 triTexel(int tri, int slot) { return texelFetch(uTris, tri * 6 + slot).xyz; }
+vec3 triTexel(int tri, int slot) { return texelFetch(uTris, tri * 7 + slot).xyz; }
 
 bool rayTri(vec3 ro, vec3 rd, vec3 v0, vec3 v1, vec3 v2,
             out float t, out float u, out float v) {
@@ -89,18 +89,18 @@ void main() {
     vec3 n1 = triTexel(hit, 4);
     vec3 n2 = triTexel(hit, 5);
     vec3 n  = normalize((1.0 - hu - hv) * n0 + hu * n1 + hv * n2);
+    vec3 albedo = triTexel(hit, 6);                  // per-triangle diffuse
     vec3 hitPos = ro + closest * rd;
 
-    // Blinn-Phong direct light + Unreal-style sky ambient (env light approximated
-    // by the hemisphere sky in the surface-normal direction).
-    vec3 L = normalize(uLightDir);
+    // Blinn-Phong point light + Unreal-style sky ambient (hemisphere sky).
+    vec3 L = normalize(uLightPos - hitPos);
     vec3 Vv = normalize(uEye - hitPos);
     vec3 H = normalize(L + Vv);
     float NdotL = max(dot(n, L), 0.0);
     float NdotH = max(dot(n, H), 0.0);
 
-    vec3 ambient = uKa * skyColor(n);
-    vec3 diffuse = uKd * NdotL;
+    vec3 ambient = albedo * skyColor(n) * 0.5;
+    vec3 diffuse = albedo * NdotL;
     vec3 spec    = (NdotL > 0.0) ? uKs * pow(NdotH, max(uShininess, 1.0)) : vec3(0.0);
     vec3 col = ambient + (diffuse + spec) * uLightColor;
     FragColor = vec4(tonemap(col), 1.0);
@@ -143,27 +143,39 @@ void UMeshRayTracer::Init()
 
 void UMeshRayTracer::UploadMesh(const UMesh& mesh, const glm::mat4& model)
 {
+    mat_ = mesh.material;                      // ks/shininess for the demo path
+
+    std::vector<glm::vec4> texels;
+    texels.reserve(static_cast<size_t>(mesh.triangleCount()) * TEXELS_PER_TRI);
+    bakeMesh(mesh, model, mesh.material.kd, texels);
+    numTris_ = mesh.triangleCount();
+
+    uploadTexels(texels);
+}
+
+// Bake one mesh's triangles (world space) + a per-instance albedo into `out`.
+void UMeshRayTracer::bakeMesh(const UMesh& mesh, const glm::mat4& model,
+                              const glm::vec3& albedo, std::vector<glm::vec4>& out)
+{
     const glm::mat3 nrmM = glm::inverseTranspose(glm::mat3(model));
     const int nTri = mesh.triangleCount();
-    mat_ = mesh.material;                      // captured for Blinn-Phong shading
-
-    // Flat RGBA32F texel stream: 6 texels per triangle (v0 v1 v2 n0 n1 n2).
-    std::vector<glm::vec4> texels;
-    texels.reserve(static_cast<size_t>(nTri) * TEXELS_PER_TRI);
     for (int i = 0; i < nTri; ++i)
     {
         const Vertex& a = mesh.vertices[mesh.indices[3 * i + 0]];
         const Vertex& b = mesh.vertices[mesh.indices[3 * i + 1]];
         const Vertex& c = mesh.vertices[mesh.indices[3 * i + 2]];
-        texels.emplace_back(glm::vec3(model * glm::vec4(a.position, 1.0f)), 0.0f);
-        texels.emplace_back(glm::vec3(model * glm::vec4(b.position, 1.0f)), 0.0f);
-        texels.emplace_back(glm::vec3(model * glm::vec4(c.position, 1.0f)), 0.0f);
-        texels.emplace_back(glm::normalize(nrmM * a.normal), 0.0f);
-        texels.emplace_back(glm::normalize(nrmM * b.normal), 0.0f);
-        texels.emplace_back(glm::normalize(nrmM * c.normal), 0.0f);
+        out.emplace_back(glm::vec3(model * glm::vec4(a.position, 1.0f)), 0.0f);
+        out.emplace_back(glm::vec3(model * glm::vec4(b.position, 1.0f)), 0.0f);
+        out.emplace_back(glm::vec3(model * glm::vec4(c.position, 1.0f)), 0.0f);
+        out.emplace_back(glm::normalize(nrmM * a.normal), 0.0f);
+        out.emplace_back(glm::normalize(nrmM * b.normal), 0.0f);
+        out.emplace_back(glm::normalize(nrmM * c.normal), 0.0f);
+        out.emplace_back(albedo, 0.0f);
     }
-    numTris_ = nTri;
+}
 
+void UMeshRayTracer::uploadTexels(const std::vector<glm::vec4>& texels)
+{
     if (!tbo_) glGenBuffers(1, &tbo_);
     glBindBuffer(GL_TEXTURE_BUFFER, tbo_);
     glBufferData(GL_TEXTURE_BUFFER,
@@ -175,6 +187,26 @@ void UMeshRayTracer::UploadMesh(const UMesh& mesh, const glm::mat4& model)
     glBindTexture(GL_TEXTURE_BUFFER, tex_);
     glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, tbo_);
     glBindTexture(GL_TEXTURE_BUFFER, 0);
+}
+
+void UMeshRayTracer::UploadWorld(const std::vector<const UMesh*>& meshes,
+                                 const std::vector<glm::mat4>& models,
+                                 const std::vector<glm::vec3>& albedos,
+                                 const glm::vec3& lightPos, const glm::vec3& lightColor)
+{
+    lightPos_ = lightPos; lightColor_ = lightColor;
+    mat_.ks = glm::vec3(0.35f); mat_.shininess = 32.0f;     // default specular for the scene
+
+    std::vector<glm::vec4> texels;
+    int total = 0;
+    for (size_t i = 0; i < meshes.size(); ++i)
+    {
+        if (!meshes[i]) continue;
+        bakeMesh(*meshes[i], models[i], albedos[i], texels);
+        total += meshes[i]->triangleCount();
+    }
+    numTris_ = total;
+    uploadTexels(texels);
 }
 
 void UMeshRayTracer::RenderFrame(const ACamera& cam, int width, int height) const
@@ -192,14 +224,8 @@ void UMeshRayTracer::RenderFrame(const ACamera& cam, int width, int height) cons
     glUniform1i (glGetUniformLocation(prog_, "uWidth"),  width);
     glUniform1i (glGetUniformLocation(prog_, "uHeight"), height);
     glUniform1i (glGetUniformLocation(prog_, "uNumTris"), numTris_);
-    glm::vec3 lightDir = glm::normalize(glm::vec3(0.5f, 0.7f, 0.4f));
-    glUniform3fv(glGetUniformLocation(prog_, "uLightDir"), 1, glm::value_ptr(lightDir));
-    glm::vec3 lightColor(1.0f);
-    glUniform3fv(glGetUniformLocation(prog_, "uLightColor"), 1, glm::value_ptr(lightColor));
-
-    // Blinn-Phong material (engine's existing shading model)
-    glUniform3fv(glGetUniformLocation(prog_, "uKa"), 1, glm::value_ptr(mat_.ka));
-    glUniform3fv(glGetUniformLocation(prog_, "uKd"), 1, glm::value_ptr(mat_.kd));
+    glUniform3fv(glGetUniformLocation(prog_, "uLightPos"),   1, glm::value_ptr(lightPos_));
+    glUniform3fv(glGetUniformLocation(prog_, "uLightColor"), 1, glm::value_ptr(lightColor_));
     glUniform3fv(glGetUniformLocation(prog_, "uKs"), 1, glm::value_ptr(mat_.ks));
     glUniform1f (glGetUniformLocation(prog_, "uShininess"), mat_.shininess);
 
