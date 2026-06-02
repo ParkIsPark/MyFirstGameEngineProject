@@ -76,9 +76,12 @@
     <ClCompile Include="Engine\Rasterizer\URasterizer.cpp" />
     <!-- Engine: Framework -->
     <ClCompile Include="Engine\Framework\Engine.cpp" />
+    <ClCompile Include="Engine\Framework\FProjectDescriptor.cpp" />
+    <ClCompile Include="Engine\Framework\USubsystemManager.cpp" />
     <!-- Engine: World -->
     <ClCompile Include="Engine\World\AActor.cpp" />
     <ClCompile Include="Engine\World\ACamera.cpp" />
+    <ClCompile Include="Engine\World\UWorld.cpp" />
     <!-- Engine: Light -->
     <ClCompile Include="Engine\Light\ALight.cpp" />
     <ClCompile Include="Engine\Light\EnvironmentLight.cpp" />
@@ -110,9 +113,13 @@
     <ClInclude Include="Engine\Rasterizer\URasterizer.h" />
     <!-- Engine: Framework headers -->
     <ClInclude Include="Engine\Framework\Engine.h" />
+    <ClInclude Include="Engine\Framework\FProjectDescriptor.h" />
+    <ClInclude Include="Engine\Framework\USubsystem.h" />
+    <ClInclude Include="Engine\Framework\USubsystemManager.h" />
     <!-- Engine: World headers -->
     <ClInclude Include="Engine\World\AActor.h" />
     <ClInclude Include="Engine\World\ACamera.h" />
+    <ClInclude Include="Engine\World\UWorld.h" />
     <!-- Engine: Light headers -->
     <ClInclude Include="Engine\Light\ALight.h" />
     <ClInclude Include="Engine\Light\EnvironmentLight.h" />

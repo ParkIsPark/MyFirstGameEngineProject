@@ -1,4 +1,5 @@
 #include "Engine.h"
+#include "UWorld.h"
 
 #include <iostream>
 #include <GL/glew.h>
@@ -9,6 +10,7 @@
 
 Engine::~Engine()
 {
+    delete world_;
     if (window_) glfwDestroyWindow(window_);
     glfwTerminate();
 }
@@ -65,15 +67,48 @@ void Engine::handleResize(int w, int h)
     OnResize(w, h);
 }
 
-int Engine::Run()
+void Engine::Tick(float dt)
 {
-    OnStartup();
-    handleResize(width_, height_);             // initial viewport / ortho
+    if (world_) world_->Tick(dt);
+    Render();
+}
 
+int Engine::Run(const char* projPath)
+{
+    // Load the project descriptor. Missing/garbage -> defaults (never crash).
+    // Only apply window size/title when a project actually loaded, so the
+    // no-project demo path keeps the size passed to Init().
+    if (proj_.LoadFromFile(projPath))
+    {
+        glfwSetWindowSize(window_, proj_.width, proj_.height);
+        glfwSetWindowTitle(window_, proj_.windowTitle.c_str());
+        handleResize(proj_.width, proj_.height);
+        std::cout << "[Engine] project '" << proj_.windowTitle << "' "
+                  << proj_.width << "x" << proj_.height
+                  << " mode=" << FProjectDescriptor::RenderModeName(proj_.renderMode) << "\n";
+    }
+    else
+    {
+        if (projPath) std::cout << "[Engine] project load failed -> defaults\n";
+    }
+
+    OnStartup();
+    handleResize(width_, height_);          // initial viewport / ortho
+
+    world_ = WorldSetting();                 // project builds the world (or null)
+    subsystems_.InitAll();
+    if (world_) world_->BeginPlay();
+
+    lastTime_ = glfwGetTime();
     while (!glfwWindowShouldClose(window_))
     {
+        const double now = glfwGetTime();
+        float dt = static_cast<float>(now - lastTime_);
+        lastTime_ = now;
+
         glClear(GL_COLOR_BUFFER_BIT);
-        Render();                              // app draws the frame
+        subsystems_.TickAll(dt);
+        Tick(dt);                            // world sim + draw
         glfwSwapBuffers(window_);
         glfwPollEvents();
 
@@ -81,5 +116,10 @@ int Engine::Run()
             glfwGetKey(window_, GLFW_KEY_Q)      == GLFW_PRESS)
             glfwSetWindowShouldClose(window_, GL_TRUE);
     }
+
+    if (world_) world_->EndPlay();
+    subsystems_.ShutdownAll();
+    delete world_;
+    world_ = nullptr;
     return 0;
 }

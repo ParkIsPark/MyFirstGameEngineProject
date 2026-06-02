@@ -23,6 +23,11 @@ public:
 
     virtual void Tick(float DeltaTime);
 
+    // Public lifecycle drivers so UWorld can dispatch the protected hooks
+    // (BeginPlay/EndPlay stay protected as the override points).
+    void DispatchBeginPlay() { BeginPlay(); }
+    void DispatchEndPlay()   { EndPlay(); }
+
 protected:
     virtual void BeginPlay();
     virtual void EndPlay();
