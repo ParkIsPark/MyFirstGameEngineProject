@@ -79,6 +79,7 @@
     <ClCompile Include="Engine\Render\UHybridPass.cpp" />
     <!-- Engine: Import -->
     <ClCompile Include="Engine\Import\UObjImporter.cpp" />
+    <ClCompile Include="Engine\Import\UFbxImporter.cpp" />
     <!-- Engine: Framework -->
     <ClCompile Include="Engine\Framework\Engine.cpp" />
     <ClCompile Include="Engine\Framework\FProjectDescriptor.cpp" />
@@ -122,6 +123,7 @@
     <ClInclude Include="Engine\Render\UHybridPass.h" />
     <!-- Engine: Import headers -->
     <ClInclude Include="Engine\Import\UObjImporter.h" />
+    <ClInclude Include="Engine\Import\UFbxImporter.h" />
     <!-- Engine: Framework headers -->
     <ClInclude Include="Engine\Framework\Engine.h" />
     <ClInclude Include="Engine\Framework\FProjectDescriptor.h" />
