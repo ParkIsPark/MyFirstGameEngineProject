@@ -1,6 +1,9 @@
 #include "AActor.h"
 #include "../Physics/UPrimitiveComponent.h"
 #include "../Mesh/UMeshComponent.h"
+#include "FArchive.h"
+
+REGISTER_ACTOR("Actor", AActor)
 
 AActor::AActor()
 {
@@ -28,6 +31,24 @@ void AActor::SetPhysics(UPrimitiveComponent* p)
 {
     physics = p;
     if (p) p->owner = this;
+}
+
+void AActor::Serialize(FArchive& ar)
+{
+    ar.Field("Name", name);
+    glm::vec3 loc = rootComponent.relLocation;
+    glm::vec3 rot = rootComponent.relRotation;
+    glm::vec3 scl = rootComponent.relScale;
+    ar.Field("Loc",   loc);
+    ar.Field("Rot",   rot);
+    ar.Field("Scale", scl);
+    if (ar.IsLoading())
+    {
+        rootComponent.relLocation = loc;
+        rootComponent.relRotation = rot;
+        rootComponent.relScale    = scl;
+        rootComponent.MarkDirty();
+    }
 }
 
 void AActor::Tick(float DeltaTime)

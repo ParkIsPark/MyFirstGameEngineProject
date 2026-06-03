@@ -98,6 +98,8 @@
     <!-- Engine: World -->
     <ClCompile Include="Engine\World\AActor.cpp" />
     <ClCompile Include="Engine\World\USceneComponent.cpp" />
+    <ClCompile Include="Engine\Serialization\FArchive.cpp" />
+    <ClCompile Include="Engine\Mesh\Material.cpp" />
     <ClCompile Include="Engine\World\ACamera.cpp" />
     <ClCompile Include="Engine\World\UWorld.cpp" />
     <!-- Engine: Light -->
@@ -150,6 +152,7 @@
     <!-- Engine: World headers -->
     <ClInclude Include="Engine\World\AActor.h" />
     <ClInclude Include="Engine\World\USceneComponent.h" />
+    <ClInclude Include="Engine\Serialization\FArchive.h" />
     <ClInclude Include="Engine\World\ACamera.h" />
     <ClInclude Include="Engine\World\UWorld.h" />
     <!-- Engine: Light headers -->

@@ -26,4 +26,7 @@ public:
     // World-space ray -> mesh-local (via GetWorldMatrix) -> UMesh::intersect.
     bool intersect(const URay& worldRay,
                    float& outT, int& outTri, float& outU, float& outV) const;
+
+    const char* TypeName() const override { return "Mesh"; }
+    void        Serialize(FArchive& ar) override;   // base + material override
 };

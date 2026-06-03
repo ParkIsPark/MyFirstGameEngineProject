@@ -4,6 +4,7 @@
 #include <vector>
 
 class AActor;
+class FArchive;
 
 // ---------------------------------------------------------------------------
 // USceneComponent (P1) — a transform node in the scene graph.
@@ -42,6 +43,10 @@ public:
     void Detach();                                     // detach from parent
 
     void MarkDirty();                                  // invalidate self + all descendants
+
+    // ---- serialization contract (P2) ----
+    virtual const char* TypeName() const { return "Scene"; }   // file Type tag
+    virtual void        Serialize(FArchive& ar);               // name + rel transform
 
     // Test hook: total world-matrix recomputations (cache-correctness checks).
     static long s_recomputeCount;

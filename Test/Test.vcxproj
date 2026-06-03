@@ -105,6 +105,8 @@
     <!-- Engine: World -->
     <ClCompile Include="$(EngineRootDir)Engine\World\AActor.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\World\USceneComponent.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Serialization\FArchive.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Mesh\Material.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\World\ACamera.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\World\UWorld.cpp" />
     <!-- Engine: Light -->
@@ -130,6 +132,7 @@
     <!-- Engine: World headers -->
     <ClInclude Include="$(EngineRootDir)Engine\World\AActor.h" />
     <ClInclude Include="$(EngineRootDir)Engine\World\USceneComponent.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Serialization\FArchive.h" />
     <ClInclude Include="$(EngineRootDir)Engine\World\ACamera.h" />
     <!-- Engine: Light headers -->
     <ClInclude Include="$(EngineRootDir)Engine\Light\ALight.h" />

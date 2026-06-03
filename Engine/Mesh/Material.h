@@ -23,4 +23,7 @@ struct Material
     int texWidth    = 0;
     int texHeight   = 0;
     int texChannels = 0;
+
+    // Bidirectional serialization of the numeric Blinn-Phong fields (P2).
+    void Serialize(class FArchive& ar);
 };

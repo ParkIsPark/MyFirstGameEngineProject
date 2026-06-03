@@ -29,6 +29,7 @@
         $(EngineRootDir)Engine\Import;
         $(EngineRootDir)Engine\Acceleration;
         $(EngineRootDir)Engine\Threading;
+        $(EngineRootDir)Engine\Serialization;
         $(EngineRootDir)Engine\Editor;
         $(EngineRootDir)Engine\Editor\External\imgui;
         $(EngineRootDir)Engine\Editor\External\imgui\backends;

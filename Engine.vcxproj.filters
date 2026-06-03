@@ -31,6 +31,9 @@
     <Filter Include="Engine\Threading">
       <UniqueIdentifier>{20000000-0000-0000-0000-000000000009}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\Serialization">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000020}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Engine\Import">
       <UniqueIdentifier>{20000000-0000-0000-0000-00000000000a}</UniqueIdentifier>
     </Filter>
@@ -64,6 +67,8 @@
     <!-- World -->
     <ClCompile Include="Engine\World\AActor.cpp"><Filter>Engine\World</Filter></ClCompile>
     <ClCompile Include="Engine\World\USceneComponent.cpp"><Filter>Engine\World</Filter></ClCompile>
+    <ClCompile Include="Engine\Serialization\FArchive.cpp"><Filter>Engine\Serialization</Filter></ClCompile>
+    <ClCompile Include="Engine\Mesh\Material.cpp"><Filter>Engine\Mesh</Filter></ClCompile>
     <ClCompile Include="Engine\World\ACamera.cpp"><Filter>Engine\World</Filter></ClCompile>
     <ClCompile Include="Engine\World\UWorld.cpp"><Filter>Engine\World</Filter></ClCompile>
     <!-- Mesh -->
@@ -117,6 +122,7 @@
     <!-- World -->
     <ClInclude Include="Engine\World\AActor.h"><Filter>Engine\World</Filter></ClInclude>
     <ClInclude Include="Engine\World\USceneComponent.h"><Filter>Engine\World</Filter></ClInclude>
+    <ClInclude Include="Engine\Serialization\FArchive.h"><Filter>Engine\Serialization</Filter></ClInclude>
     <ClInclude Include="Engine\World\ACamera.h"><Filter>Engine\World</Filter></ClInclude>
     <ClInclude Include="Engine\World\UWorld.h"><Filter>Engine\World</Filter></ClInclude>
     <!-- Mesh -->

@@ -11,6 +11,8 @@ public:
     AActor();
     virtual ~AActor();
 
+    std::string name;                         // unique within a world (serialization id)
+
     // The root scene component owns the actor's transform. Other components
     // attach under it (SetMesh / future attachments) to form the scene graph.
     USceneComponent      rootComponent;
@@ -30,6 +32,10 @@ public:
     void SetMesh(UMeshComponent* m);
     // Sets the physics component and wires the owner back-pointer.
     void SetPhysics(UPrimitiveComponent* p);
+
+    // ---- serialization contract (P2) ----
+    virtual const char* TypeName() const { return "Actor"; }
+    virtual void        Serialize(FArchive& ar);   // name + root transform
 
     virtual void Tick(float DeltaTime);
 

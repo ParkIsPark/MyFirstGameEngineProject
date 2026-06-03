@@ -1,7 +1,10 @@
 #include "USceneComponent.h"
+#include "FArchive.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
+
+REGISTER_COMPONENT("Scene", USceneComponent)
 
 long USceneComponent::s_recomputeCount = 0;
 
@@ -77,4 +80,13 @@ void USceneComponent::AttachTo(USceneComponent* parent)
 void USceneComponent::Detach()
 {
     AttachTo(nullptr);
+}
+
+void USceneComponent::Serialize(FArchive& ar)
+{
+    ar.Field("Name",  name);
+    ar.Field("Loc",   relLocation);
+    ar.Field("Rot",   relRotation);
+    ar.Field("Scale", relScale);
+    if (ar.IsLoading()) MarkDirty();
 }
