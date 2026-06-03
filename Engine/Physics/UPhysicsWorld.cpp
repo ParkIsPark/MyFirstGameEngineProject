@@ -118,8 +118,8 @@ void UPhysicsWorld::applyImpulse(AActor* a, AActor* b,
     if (total < 1e-6f) return;
 
     // Position correction (mass-weighted)
-    if (aD) a->position += normal * depth * (bD ? massB / total : 1.0f);
-    if (bD) b->position -= normal * depth * (aD ? massA / total : 1.0f);
+    if (aD) a->SetActorLocation(a->GetActorLocation() + normal * depth * (bD ? massB / total : 1.0f));
+    if (bD) b->SetActorLocation(b->GetActorLocation() - normal * depth * (aD ? massA / total : 1.0f));
 
     // isGrounded: if normal has significant upward component, the actor below is
     // being pushed down while the one above lands.  The actor pushed upward is landing.
@@ -147,7 +147,7 @@ void UPhysicsWorld::applyImpulse(AActor* a, AActor* b,
 void UPhysicsWorld::resolveAABBvsAABB(AActor* a, const glm::vec3& halfA,
                                        AActor* b, const glm::vec3& halfB)
 {
-    glm::vec3 d    = a->position - b->position;
+    glm::vec3 d    = a->GetActorLocation() - b->GetActorLocation();
     glm::vec3 over = (halfA + halfB) - glm::abs(d);
 
     if (over.x <= 0.0f || over.y <= 0.0f || over.z <= 0.0f) return;
@@ -202,7 +202,7 @@ void UPhysicsWorld::resolveSphereAABB(AActor* sphere, float radius,
                                        AActor* cube,   const glm::vec3& half)
 {
     // Closest point on AABB to sphere center (in world space)
-    glm::vec3 local   = sphere->position - cube->position;
+    glm::vec3 local   = sphere->GetActorLocation() - cube->GetActorLocation();
     glm::vec3 closest = glm::clamp(local, -half, half);
     glm::vec3 diff    = local - closest;
     float     distSq  = glm::dot(diff, diff);
@@ -253,10 +253,10 @@ void UPhysicsWorld::resolveSphereAABB(AActor* sphere, float radius,
 // ---------------------------------------------------------------------------
 void UPhysicsWorld::resolveSphereFloor(AActor* sphere, float radius, float floorY)
 {
-    float bottom = sphere->position.y - radius;
+    float bottom = sphere->GetActorLocation().y - radius;
     if (bottom >= floorY) return;
 
-    sphere->position.y = floorY + radius;
+    { glm::vec3 p = sphere->GetActorLocation(); p.y = floorY + radius; sphere->SetActorLocation(p); }
 
     UPrimitiveComponent* phys = sphere->physics;
     if (!phys) return;
@@ -271,10 +271,10 @@ void UPhysicsWorld::resolveSphereFloor(AActor* sphere, float radius, float floor
 
 void UPhysicsWorld::resolveCubeFloor(AActor* cube, const glm::vec3& half, float floorY)
 {
-    float bottom = cube->position.y - half.y;
+    float bottom = cube->GetActorLocation().y - half.y;
     if (bottom >= floorY) return;
 
-    cube->position.y = floorY + half.y;
+    { glm::vec3 p = cube->GetActorLocation(); p.y = floorY + half.y; cube->SetActorLocation(p); }
 
     UPrimitiveComponent* phys = cube->physics;
     if (!phys) return;
@@ -292,7 +292,7 @@ void UPhysicsWorld::resolveCubeFloor(AActor* cube, const glm::vec3& half, float 
 // ---------------------------------------------------------------------------
 void UPhysicsWorld::resolveSphereSphere(AActor* a, float ra, AActor* b, float rb)
 {
-    glm::vec3 diff = a->position - b->position;
+    glm::vec3 diff = a->GetActorLocation() - b->GetActorLocation();
     float dist     = glm::length(diff);
     float minDist  = ra + rb;
 

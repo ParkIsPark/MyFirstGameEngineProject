@@ -53,21 +53,21 @@ void EditorEngine::BuildEditorWorld()
     auto spawnMesh = [&](const char* name, UMesh* mesh, glm::vec3 pos, glm::vec3 kd)
     {
         AActor* a = new AActor();
-        a->position = pos;
+        a->SetActorLocation(pos);
         UMeshComponent* mc = new UMeshComponent();
         mc->mesh = mesh;
         mc->hasMaterialOverride = true;
         mc->materialOverride.kd        = kd;
         mc->materialOverride.ks        = glm::vec3(0.4f);
         mc->materialOverride.shininess = 32.0f;
-        a->mesh = mc;
+        a->SetMesh(mc);
         editorWorld_.Spawn(a);
         actorNames_.push_back(name);
     };
     auto spawnEmpty = [&](const char* name, glm::vec3 pos)
     {
         AActor* a = new AActor();
-        a->position = pos;
+        a->SetActorLocation(pos);
         editorWorld_.Spawn(a);
         actorNames_.push_back(name);
     };
@@ -78,7 +78,7 @@ void EditorEngine::BuildEditorWorld()
     // A real light actor (ALight owns a LightComponent) -- inspectable in Details.
     {
         ALight* light = new ALight(new PointLight(glm::vec3(5, 5, -3), glm::vec3(1.0f), glm::vec3(1.0f)));
-        light->position = glm::vec3(5.0f, 5.0f, -3.0f);
+        light->SetActorLocation(glm::vec3(5.0f, 5.0f, -3.0f));
         editorWorld_.Spawn(light);
         actorNames_.push_back("PointLight");
     }
@@ -108,15 +108,14 @@ UWorld* EditorEngine::CopyWorld(UWorld& src)
     for (AActor* sa : src.GetScene().Actors)
     {
         AActor* da = new AActor();
-        da->position = sa->position;
-        da->rotation = sa->rotation;
-        da->scale    = sa->scale;
+        da->SetActorLocation(sa->GetActorLocation());
+        da->SetActorRotation(sa->GetActorRotation());
+        da->SetActorScale   (sa->GetActorScale());
 
         if (sa->mesh)
         {
-            UMeshComponent* mc = new UMeshComponent();
-            *mc = *sa->mesh;                 // shares the UMesh asset; copies override + rel xform
-            da->mesh = mc;
+            UMeshComponent* mc = new UMeshComponent(*sa->mesh); // shares UMesh asset; copies override + rel xform
+            da->SetMesh(mc);                                    // re-parents under da's root
         }
         if (sa->physics)
         {
@@ -207,7 +206,7 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
             if (mc->mesh)
             {
                 meshes.push_back(mc->mesh);
-                models.push_back(mc->GetWorldMatrix(*a));
+                models.push_back(mc->GetWorldMatrix());
                 albedos.push_back(mc->hasMaterialOverride ? mc->materialOverride.kd : mc->mesh->material.kd);
             }
         if (ALight* L = dynamic_cast<ALight*>(a))
@@ -494,9 +493,12 @@ void EditorEngine::DrawDetails()
 
     ImGui::BeginDisabled(playing_);          // properties are read-only during PIE
     ImGui::SeparatorText("Transform");
-    ImGui::DragFloat3("Position", &a->position.x, 0.05f);
-    ImGui::DragFloat3("Rotation", &a->rotation.x, 1.0f);
-    ImGui::DragFloat3("Scale",    &a->scale.x,    0.05f, 0.01f, 100.0f);
+    glm::vec3 loc = a->GetActorLocation();
+    if (ImGui::DragFloat3("Position", &loc.x, 0.05f))            a->SetActorLocation(loc);
+    glm::vec3 rot = a->GetActorRotation();
+    if (ImGui::DragFloat3("Rotation", &rot.x, 1.0f))            a->SetActorRotation(rot);
+    glm::vec3 scl = a->GetActorScale();
+    if (ImGui::DragFloat3("Scale",    &scl.x, 0.05f, 0.01f, 100.0f)) a->SetActorScale(scl);
 
     // ---- UMeshComponent ----
     if (a->mesh && a->mesh->mesh)
@@ -671,7 +673,7 @@ void EditorEngine::PickActor(int w, int h)
         UMeshComponent* mc = actors[i]->mesh;
         if (!mc || !mc->mesh) continue;
         float t, u, v; int tri;
-        if (mc->intersect(ray, *actors[i], t, tri, u, v) && t < best) { best = t; bestIdx = i; }
+        if (mc->intersect(ray, t, tri, u, v) && t < best) { best = t; bestIdx = i; }
     }
     if (bestIdx >= 0) selected_ = bestIdx;
 }

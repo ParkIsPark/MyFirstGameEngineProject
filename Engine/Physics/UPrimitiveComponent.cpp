@@ -14,8 +14,8 @@ void UPrimitiveComponent::Integrate(float dt)
     if (IsStatic() || !owner) return;
 
     glm::vec3 acceleration = force / mass;
-    velocity        += acceleration * dt;
-    owner->position += velocity * dt;
+    velocity += acceleration * dt;
+    owner->SetActorLocation(owner->GetActorLocation() + velocity * dt);
 }
 
 void UPrimitiveComponent::ClearForces()

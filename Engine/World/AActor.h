@@ -1,5 +1,6 @@
 #pragma once
 #include <glm/glm.hpp>
+#include "USceneComponent.h"
 
 class UPrimitiveComponent;
 class UMeshComponent;
@@ -8,23 +9,31 @@ class AActor
 {
 public:
     AActor();
-    ~AActor();
+    virtual ~AActor();
 
-    glm::vec3        position = glm::vec3(0.0f);
-    glm::vec3        rotation = glm::vec3(0.0f); // Euler XYZ (degrees)
-    glm::vec3        scale    = glm::vec3(1.0f);
-    UMeshComponent*  mesh     = nullptr;         // mesh-first render instance
-    UPrimitiveComponent* physics = nullptr;      // root primitive: shape (sphere/box) + rigid body
+    // The root scene component owns the actor's transform. Other components
+    // attach under it (SetMesh / future attachments) to form the scene graph.
+    USceneComponent      rootComponent;
+    UMeshComponent*      mesh    = nullptr;   // mesh instance, attached to rootComponent
+    UPrimitiveComponent* physics = nullptr;   // root primitive: shape + rigid body
 
-    glm::vec3 GetPosition() const { return position; }
+    // ---- transform accessors (delegate to rootComponent; all writes MarkDirty) ----
+    glm::vec3 GetActorLocation() const { return rootComponent.GetWorldLocation(); }
+    void      SetActorLocation(const glm::vec3& v) { rootComponent.relLocation = v; rootComponent.MarkDirty(); }
+    glm::vec3 GetActorRotation() const { return rootComponent.relRotation; }
+    void      SetActorRotation(const glm::vec3& v) { rootComponent.relRotation = v; rootComponent.MarkDirty(); }
+    glm::vec3 GetActorScale()    const { return rootComponent.relScale; }
+    void      SetActorScale(const glm::vec3& v)    { rootComponent.relScale = v; rootComponent.MarkDirty(); }
+    glm::vec3 GetPosition()      const { return GetActorLocation(); } // back-compat alias
 
-    // Sets physics component and wires the owner back-pointer.
+    // Sets the mesh instance and attaches it under the root component.
+    void SetMesh(UMeshComponent* m);
+    // Sets the physics component and wires the owner back-pointer.
     void SetPhysics(UPrimitiveComponent* p);
 
     virtual void Tick(float DeltaTime);
 
-    // Public lifecycle drivers so UWorld can dispatch the protected hooks
-    // (BeginPlay/EndPlay stay protected as the override points).
+    // Public lifecycle drivers so UWorld can dispatch the protected hooks.
     void DispatchBeginPlay() { BeginPlay(); }
     void DispatchEndPlay()   { EndPlay(); }
 

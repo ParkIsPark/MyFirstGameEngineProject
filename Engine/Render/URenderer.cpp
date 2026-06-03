@@ -143,7 +143,7 @@ void URenderer::GBufferWorld(UScene& scene, const ACamera& cam, int nx, int ny)
         const glm::vec3 albedo = comp->hasMaterialOverride
             ? comp->materialOverride.kd : comp->mesh->material.kd;
 
-        const FTransform xf = ActorTransform(comp->GetWorldMatrix(*actor), cam, nx, ny);
+        const FTransform xf = ActorTransform(comp->GetWorldMatrix(), cam, nx, ny);
         raster_.DrawMeshGBuffer(*comp->mesh, xf, albedo, gbuffer_);
     }
 }

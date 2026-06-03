@@ -63,6 +63,7 @@
     <ClCompile Include="Engine\Core\UPostProcessFilter.cpp"><Filter>Engine\Core</Filter></ClCompile>
     <!-- World -->
     <ClCompile Include="Engine\World\AActor.cpp"><Filter>Engine\World</Filter></ClCompile>
+    <ClCompile Include="Engine\World\USceneComponent.cpp"><Filter>Engine\World</Filter></ClCompile>
     <ClCompile Include="Engine\World\ACamera.cpp"><Filter>Engine\World</Filter></ClCompile>
     <ClCompile Include="Engine\World\UWorld.cpp"><Filter>Engine\World</Filter></ClCompile>
     <!-- Mesh -->
@@ -115,6 +116,7 @@
     <ClInclude Include="Engine\Core\UPostProcessFilter.h"><Filter>Engine\Core</Filter></ClInclude>
     <!-- World -->
     <ClInclude Include="Engine\World\AActor.h"><Filter>Engine\World</Filter></ClInclude>
+    <ClInclude Include="Engine\World\USceneComponent.h"><Filter>Engine\World</Filter></ClInclude>
     <ClInclude Include="Engine\World\ACamera.h"><Filter>Engine\World</Filter></ClInclude>
     <ClInclude Include="Engine\World\UWorld.h"><Filter>Engine\World</Filter></ClInclude>
     <!-- Mesh -->
