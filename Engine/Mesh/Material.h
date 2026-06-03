@@ -1,6 +1,11 @@
 #pragma once
 #include <glm/glm.hpp>
 #include <vector>
+#include <string>
+
+// UV addressing for the diffuse texture. GL sampler wrap is texture-wide, so
+// per-material wrap is applied in SampleDiffuse / the shader (P3 decision).
+enum class EWrapMode { Repeat, Clamp };
 
 // ---------------------------------------------------------------------------
 // Phong/Blinn-Phong material coefficients.  Owned by UMesh (per-asset default)
@@ -24,6 +29,15 @@ struct Material
     int texHeight   = 0;
     int texChannels = 0;
 
-    // Bidirectional serialization of the numeric Blinn-Phong fields (P2).
+    // ---- diffuse texture (P3) ----
+    std::string diffuseTexPath;                 // Content-relative; empty = untextured
+    EWrapMode   wrapMode = EWrapMode::Repeat;   // per-material UV addressing
+    glm::vec2   uvTiling = glm::vec2(1.0f);     // UV scale before wrap
+
+    // Bidirectional serialization (numeric Blinn-Phong + diffuse-texture fields).
     void Serialize(class FArchive& ar);
+
+    // CPU diffuse sample at uv (applies uvTiling + wrapMode, sRGB->linear).
+    // Returns kd when there is no CPU texture data.
+    glm::vec3 SampleDiffuse(glm::vec2 uv) const;
 };

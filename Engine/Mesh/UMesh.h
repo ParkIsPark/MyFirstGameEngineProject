@@ -58,4 +58,25 @@ public:
     // Interpolated attributes at a (triangle, barycentric) location.
     glm::vec3 getNormalAt(int triId, float u, float v) const;
     glm::vec2 getUVAt(int triId, float u, float v) const;
+
+    // -------- material slots (P3) --------
+    // `material` above stays the single/default material (== slot 0). For
+    // multi-material meshes, `materials` holds the slots and `triMaterial`
+    // maps each triangle to a slot. Single-material meshes leave both empty
+    // and keep using `material` (backward compatible).
+    std::vector<Material> materials;     // slots (empty -> use `material`)
+    std::vector<uint32_t> triMaterial;   // per-triangle slot index (empty -> slot 0)
+
+    const Material& materialForTri(int tri) const;
+
+    // -------- .mesh binary asset I/O (P3) --------
+    // Geometry + material slots (texture stored as path, not pixels). BVH is
+    // NOT stored; rebuild via BuildBVH() after load. Robust: returns false /
+    // nullptr on bad file, never throws.
+    bool          SaveBinary(const char* path) const;
+    static UMesh* LoadBinary(const char* path);
+
+    // Merge per-material parts (e.g. UObjImporter::LoadMulti) into one mesh
+    // with one slot per part + per-triangle slot indices. Caller owns result.
+    static UMesh* MergeWithSlots(const std::vector<UMesh*>& parts);
 };

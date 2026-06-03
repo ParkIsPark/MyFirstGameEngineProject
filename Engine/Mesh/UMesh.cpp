@@ -6,6 +6,9 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 #include <limits>
+#include <fstream>
+#include <cstdint>
+#include <cstring>
 
 UMesh::UMesh()  = default;          // out-of-line: BVH is complete here
 UMesh::~UMesh() = default;
@@ -223,4 +226,123 @@ glm::vec2 UMesh::getUVAt(int triId, float u, float v) const
     const glm::vec2& t1 = vertices[indices[3 * triId + 1]].uv;
     const glm::vec2& t2 = vertices[indices[3 * triId + 2]].uv;
     return (1.0f - u - v) * t0 + u * t1 + v * t2;
+}
+
+// ---------------------------------------------------------------------------
+// Material slots
+// ---------------------------------------------------------------------------
+const Material& UMesh::materialForTri(int tri) const
+{
+    if (materials.empty()) return material;
+    int idx = (tri >= 0 && tri < (int)triMaterial.size()) ? (int)triMaterial[tri] : 0;
+    if (idx < 0 || idx >= (int)materials.size()) idx = 0;
+    return materials[idx];
+}
+
+UMesh* UMesh::MergeWithSlots(const std::vector<UMesh*>& parts)
+{
+    UMesh* m = new UMesh();
+    for (size_t p = 0; p < parts.size(); ++p)
+    {
+        const UMesh* src = parts[p];
+        if (!src) continue;
+        const uint32_t base = (uint32_t)m->vertices.size();
+        for (const Vertex& v : src->vertices) m->vertices.push_back(v);
+        for (uint32_t i : src->indices)       m->indices.push_back(i + base);
+        m->materials.push_back(src->material);
+        const int tris = src->triangleCount();
+        for (int t = 0; t < tris; ++t) m->triMaterial.push_back((uint32_t)m->materials.size() - 1);
+    }
+    if (!m->materials.empty()) m->material = m->materials[0];
+    return m;
+}
+
+// ---------------------------------------------------------------------------
+// .mesh binary I/O   (magic 'UMSH', version 1)
+// ---------------------------------------------------------------------------
+namespace
+{
+    template <class T> void wr(std::ostream& o, const T& v) { o.write(reinterpret_cast<const char*>(&v), sizeof(T)); }
+    template <class T> bool rd(std::istream& i, T& v)       { return (bool)i.read(reinterpret_cast<char*>(&v), sizeof(T)); }
+    void wrStr(std::ostream& o, const std::string& s) { uint32_t n = (uint32_t)s.size(); wr(o, n); if (n) o.write(s.data(), n); }
+    bool rdStr(std::istream& i, std::string& s)
+    {
+        uint32_t n = 0; if (!rd(i, n)) return false;
+        if (n > (1u << 28)) return false;            // sanity guard
+        s.resize(n); if (n) i.read(&s[0], n); return (bool)i;
+    }
+    void wrMat(std::ostream& o, const Material& m)
+    {
+        wr(o, m.ka); wr(o, m.kd); wr(o, m.ks); wr(o, m.shininess);
+        wr(o, m.km); wr(o, m.emissive);
+        wrStr(o, m.diffuseTexPath);
+        int32_t wm = (int32_t)m.wrapMode; wr(o, wm);
+        wr(o, m.uvTiling);
+    }
+    bool rdMat(std::istream& i, Material& m)
+    {
+        if (!rd(i, m.ka) || !rd(i, m.kd) || !rd(i, m.ks) || !rd(i, m.shininess)) return false;
+        if (!rd(i, m.km) || !rd(i, m.emissive)) return false;
+        if (!rdStr(i, m.diffuseTexPath)) return false;
+        int32_t wm = 0; if (!rd(i, wm)) return false; m.wrapMode = (EWrapMode)wm;
+        if (!rd(i, m.uvTiling)) return false;
+        return true;
+    }
+}
+
+bool UMesh::SaveBinary(const char* path) const
+{
+    std::ofstream f(path, std::ios::binary);
+    if (!f) return false;
+
+    f.write("UMSH", 4);
+    uint32_t version = 1; wr(f, version);
+
+    uint32_t vn = (uint32_t)vertices.size(); wr(f, vn);
+    for (const Vertex& v : vertices) { wr(f, v.position); wr(f, v.normal); wr(f, v.uv); }
+
+    uint32_t in = (uint32_t)indices.size(); wr(f, in);
+    for (uint32_t idx : indices) wr(f, idx);
+
+    // Normalize to slot representation: at least one slot.
+    const std::vector<Material> slots = materials.empty() ? std::vector<Material>{ material } : materials;
+    uint32_t sn = (uint32_t)slots.size(); wr(f, sn);
+    for (const Material& m : slots) wrMat(f, m);
+
+    uint32_t tn = (uint32_t)triMaterial.size(); wr(f, tn);
+    for (uint32_t t : triMaterial) wr(f, t);
+
+    return (bool)f;
+}
+
+UMesh* UMesh::LoadBinary(const char* path)
+{
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return nullptr;
+
+    char magic[4] = {};
+    if (!f.read(magic, 4) || std::memcmp(magic, "UMSH", 4) != 0) return nullptr;
+    uint32_t version = 0; if (!rd(f, version) || version != 1) return nullptr;
+
+    UMesh* m = new UMesh();
+
+    uint32_t vn = 0; if (!rd(f, vn) || vn > (1u << 27)) { delete m; return nullptr; }
+    m->vertices.resize(vn);
+    for (uint32_t i = 0; i < vn; ++i)
+    { Vertex& v = m->vertices[i]; if (!rd(f, v.position) || !rd(f, v.normal) || !rd(f, v.uv)) { delete m; return nullptr; } }
+
+    uint32_t in = 0; if (!rd(f, in) || in > (1u << 29)) { delete m; return nullptr; }
+    m->indices.resize(in);
+    for (uint32_t i = 0; i < in; ++i) if (!rd(f, m->indices[i])) { delete m; return nullptr; }
+
+    uint32_t sn = 0; if (!rd(f, sn) || sn > (1u << 20)) { delete m; return nullptr; }
+    m->materials.resize(sn);
+    for (uint32_t i = 0; i < sn; ++i) if (!rdMat(f, m->materials[i])) { delete m; return nullptr; }
+    if (!m->materials.empty()) m->material = m->materials[0];
+
+    uint32_t tn = 0; if (!rd(f, tn) || tn > (1u << 29)) { delete m; return nullptr; }
+    m->triMaterial.resize(tn);
+    for (uint32_t i = 0; i < tn; ++i) if (!rd(f, m->triMaterial[i])) { delete m; return nullptr; }
+
+    return m;
 }

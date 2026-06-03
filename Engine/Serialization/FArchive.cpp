@@ -26,6 +26,7 @@ static std::string trim(const std::string& s)
 void FSaveArchive::Field(const char* key, float& v)       { out_ += key; out_ += " = " + f2s(v) + "\n"; }
 void FSaveArchive::Field(const char* key, int& v)         { out_ += key; out_ += " = " + std::to_string(v) + "\n"; }
 void FSaveArchive::Field(const char* key, bool& v)        { out_ += key; out_ += " = "; out_ += (v ? "1" : "0"); out_ += "\n"; }
+void FSaveArchive::Field(const char* key, glm::vec2& v)   { out_ += key; out_ += " = " + f2s(v.x) + " " + f2s(v.y) + "\n"; }
 void FSaveArchive::Field(const char* key, glm::vec3& v)   { out_ += key; out_ += " = " + v2s(v) + "\n"; }
 void FSaveArchive::Field(const char* key, std::string& v) { out_ += key; out_ += " = " + v + "\n"; }
 
@@ -63,6 +64,15 @@ void FLoadArchive::Field(const char* key, bool& v)
     if (it == kv_.end()) return;
     const std::string& s = it->second;
     v = (s == "1" || s == "true" || s == "True");
+}
+void FLoadArchive::Field(const char* key, glm::vec2& v)
+{
+    auto it = kv_.find(key);
+    if (it == kv_.end()) return;
+    std::istringstream is(it->second);
+    glm::vec2 t = v;
+    is >> t.x >> t.y;
+    v = t;
 }
 void FLoadArchive::Field(const char* key, glm::vec3& v)
 {

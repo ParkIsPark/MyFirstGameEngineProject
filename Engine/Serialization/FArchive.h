@@ -24,6 +24,7 @@ public:
     virtual void Field(const char* key, float& v)       = 0;
     virtual void Field(const char* key, int& v)         = 0;
     virtual void Field(const char* key, bool& v)        = 0;
+    virtual void Field(const char* key, glm::vec2& v)   = 0;
     virtual void Field(const char* key, glm::vec3& v)   = 0;
     virtual void Field(const char* key, std::string& v) = 0;
 
@@ -40,6 +41,7 @@ public:
     void Field(const char* key, float& v)       override;
     void Field(const char* key, int& v)         override;
     void Field(const char* key, bool& v)        override;
+    void Field(const char* key, glm::vec2& v)   override;
     void Field(const char* key, glm::vec3& v)   override;
     void Field(const char* key, std::string& v) override;
 
@@ -58,6 +60,7 @@ public:
     void Field(const char* key, float& v)       override;
     void Field(const char* key, int& v)         override;
     void Field(const char* key, bool& v)        override;
+    void Field(const char* key, glm::vec2& v)   override;
     void Field(const char* key, glm::vec3& v)   override;
     void Field(const char* key, std::string& v) override;
 
