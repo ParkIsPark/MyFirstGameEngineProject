@@ -23,13 +23,18 @@
 #include "ALight.h"
 #include "PointLight.h"
 #include "LightComponent.h"
+#include "FWorldSerializer.h"
+#include "FRenderShowFlag.h"
 
 #include <cstdio>
 #include <cctype>
 #include <filesystem>
 #include <algorithm>
 
-namespace { const char* kModes[] = { "Rasterizer", "GPU RT", "Hybrid" }; }
+namespace {
+    const char* kModes[]   = { "Rasterizer", "GPU RT", "Hybrid" };
+    const char* kShading[] = { "Flat", "Gouraud", "Phong" };
+}
 
 EditorEngine::~EditorEngine()
 {
@@ -100,6 +105,18 @@ void EditorEngine::BuildEditorWorld()
     }
 
     selected_ = 0;
+}
+
+void EditorEngine::SaveWorld()
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::create_directories("Content", ec);
+    const std::string path = "Content/" + worldName_ + ".world";
+    FWorldSerializer::SaveToFile(editorWorld_, path.c_str());
+    content_.clear();          // refresh so the new .world shows in the browser
+    ScanContent();
+    std::printf("[Editor] Saved %s\n", path.c_str());
 }
 
 UWorld* EditorEngine::CopyWorld(UWorld& src)
@@ -391,7 +408,7 @@ void EditorEngine::DrawMenuBar()
     if (ImGui::BeginMenu("File"))
     {
         ImGui::MenuItem("New World");
-        ImGui::MenuItem("Save World");
+        if (ImGui::MenuItem("Save World", "Ctrl+S")) SaveWorld();
         ImGui::Separator();
         if (ImGui::MenuItem("Quit")) glfwSetWindowShouldClose(window_, GL_TRUE);
         ImGui::EndMenu();
@@ -459,6 +476,14 @@ void EditorEngine::DrawToolbar()
     ImGui::SameLine(0, 16);
     ImGui::TextDisabled("Render Mode"); ImGui::SameLine();
     for (int i = 0; i < 3; ++i) { if (i) ImGui::SameLine(); if (ImGui::RadioButton(kModes[i], renderMode_ == i)) renderMode_ = i; }
+
+    // Shading model (HW6 Q1-Q3) drives the CPU raster preview (editor + PIE raster).
+    ImGui::SameLine(0, 16);
+    ImGui::TextDisabled("Shading"); ImGui::SameLine();
+    int& sm = ActiveWorld().GetScene().shadingModel;     // 0=Flat 1=Gouraud 2=Phong
+    for (int i = 0; i < 3; ++i) { if (i) ImGui::SameLine(); if (ImGui::RadioButton(kShading[i], sm == i)) sm = i; }
+    ImGui::SameLine(0, 12); ImGui::Checkbox("Depth", &depthView_);
+
     const float fps = ImGui::GetIO().Framerate;
     ImGui::SameLine(ImGui::GetWindowWidth() - 210);
     ImGui::Text("FPS %.0f  (%.2f ms)", fps, 1000.0f / fps);
@@ -573,8 +598,11 @@ void EditorEngine::EnsureViewportTex(int w, int h)
 
 void EditorEngine::DrawViewport()
 {
-    ImGui::TextDisabled("[%s] %s   (RMB-drag + WASD/QE to fly, LMB to pick)",
-                        kModes[renderMode_], playing_ ? "Playing (PIE)" : "Editor World");
+    const int hintMode = playing_ ? renderMode_ : 0;     // editor preview is always raster
+    ImGui::TextDisabled("[%s%s%s] %s   (RMB-drag + WASD/QE to fly, LMB to pick)",
+                        kModes[hintMode],
+                        hintMode == 0 ? " / " : "", hintMode == 0 ? kShading[ActiveWorld().GetScene().shadingModel] : "",
+                        playing_ ? "Playing (PIE)" : "Editor World");
     ImGui::Separator();
 
     const ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -597,7 +625,10 @@ void EditorEngine::DrawViewport()
     {
         UScene& scene = world.GetScene();
         scene.width = w; scene.height = h;
-        renderer_.Render(world, ERenderMode::RasterOnly);
+        FRenderShowFlag flag;
+        flag.shading   = (EShadingModel)scene.shadingModel;   // Flat/Gouraud/Phong (HW6)
+        flag.depthView = depthView_;
+        renderer_.RasterShaded(world, flag);
         if (!scene.outputImage.empty())
         {
             EnsureViewportTex(w, h);

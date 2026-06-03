@@ -34,6 +34,7 @@ protected:
 
 private:
     void BuildEditorWorld();
+    void SaveWorld();                    // editor world -> Content/<name>.world
     void OnPlay();                       // Editor -> PIE: deep-copy + BeginPlay
     void OnStop();                       // PIE -> Editor
     UWorld* CopyWorld(UWorld& src);      // deep copy (shares UMesh assets)
@@ -56,8 +57,10 @@ private:
     bool imguiReady_ = false;
     bool showDemo_   = false;
     int  renderMode_ = 0;        // 0=Rasterizer 1=GPU RT 2=Hybrid
+    bool depthView_  = false;    // CPU raster preview: grayscale depth instead of shade
     bool playing_    = false;    // Editor vs PIE (Stage 5)
     int  selected_   = -1;       // index into editorWorld_ actors
+    std::string worldName_ = "EditorWorld";   // -> Content/<worldName_>.world
 
     UWorld    editorWorld_;
     UWorld*   pieWorld_ = nullptr;      // spawned on Play (deep copy of editorWorld_)
