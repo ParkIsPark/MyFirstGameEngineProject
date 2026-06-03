@@ -15,6 +15,19 @@ class UGBuffer;
 class URasterizer
 {
 public:
+    // ---- clip / cull stage (CPU software-raster front end, page 10) ----
+    // nearClip is ACCURACY (a triangle crossing the camera plane has a vertex
+    // with w >= 0 -> the perspective divide flips it; clip in clip space first).
+    // frustumCull / backfaceCull are PERFORMANCE only -- they must not change the
+    // rendered image (depth handles occlusion).
+    bool nearClip     = true;
+    bool frustumCull  = true;
+    bool backfaceCull = false;
+
+    struct CullStats { int trianglesIn = 0, frustumCulled = 0, backfaceCulled = 0, rasterized = 0; };
+    mutable CullStats stats;
+    void ResetStats() const { stats = CullStats{}; }
+
     // 2D edge function (twice the signed triangle area abp). Sign = winding.
     static float EdgeFunction(const glm::vec2& a, const glm::vec2& b, const glm::vec2& p);
 

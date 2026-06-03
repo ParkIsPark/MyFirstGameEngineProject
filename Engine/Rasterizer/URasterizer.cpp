@@ -7,6 +7,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 float URasterizer::EdgeFunction(const glm::vec2& a, const glm::vec2& b, const glm::vec2& p)
 {
@@ -84,38 +85,74 @@ void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
     DrawMeshGBuffer(mesh, xf, mesh.material.kd, gb);
 }
 
+namespace
+{
+    // A vertex carried through clip space with the attributes we interpolate.
+    struct ClipV { glm::vec4 clip; glm::vec3 wp; glm::vec3 wn; };
+
+    ClipV lerpClip(const ClipV& A, const ClipV& B, float t)
+    {
+        return ClipV{ A.clip + t * (B.clip - A.clip),
+                      A.wp   + t * (B.wp   - A.wp),
+                      A.wn   + t * (B.wn   - A.wn) };
+    }
+
+    // Inside (visible side) when the vertex is in FRONT of the camera plane,
+    // i.e. clip.w (= z_eye for this FCG projection) is sufficiently negative.
+    // Crossing this plane is exactly where the perspective divide flips, so we
+    // clip here BEFORE the divide.
+    constexpr float NEAR_EPS = 1e-4f;
+    inline float frontDist(const glm::vec4& c) { return -NEAR_EPS - c.w; }
+
+    // Sutherland-Hodgman against the single near/front plane. poly may grow to 4.
+    void clipNear(const ClipV in[3], std::vector<ClipV>& out)
+    {
+        out.clear();
+        for (int i = 0; i < 3; ++i)
+        {
+            const ClipV& A = in[i];
+            const ClipV& B = in[(i + 1) % 3];
+            const float dA = frontDist(A.clip), dB = frontDist(B.clip);
+            const bool inA = dA > 0.0f, inB = dB > 0.0f;
+            if (inA) out.push_back(A);
+            if (inA != inB) out.push_back(lerpClip(A, B, dA / (dA - dB)));
+        }
+    }
+
+    // Cohen-Sutherland-style trivial reject: all three vertices outside the same
+    // clip-volume plane (handles the negative-w convention via abs(w)).
+    bool frustumReject(const glm::vec4& a, const glm::vec4& b, const glm::vec4& c)
+    {
+        auto out = [](const glm::vec4& p) {
+            const float w = std::fabs(p.w);
+            int o = 0;
+            if (p.x >  w) o |= 1;  if (p.x < -w) o |= 2;
+            if (p.y >  w) o |= 4;  if (p.y < -w) o |= 8;
+            return o;
+        };
+        return (out(a) & out(b) & out(c)) != 0;
+    }
+}
+
 void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
                                   const glm::vec3& albedo, UGBuffer& gb) const
 {
     const glm::mat3 nrmM = glm::inverseTranspose(glm::mat3(xf.model));
     const int nTri = mesh.triangleCount();
 
-    for (int tri = 0; tri < nTri; ++tri)
+    // Rasterize one screen-space sub-triangle (with its clip-space attributes).
+    auto rasterTri = [&](const ClipV& A, const ClipV& B, const ClipV& C)
     {
-        const Vertex& a = mesh.vertices[mesh.indices[3 * tri + 0]];
-        const Vertex& b = mesh.vertices[mesh.indices[3 * tri + 1]];
-        const Vertex& c = mesh.vertices[mesh.indices[3 * tri + 2]];
-
-        // clip -> screen (keep clip.w for perspective-correct interpolation)
-        const glm::vec4 c0 = xf.ToClip(a.position);
-        const glm::vec4 c1 = xf.ToClip(b.position);
-        const glm::vec4 c2 = xf.ToClip(c.position);
-        const glm::vec3 s0 = xf.ToScreen(c0);
-        const glm::vec3 s1 = xf.ToScreen(c1);
-        const glm::vec3 s2 = xf.ToScreen(c2);
-        const float iw0 = 1.0f / c0.w, iw1 = 1.0f / c1.w, iw2 = 1.0f / c2.w;
-
-        // world-space attributes at the vertices
-        const glm::vec3 wp0 = glm::vec3(xf.model * glm::vec4(a.position, 1.0f));
-        const glm::vec3 wp1 = glm::vec3(xf.model * glm::vec4(b.position, 1.0f));
-        const glm::vec3 wp2 = glm::vec3(xf.model * glm::vec4(c.position, 1.0f));
-        const glm::vec3 wn0 = nrmM * a.normal;
-        const glm::vec3 wn1 = nrmM * b.normal;
-        const glm::vec3 wn2 = nrmM * c.normal;
+        const glm::vec3 s0 = xf.ToScreen(A.clip);
+        const glm::vec3 s1 = xf.ToScreen(B.clip);
+        const glm::vec3 s2 = xf.ToScreen(C.clip);
+        const float iw0 = 1.0f / A.clip.w, iw1 = 1.0f / B.clip.w, iw2 = 1.0f / C.clip.w;
 
         const glm::vec2 p0(s0.x, s0.y), p1(s1.x, s1.y), p2(s2.x, s2.y);
         const float area = EdgeFunction(p0, p1, p2);
-        if (area == 0.0f) continue;
+        if (area == 0.0f) return;
+        if (backfaceCull && area < 0.0f) { ++stats.backfaceCulled; return; }
+        ++stats.rasterized;
         const float inv = 1.0f / area;
 
         int minX = static_cast<int>(std::floor(std::min({ p0.x, p1.x, p2.x })));
@@ -138,16 +175,41 @@ void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
             if (!inside) continue;
 
             const float al = w0 * inv, be = w1 * inv, ga = w2 * inv;
-            const float z  = al * s0.z + be * s1.z + ga * s2.z;        // screen-linear depth
-
-            // perspective-correct attribute interpolation (weight by 1/w)
+            const float z  = al * s0.z + be * s1.z + ga * s2.z;
             const float pw = al * iw0 + be * iw1 + ga * iw2;
-            const glm::vec3 wp =
-                (al * wp0 * iw0 + be * wp1 * iw1 + ga * wp2 * iw2) / pw;
+            const glm::vec3 wp = (al * A.wp * iw0 + be * B.wp * iw1 + ga * C.wp * iw2) / pw;
             const glm::vec3 wn = glm::normalize(
-                (al * wn0 * iw0 + be * wn1 * iw1 + ga * wn2 * iw2) / pw);
-
+                                 (al * A.wn * iw0 + be * B.wn * iw1 + ga * C.wn * iw2) / pw);
             gb.TestAndSet(x, y, z, wp, wn, albedo);
+        }
+    };
+
+    for (int tri = 0; tri < nTri; ++tri)
+    {
+        ++stats.trianglesIn;
+        const Vertex& a = mesh.vertices[mesh.indices[3 * tri + 0]];
+        const Vertex& b = mesh.vertices[mesh.indices[3 * tri + 1]];
+        const Vertex& c = mesh.vertices[mesh.indices[3 * tri + 2]];
+
+        ClipV v[3] = {
+            { xf.ToClip(a.position), glm::vec3(xf.model * glm::vec4(a.position, 1.0f)), nrmM * a.normal },
+            { xf.ToClip(b.position), glm::vec3(xf.model * glm::vec4(b.position, 1.0f)), nrmM * b.normal },
+            { xf.ToClip(c.position), glm::vec3(xf.model * glm::vec4(c.position, 1.0f)), nrmM * c.normal },
+        };
+
+        if (frustumCull && frustumReject(v[0].clip, v[1].clip, v[2].clip))
+        { ++stats.frustumCulled; continue; }
+
+        if (nearClip)
+        {
+            std::vector<ClipV> poly;
+            clipNear(v, poly);
+            for (size_t k = 1; k + 1 < poly.size(); ++k)   // fan-triangulate
+                rasterTri(poly[0], poly[k], poly[k + 1]);
+        }
+        else
+        {
+            rasterTri(v[0], v[1], v[2]);
         }
     }
 }
