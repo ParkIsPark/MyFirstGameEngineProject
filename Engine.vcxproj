@@ -166,6 +166,7 @@
     <ClInclude Include="Engine\Player\UPlayerController.h" />
     <!-- Engine: RayTracing headers -->
     <ClInclude Include="Engine\RayTracing\UMeshRayTracer.h" />
+    <ClInclude Include="Engine\RayTracing\RTShading.h" />
     <ClInclude Include="Engine\RayTracing\URay.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

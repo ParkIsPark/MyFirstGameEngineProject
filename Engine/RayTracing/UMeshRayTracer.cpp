@@ -8,6 +8,9 @@
 #include "UMesh.h"
 #include "ACamera.h"
 #include "BVH.h"
+#include "RTShading.h"     // shared lighting+shadow GLSL (same code as Hybrid)
+
+#include <string>
 
 // Triangles are passed to the shader through a *texture buffer object* (TBO,
 // core since GL 3.1 / GLSL 1.40), NOT an SSBO. SSBOs need GL 4.3, which we must
@@ -23,23 +26,32 @@ layout(location = 0) in vec2 aPos;
 void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
 )GLSL";
 
-static const char* FRAG_SRC = R"GLSL(
+// GPU ray-trace fragment shader = [preamble + uniforms + triPos accessor]
+//                                + RT_SHADING_GLSL (shared lighting/shadow)
+//                                + [closest-hit primary ray + main].
+// The triangle TBO holds 7 texels/triangle (v0,v1,v2,n0,n1,n2,albedo): primary
+// rays need normals + albedo, while the shared shadow test only reads triPos().
+static const char* FRAG_HEAD = R"GLSL(
 #version 330 core
 out vec4 FragColor;
 
 uniform vec3  uEye, uU, uV, uW;
 uniform float uL, uR, uB, uT, uD;
-uniform int   uWidth, uHeight, uNumTris;
+uniform int   uWidth, uHeight, uNumTris, uNumNodes;
 uniform vec3  uLightPos, uLightColor;
 uniform vec3  uKs;                    // specular coefficient (per-tri albedo = diffuse)
 uniform float uShininess;             // Phong exponent
 uniform samplerBuffer uTris;          // 7 texels per triangle (see C++ side)
 uniform samplerBuffer uNodes;         // BVH: 2 texels per node (bbMin|left, bbMax|count)
 uniform samplerBuffer uTriIdx;        // BVH leaf -> triangle index (R32F)
-uniform int uNumNodes;
 
 vec3 triTexel(int tri, int slot) { return texelFetch(uTris, tri * 7 + slot).xyz; }
+vec3 triPos  (int tri, int slot) { return triTexel(tri, slot); }   // shadow accessor
+)GLSL";
 
+static const char* FRAG_BODY = R"GLSL(
+// Closest-hit needs barycentrics (for normal interpolation), so it keeps its own
+// triangle test; the AABB slab + any-hit shadow come from the shared block.
 bool rayTri(vec3 ro, vec3 rd, vec3 v0, vec3 v1, vec3 v2,
             out float t, out float u, out float v) {
     vec3 e1 = v1 - v0;
@@ -55,21 +67,6 @@ bool rayTri(vec3 ro, vec3 rd, vec3 v0, vec3 v1, vec3 v2,
     t = dot(e2, q) * inv;           return t > 1e-4;
 }
 
-vec3 skyColor(vec3 rd) {
-    float k = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
-    return mix(vec3(0.10, 0.12, 0.16), vec3(0.40, 0.55, 0.80), k);
-}
-
-// Ray vs AABB slab (camera/shadow rays are ~never axis-parallel through a face).
-bool slab(vec3 ro, vec3 invD, vec3 mn, vec3 mx, float tMax) {
-    vec3 t0 = (mn - ro) * invD;
-    vec3 t1 = (mx - ro) * invD;
-    vec3 te = min(t0, t1), tx = max(t0, t1);
-    float enter = max(max(te.x, te.y), max(te.z, 0.0));
-    float exit  = min(min(tx.x, tx.y), min(tx.z, tMax));
-    return enter <= exit;
-}
-
 // Stack-based BVH closest-hit traversal (1:1 port of the CPU BVH).
 bool traceClosest(vec3 ro, vec3 rd, out float t, out int tri, out float u, out float v) {
     vec3 invD = 1.0 / rd;
@@ -79,7 +76,7 @@ bool traceClosest(vec3 ro, vec3 rd, out float t, out int tri, out float u, out f
         int ni = stack[--sp];
         vec4 a = texelFetch(uNodes, ni * 2 + 0);
         vec4 b = texelFetch(uNodes, ni * 2 + 1);
-        if (!slab(ro, invD, a.xyz, b.xyz, t)) continue;
+        if (!_slab(ro, invD, a.xyz, b.xyz, t)) continue;
         int rc = int(b.w);
         if (rc > 0) {                                   // leaf
             int start = int(a.w);
@@ -98,13 +95,6 @@ bool traceClosest(vec3 ro, vec3 rd, out float t, out int tri, out float u, out f
     return tri >= 0;
 }
 
-// Reinhard tone map + gamma: compress accumulated light instead of clipping to
-// flat white when ambient + diffuse + specular (and multiple lights) stack up.
-vec3 tonemap(vec3 c) {
-    c = c / (c + vec3(1.0));
-    return pow(c, vec3(1.0 / 2.2));
-}
-
 void main() {
     float aspect = float(uWidth) / float(uHeight);
     float su = (uL + (uR - uL) * (gl_FragCoord.x / float(uWidth))) * aspect;
@@ -112,6 +102,8 @@ void main() {
     vec3 rd = normalize(-uD * uW + su * uU + sv * uV);   // ACamera convention
     vec3 ro = uEye;
 
+    // Primary ray finds the visible surface; lighting + shadow is the SHARED
+    // ray-traced pass (identical shadeSurface() as the hybrid renderer).
     float closest; int hit; float hu, hv;
     if (!traceClosest(ro, rd, closest, hit, hu, hv)) {
         FragColor = vec4(tonemap(skyColor(rd)), 1.0); return;
@@ -124,18 +116,7 @@ void main() {
     vec3 albedo = triTexel(hit, 6);                  // per-triangle diffuse
     vec3 hitPos = ro + closest * rd;
 
-    // Blinn-Phong point light + Unreal-style sky ambient (hemisphere sky).
-    vec3 L = normalize(uLightPos - hitPos);
-    vec3 Vv = normalize(uEye - hitPos);
-    vec3 H = normalize(L + Vv);
-    float NdotL = max(dot(n, L), 0.0);
-    float NdotH = max(dot(n, H), 0.0);
-
-    vec3 ambient = albedo * skyColor(n) * 0.5;
-    vec3 diffuse = albedo * NdotL;
-    vec3 spec    = (NdotL > 0.0) ? uKs * pow(NdotH, max(uShininess, 1.0)) : vec3(0.0);
-    vec3 col = ambient + (diffuse + spec) * uLightColor;
-    FragColor = vec4(tonemap(col), 1.0);
+    FragColor = vec4(tonemap(shadeSurface(hitPos, n, albedo)), 1.0);
 }
 )GLSL";
 
@@ -152,8 +133,9 @@ static GLuint compile(GLenum type, const char* src)
 
 void UMeshRayTracer::Init()
 {
+    const std::string frag = std::string(FRAG_HEAD) + RT_SHADING_GLSL + FRAG_BODY;
     GLuint vs = compile(GL_VERTEX_SHADER,   VERT_SRC);
-    GLuint fs = compile(GL_FRAGMENT_SHADER, FRAG_SRC);
+    GLuint fs = compile(GL_FRAGMENT_SHADER, frag.c_str());
     prog_ = glCreateProgram();
     glAttachShader(prog_, vs); glAttachShader(prog_, fs);
     glLinkProgram(prog_);

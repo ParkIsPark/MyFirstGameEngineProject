@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <cctype>
 #include <filesystem>
+#include <algorithm>
 
 namespace { const char* kModes[] = { "Rasterizer", "GPU RT", "Hybrid" }; }
 
@@ -214,6 +215,19 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
             { lightPos = pl->LightPos; lightColor = pl->LightColor * pl->LightIntensity; }
     }
 
+    // Signature of the scene GEOMETRY (mesh identity + world transform + albedo).
+    // O(numMeshes), independent of resolution/camera. When it is unchanged the
+    // BVH + triangle TBOs from last frame are still valid, so we skip the rebuild.
+    size_t geomSig = 1469598103934665603ull;             // FNV-1a 64
+    {
+        auto mix = [&](const void* p, size_t n) {
+            const unsigned char* b = static_cast<const unsigned char*>(p);
+            for (size_t i = 0; i < n; ++i) { geomSig ^= b[i]; geomSig *= 1099511628211ull; }
+        };
+        for (size_t i = 0; i < meshes.size(); ++i)
+        { mix(&meshes[i], sizeof(meshes[i])); mix(&models[i], sizeof(glm::mat4)); mix(&albedos[i], sizeof(glm::vec3)); }
+    }
+
     EnsureFBO(w, h);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
     glViewport(0, 0, w, h);
@@ -222,28 +236,67 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
 
     if (mode == 1)                                   // GPU RT
     {
-        worldRT_.UploadWorld(meshes, models, albedos, lightPos, lightColor);
-        worldRT_.RenderFrame(cam, w, h);
+        if (!rtUploaded_ || geomSig != rtUploadSig_)   // skip when geometry static
+        {
+            worldRT_.UploadWorld(meshes, models, albedos, lightPos, lightColor);
+            rtUploadSig_ = geomSig; rtUploaded_ = true;
+        }
+        worldRT_.SetLight(lightPos, lightColor);     // light may move without geometry
+        worldRT_.RenderFrame(cam, w, h);             // camera/light uniforms each frame
     }
     else                                             // Hybrid: CPU G-buffer + GPU shadow
     {
         gbuf_.Init(w, h); gbuf_.Clear();
-        std::vector<glm::vec3> tris;
+
+        // Per-instance transform (camera-dependent -> rebuilt every frame).
+        std::vector<FTransform> xfs(meshes.size());
         for (size_t i = 0; i < meshes.size(); ++i)
         {
-            FTransform xf;
-            xf.model    = models[i];
-            xf.view     = FTransform::MakeView(cam);
-            xf.proj     = FTransform::MakeProjFCG(cam.l, cam.r, cam.b, cam.t, -cam.d, -1000.0f);
-            xf.viewport = FTransform::MakeViewport(w, h);
-            rast_.DrawMeshGBuffer(*meshes[i], xf, albedos[i], gbuf_);
-            const int nt = meshes[i]->triangleCount();
-            for (int t = 0; t < nt; ++t)
-                for (int k = 0; k < 3; ++k)
-                    tris.push_back(glm::vec3(models[i] * glm::vec4(meshes[i]->vertices[meshes[i]->indices[3*t+k]].position, 1.0f)));
+            xfs[i].model    = models[i];
+            xfs[i].view     = FTransform::MakeView(cam);
+            xfs[i].proj     = FTransform::MakeProjFCG(cam.l, cam.r, cam.b, cam.t, -cam.d, -1000.0f);
+            xfs[i].viewport = FTransform::MakeViewport(w, h);
         }
-        hybrid_.UploadSceneTriangles(tris);
-        hybrid_.UploadGBuffer(gbuf_);
+
+        // Shadow-ray geometry (world-space tris + BVH) depends only on geometry,
+        // so flatten + upload it only when the signature changes -- not per frame.
+        if (!hybridUploaded_ || geomSig != hybridUploadSig_)
+        {
+            std::vector<glm::vec3> tris;
+            for (size_t i = 0; i < meshes.size(); ++i)
+            {
+                const int nt = meshes[i]->triangleCount();
+                for (int t = 0; t < nt; ++t)
+                    for (int k = 0; k < 3; ++k)
+                        tris.push_back(glm::vec3(models[i] * glm::vec4(meshes[i]->vertices[meshes[i]->indices[3*t+k]].position, 1.0f)));
+            }
+            hybrid_.UploadSceneTriangles(tris);
+            hybridUploadSig_ = geomSig; hybridUploaded_ = true;
+        }
+
+        // RASTER fills the G-buffer (primary visibility), parallelized over screen
+        // tiles. Each tile owns a disjoint pixel rect, so the per-pixel depth test
+        // + write never races -- no locks needed. Triangle setup is redundant per
+        // tile but cheap next to the pixel work.
+        const int TILE = 64;
+        const int ntx  = (w + TILE - 1) / TILE;
+        const int nty  = (h + TILE - 1) / TILE;
+        const int nTiles = ntx * nty;
+        pool_.ParallelForChunks(nTiles, [&](int begin, int end)
+        {
+            for (int tile = begin; tile < end; ++tile)
+            {
+                const int tx = tile % ntx, ty = tile / ntx;
+                const int cx0 = tx * TILE, cy0 = ty * TILE;
+                const int cx1 = std::min(cx0 + TILE - 1, w - 1);
+                const int cy1 = std::min(cy0 + TILE - 1, h - 1);
+                for (size_t i = 0; i < meshes.size(); ++i)
+                    rast_.DrawMeshGBuffer(*meshes[i], xfs[i], albedos[i], gbuf_,
+                                          cx0, cy0, cx1, cy1, /*countStats=*/false);
+            }
+        });
+
+        hybrid_.UploadGBuffer(gbuf_);                // camera-dependent -> every frame
         hybrid_.Render(cam, lightPos, lightColor, w, h);
     }
 

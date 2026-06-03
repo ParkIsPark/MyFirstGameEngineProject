@@ -30,6 +30,11 @@ public:
                      const std::vector<glm::vec3>&    albedos,
                      const glm::vec3& lightPos, const glm::vec3& lightColor);
     void RenderFrame(const ACamera& cam, int width, int height) const;
+    // Update the light without re-uploading geometry (light is a per-frame
+    // uniform, not baked into the triangle buffer) -- lets callers cache the
+    // BVH/TBO upload across frames while still animating the light.
+    void SetLight(const glm::vec3& pos, const glm::vec3& color)
+    { lightPos_ = pos; lightColor_ = color; }
     void Cleanup();
     bool ready() const { return prog_ != 0; }
 

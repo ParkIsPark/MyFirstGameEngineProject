@@ -39,6 +39,9 @@ private:
     unsigned int prog_ = 0, vao_ = 0, vbo_ = 0;
     unsigned int texWP_ = 0, texN_ = 0, texAlb_ = 0, texDepth_ = 0;
     unsigned int tbo_ = 0, triTex_ = 0;
-    int numTris_ = 0;
+    unsigned int nodeTbo_ = 0, nodeTex_ = 0;   // BVH nodes
+    unsigned int idxTbo_  = 0, idxTex_  = 0;   // BVH leaf -> triangle index
+    int numTris_  = 0;
+    int numNodes_ = 0;
     int gw_ = 0, gh_ = 0;
 };

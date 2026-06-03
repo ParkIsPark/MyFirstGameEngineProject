@@ -6,6 +6,7 @@
 #include "UHybridPass.h"
 #include "UGBuffer.h"
 #include "URasterizer.h"
+#include "ThreadPool.h"
 
 #include <vector>
 #include <string>
@@ -78,6 +79,15 @@ private:
     UHybridPass    hybrid_;      // Hybrid play mode (G-buffer + shadow)
     URasterizer    rast_;        // builds the hybrid G-buffer
     UGBuffer       gbuf_;
+    ThreadPool     pool_;        // tile-parallel G-buffer fill (hybrid mode)
+
+    // Geometry-upload cache. The BVH + triangle TBOs depend only on the scene
+    // geometry (mesh identity + world transform + albedo), NOT the camera, so we
+    // rebuild/upload them only when that signature changes -- not every frame.
+    // (The hybrid G-buffer raster + upload is camera-dependent and still runs
+    // each frame; only its shadow-ray BVH is cached here.)
+    size_t rtUploadSig_     = 0;  bool rtUploaded_     = false;  // GPU RT mode
+    size_t hybridUploadSig_ = 0;  bool hybridUploaded_ = false;  // Hybrid mode
     unsigned int   fbo_ = 0, fboTex_ = 0, fboDepth_ = 0;
     int            fboW_ = 0, fboH_ = 0;
     bool           gpuReady_ = false;

@@ -135,10 +135,16 @@ namespace
 }
 
 void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
-                                  const glm::vec3& albedo, UGBuffer& gb) const
+                                  const glm::vec3& albedo, UGBuffer& gb,
+                                  int cx0, int cy0, int cx1, int cy1, bool countStats) const
 {
     const glm::mat3 nrmM = glm::inverseTranspose(glm::mat3(xf.model));
     const int nTri = mesh.triangleCount();
+
+    // Tile bounds (clamped to the G-buffer). A multithreaded fill gives each tile
+    // a disjoint pixel rect so TestAndSet never races.
+    const int tx0 = std::max(cx0, 0),          ty0 = std::max(cy0, 0);
+    const int tx1 = std::min(cx1, gb.nx - 1),  ty1 = std::min(cy1, gb.ny - 1);
 
     // Rasterize one screen-space sub-triangle (with its clip-space attributes).
     auto rasterTri = [&](const ClipV& A, const ClipV& B, const ClipV& C)
@@ -151,16 +157,16 @@ void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
         const glm::vec2 p0(s0.x, s0.y), p1(s1.x, s1.y), p2(s2.x, s2.y);
         const float area = EdgeFunction(p0, p1, p2);
         if (area == 0.0f) return;
-        if (backfaceCull && area < 0.0f) { ++stats.backfaceCulled; return; }
-        ++stats.rasterized;
+        if (backfaceCull && area < 0.0f) { if (countStats) ++stats.backfaceCulled; return; }
+        if (countStats) ++stats.rasterized;
         const float inv = 1.0f / area;
 
         int minX = static_cast<int>(std::floor(std::min({ p0.x, p1.x, p2.x })));
         int maxX = static_cast<int>(std::ceil (std::max({ p0.x, p1.x, p2.x })));
         int minY = static_cast<int>(std::floor(std::min({ p0.y, p1.y, p2.y })));
         int maxY = static_cast<int>(std::ceil (std::max({ p0.y, p1.y, p2.y })));
-        minX = std::max(minX, 0);          minY = std::max(minY, 0);
-        maxX = std::min(maxX, gb.nx - 1);  maxY = std::min(maxY, gb.ny - 1);
+        minX = std::max(minX, tx0);  minY = std::max(minY, ty0);
+        maxX = std::min(maxX, tx1);  maxY = std::min(maxY, ty1);
 
         for (int y = minY; y <= maxY; ++y)
         for (int x = minX; x <= maxX; ++x)
@@ -186,7 +192,7 @@ void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
 
     for (int tri = 0; tri < nTri; ++tri)
     {
-        ++stats.trianglesIn;
+        if (countStats) ++stats.trianglesIn;
         const Vertex& a = mesh.vertices[mesh.indices[3 * tri + 0]];
         const Vertex& b = mesh.vertices[mesh.indices[3 * tri + 1]];
         const Vertex& c = mesh.vertices[mesh.indices[3 * tri + 2]];
@@ -198,7 +204,7 @@ void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
         };
 
         if (frustumCull && frustumReject(v[0].clip, v[1].clip, v[2].clip))
-        { ++stats.frustumCulled; continue; }
+        { if (countStats) ++stats.frustumCulled; continue; }
 
         if (nearClip)
         {

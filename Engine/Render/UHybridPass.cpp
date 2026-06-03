@@ -6,6 +6,11 @@
 #include "UHybridPass.h"
 #include "UGBuffer.h"
 #include "ACamera.h"
+#include "UMesh.h"
+#include "BVH.h"
+#include "RTShading.h"     // shared lighting+shadow GLSL (same code as GPU RT)
+
+#include <string>
 
 // Bundled GLEW header predates GL_TEXTURE_BUFFER usage in some configs; the
 // constant is present (4.2 header) but define defensively.
@@ -19,7 +24,12 @@ layout(location = 0) in vec2 aPos;
 void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
 )GLSL";
 
-static const char* FRAG_SRC = R"GLSL(
+// Hybrid fragment shader = [preamble + uniforms + triPos accessor]
+//                          + RT_SHADING_GLSL (shared lighting/shadow)
+//                          + [main: read primary hit from the G-buffer].
+// The triangle TBO holds 3 texels/triangle (positions only) since shadow rays
+// need geometry, not shading attributes.
+static const char* FRAG_HEAD = R"GLSL(
 #version 330 core
 out vec4 FragColor;
 
@@ -27,59 +37,28 @@ uniform sampler2D     uWorldPos;     // RGB32F  (per-pixel world position)
 uniform sampler2D     uNormal;       // RGB32F  (per-pixel world normal)
 uniform sampler2D     uAlbedo;       // RGB32F  (per-pixel albedo = kd)
 uniform sampler2D     uDepth;        // R32F    (1.0 = background)
-uniform samplerBuffer uTris;         // 3 texels per triangle (v0,v1,v2) for shadow rays
+uniform samplerBuffer uTris;         // 3 texels per triangle (v0,v1,v2)
+uniform samplerBuffer uNodes;        // BVH: 2 texels/node (bbMin|left, bbMax|count)
+uniform samplerBuffer uTriIdx;       // BVH leaf -> triangle index (R32F)
 
 uniform vec3  uEye, uU, uV, uW;
 uniform float uL, uR, uB, uT, uD;
-uniform int   uWidth, uHeight, uNumTris;
+uniform int   uWidth, uHeight, uNumTris, uNumNodes;
 uniform vec3  uLightPos, uLightColor;
 uniform vec3  uKs;                    // specular coefficient (Blinn-Phong)
 uniform float uShininess;
 
-bool rayTri(vec3 ro, vec3 rd, vec3 v0, vec3 v1, vec3 v2, out float t) {
-    vec3 e1 = v1 - v0, e2 = v2 - v0;
-    vec3 p = cross(rd, e2);
-    float det = dot(e1, p);
-    if (abs(det) < 1e-8) return false;
-    float inv = 1.0 / det;
-    vec3 s = ro - v0;
-    float u = dot(s, p) * inv;            if (u < 0.0 || u > 1.0) return false;
-    vec3 q = cross(s, e1);
-    float v = dot(rd, q) * inv;           if (v < 0.0 || u + v > 1.0) return false;
-    t = dot(e2, q) * inv;                 return t > 1e-4;
-}
+vec3 triPos(int tri, int slot) { return texelFetch(uTris, tri * 3 + slot).xyz; }
+)GLSL";
 
-// Any-hit occlusion test up to maxT (shadow ray).
-bool occluded(vec3 ro, vec3 rd, float maxT) {
-    for (int i = 0; i < uNumTris; ++i) {
-        vec3 v0 = texelFetch(uTris, i*3 + 0).xyz;
-        vec3 v1 = texelFetch(uTris, i*3 + 1).xyz;
-        vec3 v2 = texelFetch(uTris, i*3 + 2).xyz;
-        float t;
-        if (rayTri(ro, rd, v0, v1, v2, t) && t < maxT - 1e-3) return true;
-    }
-    return false;
-}
-
-vec3 skyColor(vec3 rd) {
-    float k = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
-    return mix(vec3(0.10, 0.12, 0.16), vec3(0.40, 0.55, 0.80), k);
-}
-
-// Reinhard tone map + gamma. Reinhard maps [0,inf) -> [0,1) so accumulated
-// light (ambient + diffuse + specular, multiple lights) never blows out to a
-// flat white -- it compresses highlights instead of clipping.
-vec3 tonemap(vec3 c) {
-    c = c / (c + vec3(1.0));
-    return pow(c, vec3(1.0 / 2.2));
-}
-
+static const char* FRAG_MAIN = R"GLSL(
 void main() {
     ivec2 px = ivec2(gl_FragCoord.xy);
     float depth = texelFetch(uDepth, px, 0).r;
 
+    // RASTER decided visibility: depth==1 means this pixel saw no surface, so
+    // shade the sky along the primary camera ray.
     if (depth >= 1.0) {
-        // Background: shade the sky along the primary camera ray.
         float aspect = float(uWidth) / float(uHeight);
         float su = (uL + (uR - uL) * (gl_FragCoord.x / float(uWidth))) * aspect;
         float sv =  uB + (uT - uB) * (gl_FragCoord.y / float(uHeight));
@@ -88,29 +67,12 @@ void main() {
         return;
     }
 
-    vec3 P  = texelFetch(uWorldPos, px, 0).xyz;
-    vec3 N  = normalize(texelFetch(uNormal, px, 0).xyz);
-    vec3 alb = texelFetch(uAlbedo, px, 0).xyz;
-
-    vec3  toL  = uLightPos - P;
-    float dist = length(toL);
-    vec3  L    = toL / dist;
-    float NdotL = max(dot(N, L), 0.0);
-
-    // one shadow ray toward the light (offset along normal to avoid acne)
-    float shadow = (NdotL > 0.0 && occluded(P + N * 1e-3, L, dist)) ? 0.0 : 1.0;
-
-    vec3 Vv = normalize(uEye - P);
-    vec3 H  = normalize(L + Vv);
-    float NdotH = max(dot(N, H), 0.0);
-
-    // Blinn-Phong direct + Unreal-style sky ambient (env light)
-    vec3 ambient = alb * skyColor(N) * 0.35;
-    vec3 diffuse = alb * NdotL;
-    vec3 spec    = (NdotL > 0.0) ? uKs * pow(NdotH, max(uShininess, 1.0)) : vec3(0.0);
-    vec3 col = ambient + (diffuse + spec) * uLightColor * shadow;
-
-    FragColor = vec4(tonemap(col), 1.0);
+    // Primary hit comes from the rasterized G-buffer; the lighting + shadow is
+    // the SHARED ray-traced pass (identical to GPU RT mode's shadeSurface()).
+    vec3 P   = texelFetch(uWorldPos, px, 0).xyz;
+    vec3 N   = normalize(texelFetch(uNormal, px, 0).xyz);
+    vec3 alb = texelFetch(uAlbedo,   px, 0).xyz;
+    FragColor = vec4(tonemap(shadeSurface(P, N, alb)), 1.0);
 }
 )GLSL";
 
@@ -138,8 +100,9 @@ static GLuint makeTex2D(int w, int h, GLint internalFmt, GLenum fmt)
 
 void UHybridPass::Init()
 {
+    const std::string frag = std::string(FRAG_HEAD) + RT_SHADING_GLSL + FRAG_MAIN;
     GLuint vs = compile(GL_VERTEX_SHADER,   VERT_SRC);
-    GLuint fs = compile(GL_FRAGMENT_SHADER, FRAG_SRC);
+    GLuint fs = compile(GL_FRAGMENT_SHADER, frag.c_str());
     prog_ = glCreateProgram();
     glAttachShader(prog_, vs); glAttachShader(prog_, fs);
     glLinkProgram(prog_);
@@ -162,16 +125,57 @@ void UHybridPass::Init()
 void UHybridPass::UploadSceneTriangles(const std::vector<glm::vec3>& tris)
 {
     numTris_ = static_cast<int>(tris.size()) / 3;
+
+    // Triangle TBO (original order; BVH leaves index into this).
     if (!tbo_) glGenBuffers(1, &tbo_);
     glBindBuffer(GL_TEXTURE_BUFFER, tbo_);
     glBufferData(GL_TEXTURE_BUFFER,
                  static_cast<GLsizeiptr>(tris.size() * sizeof(glm::vec3)),
                  tris.empty() ? nullptr : glm::value_ptr(tris[0]), GL_STATIC_DRAW);
     glBindBuffer(GL_TEXTURE_BUFFER, 0);
-
     if (!triTex_) glGenTextures(1, &triTex_);
     glBindTexture(GL_TEXTURE_BUFFER, triTex_);
     glTexBuffer(GL_TEXTURE_BUFFER, GL_RGB32F, tbo_);
+    glBindTexture(GL_TEXTURE_BUFFER, 0);
+
+    if (numTris_ == 0) { numNodes_ = 0; return; }
+
+    // Build a BVH over the world-space shadow triangles (same accel as GPU RT).
+    UMesh m;
+    m.vertices.reserve(tris.size());
+    for (const glm::vec3& p : tris) { Vertex v; v.position = p; m.vertices.push_back(v); }
+    m.indices.reserve(tris.size());
+    for (uint32_t i = 0; i < tris.size(); ++i) m.indices.push_back(i);
+    m.BuildBVH();
+    const BVH& bvh = *m.bvh;
+
+    std::vector<glm::vec4> nodeTexels;
+    nodeTexels.reserve(bvh.nodes.size() * 2);
+    for (const BVHNode& n : bvh.nodes)
+    {
+        nodeTexels.emplace_back(n.bbMin, static_cast<float>(n.leftOrTriStart));
+        nodeTexels.emplace_back(n.bbMax, static_cast<float>(n.rightOrTriCount));
+    }
+    numNodes_ = static_cast<int>(bvh.nodes.size());
+    if (!nodeTbo_) glGenBuffers(1, &nodeTbo_);
+    glBindBuffer(GL_TEXTURE_BUFFER, nodeTbo_);
+    glBufferData(GL_TEXTURE_BUFFER, static_cast<GLsizeiptr>(nodeTexels.size() * sizeof(glm::vec4)),
+                 nodeTexels.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_TEXTURE_BUFFER, 0);
+    if (!nodeTex_) glGenTextures(1, &nodeTex_);
+    glBindTexture(GL_TEXTURE_BUFFER, nodeTex_);
+    glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, nodeTbo_);
+    glBindTexture(GL_TEXTURE_BUFFER, 0);
+
+    std::vector<float> idx(bvh.triIndices.begin(), bvh.triIndices.end());
+    if (!idxTbo_) glGenBuffers(1, &idxTbo_);
+    glBindBuffer(GL_TEXTURE_BUFFER, idxTbo_);
+    glBufferData(GL_TEXTURE_BUFFER, static_cast<GLsizeiptr>(idx.size() * sizeof(float)),
+                 idx.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_TEXTURE_BUFFER, 0);
+    if (!idxTex_) glGenTextures(1, &idxTex_);
+    glBindTexture(GL_TEXTURE_BUFFER, idxTex_);
+    glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, idxTbo_);
     glBindTexture(GL_TEXTURE_BUFFER, 0);
 }
 
@@ -217,11 +221,12 @@ void UHybridPass::Render(const ACamera& cam, const glm::vec3& lightPos,
     glUniform1i (glGetUniformLocation(prog_, "uWidth"),  width);
     glUniform1i (glGetUniformLocation(prog_, "uHeight"), height);
     glUniform1i (glGetUniformLocation(prog_, "uNumTris"), numTris_);
+    glUniform1i (glGetUniformLocation(prog_, "uNumNodes"), numNodes_);
     glUniform3fv(glGetUniformLocation(prog_, "uLightPos"),   1, glm::value_ptr(lightPos));
     glUniform3fv(glGetUniformLocation(prog_, "uLightColor"), 1, glm::value_ptr(lightColor));
-    glm::vec3 ks(0.5f);
+    glm::vec3 ks(0.35f);   // match GPU RT mode (UMeshRayTracer) so the shared
     glUniform3fv(glGetUniformLocation(prog_, "uKs"), 1, glm::value_ptr(ks));
-    glUniform1f (glGetUniformLocation(prog_, "uShininess"), 48.0f);
+    glUniform1f (glGetUniformLocation(prog_, "uShininess"), 32.0f);   // shadeSurface() looks identical
 
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texWP_);
     glUniform1i(glGetUniformLocation(prog_, "uWorldPos"), 0);
@@ -233,6 +238,10 @@ void UHybridPass::Render(const ACamera& cam, const glm::vec3& lightPos,
     glUniform1i(glGetUniformLocation(prog_, "uDepth"), 3);
     glActiveTexture(GL_TEXTURE4); glBindTexture(GL_TEXTURE_BUFFER, triTex_);
     glUniform1i(glGetUniformLocation(prog_, "uTris"), 4);
+    glActiveTexture(GL_TEXTURE5); glBindTexture(GL_TEXTURE_BUFFER, nodeTex_);
+    glUniform1i(glGetUniformLocation(prog_, "uNodes"), 5);
+    glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER, idxTex_);
+    glUniform1i(glGetUniformLocation(prog_, "uTriIdx"), 6);
 
     glBindVertexArray(vao_);
     glDrawArrays(GL_TRIANGLES, 0, 6);
@@ -249,8 +258,13 @@ void UHybridPass::Cleanup()
     if (texDepth_) glDeleteTextures(1, &texDepth_);
     if (triTex_)   glDeleteTextures(1, &triTex_);
     if (tbo_)      glDeleteBuffers(1, &tbo_);
+    if (nodeTex_)  glDeleteTextures(1, &nodeTex_);
+    if (nodeTbo_)  glDeleteBuffers(1, &nodeTbo_);
+    if (idxTex_)   glDeleteTextures(1, &idxTex_);
+    if (idxTbo_)   glDeleteBuffers(1, &idxTbo_);
     if (vbo_)      glDeleteBuffers(1, &vbo_);
     if (vao_)      glDeleteVertexArrays(1, &vao_);
     if (prog_)     glDeleteProgram(prog_);
     texWP_ = texN_ = texAlb_ = texDepth_ = triTex_ = tbo_ = vbo_ = vao_ = prog_ = 0;
+    nodeTex_ = nodeTbo_ = idxTex_ = idxTbo_ = 0;
 }
