@@ -1,6 +1,6 @@
 #include "EnvironmentLight.h"
-// CPU illuminate() (hemisphere GI) removed with the CPU ray tracer; the GPU
-// IndirectLightPass below assembles the equivalent hemisphere sampling shader.
+// CPU illuminate() (hemisphere GI) removed with the CPU ray tracer; getGLSLInfo()
+// below emits the equivalent hemisphere-sampling GLSL for the GPU shading path.
 #include <string>
 #include <algorithm>
 

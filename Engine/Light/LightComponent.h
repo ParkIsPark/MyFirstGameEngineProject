@@ -4,10 +4,11 @@
 
 // ---------------------------------------------------------------------------
 // GPU code-generation descriptor — returned by each LightComponent subclass.
-// DirectLightPass / IndirectLightPass collect these to build the lighting
-// functions and the shadeDirect() / shadeIndirect() dispatchers at
-// shader-assembly time. `directContrib` feeds shadeDirect(), `indirectContrib`
-// feeds shadeIndirect().
+// Carries the per-light-type GLSL snippets (constants/uniforms/functions and
+// the direct/indirect contribution lines) used to assemble the lighting code.
+// The old multi-pass shader assembler that consumed this was removed with the
+// legacy ray tracer; the descriptor is retained as the foundation for feeding
+// light parameters into the GPU shading path (future editor light controls).
 // ---------------------------------------------------------------------------
 struct LightGLSLInfo
 {
