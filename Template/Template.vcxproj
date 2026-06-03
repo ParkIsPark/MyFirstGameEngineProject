@@ -144,6 +144,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\UGBuffer.h" />
     <!-- Engine: Render headers -->
     <ClInclude Include="$(EngineRootDir)Engine\Render\URenderer.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderShowFlag.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\UHybridPass.h" />
     <!-- Engine: Acceleration + Threading headers -->
     <ClInclude Include="$(EngineRootDir)Engine\Acceleration\BVH.h" />

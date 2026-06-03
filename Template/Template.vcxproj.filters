@@ -122,6 +122,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.h"><Filter>Engine\Rasterizer</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\UGBuffer.h"><Filter>Engine\Rasterizer</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\URenderer.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderShowFlag.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\UHybridPass.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Acceleration\BVH.h"><Filter>Engine\Acceleration</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Threading\ThreadPool.h"><Filter>Engine\Threading</Filter></ClInclude>

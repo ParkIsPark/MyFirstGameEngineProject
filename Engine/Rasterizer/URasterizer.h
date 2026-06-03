@@ -5,6 +5,22 @@ class UMesh;
 struct FTransform;
 class UFrameBuffer;
 class UGBuffer;
+struct Material;
+
+// CPU shading model (HW6 Q1-Q3). Flat = per-triangle normal shaded at the
+// centroid; Gouraud = per-vertex shade, color interpolated; Phong = per-pixel
+// interpolated normal shaded per fragment.
+enum class EShadingModel { Flat, Gouraud, Phong };
+
+// Lighting inputs for the CPU shaded raster (single point light + ambient,
+// Blinn-Phong). Matches the HW6 formula L = ka*Ia + kd*I*max(0,n.l) + ks*I*max(0,n.h)^p.
+struct FShadeParams
+{
+    glm::vec3 lightPos   = glm::vec3(0.0f);
+    glm::vec3 lightColor = glm::vec3(1.0f);   // I  (color * intensity)
+    glm::vec3 ambient    = glm::vec3(0.2f);   // Ia (white ambient)
+    glm::vec3 eye        = glm::vec3(0.0f);
+};
 
 // ---------------------------------------------------------------------------
 // URasterizer — general-purpose software rasterizer (NOT Q1-specific).
@@ -56,4 +72,11 @@ public:
                          const glm::vec3& albedo, UGBuffer& gb,
                          int cx0 = 0, int cy0 = 0, int cx1 = 0x7fffffff, int cy1 = 0x7fffffff,
                          bool countStats = true) const;
+
+    // ---- CPU shaded raster (HW6 Q1-Q3) ----
+    // Rasterize a mesh shaded with the given model + Blinn-Phong, writing the
+    // gamma-corrected (gamma 2.2) lit color into fb (depth-tested). Uses the
+    // mesh's per-triangle material slot when `mat` is null.
+    void DrawMeshShaded(const UMesh& mesh, const FTransform& xf, const Material* mat,
+                        const FShadeParams& sp, EShadingModel model, UFrameBuffer& fb) const;
 };

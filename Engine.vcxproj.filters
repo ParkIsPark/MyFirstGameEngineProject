@@ -137,6 +137,7 @@
     <ClInclude Include="Engine\Rasterizer\UGBuffer.h"><Filter>Engine\Rasterizer</Filter></ClInclude>
     <!-- Render -->
     <ClInclude Include="Engine\Render\URenderer.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="Engine\Render\FRenderShowFlag.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\UHybridPass.h"><Filter>Engine\Render</Filter></ClInclude>
     <!-- RayTracing -->
     <ClInclude Include="Engine\RayTracing\UMeshRayTracer.h"><Filter>Engine\RayTracing</Filter></ClInclude>

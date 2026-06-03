@@ -5,6 +5,7 @@
 #include "UFrameBuffer.h"
 #include "UGBuffer.h"
 #include "ThreadPool.h"
+#include "FRenderShowFlag.h"
 
 class UWorld;
 class UScene;
@@ -32,6 +33,11 @@ public:
     static std::vector<ERenderStage> Plan(ERenderMode mode);
 
     void Render(UWorld& world, ERenderMode mode);
+
+    // CPU shaded raster (HW6 Q1-Q3): rasterize every actor's mesh with the
+    // flag's shading model (Flat/Gouraud/Phong) + Blinn-Phong + gamma, writing
+    // scene.outputImage. depthView -> grayscale depth instead.
+    void RasterShaded(UWorld& world, const FRenderShowFlag& flag);
 
     // Last executed plan, for logging / dispatch tests.
     const std::vector<ERenderStage>& LastPlan() const { return lastPlan_; }

@@ -147,3 +147,39 @@ void URenderer::GBufferWorld(UScene& scene, const ACamera& cam, int nx, int ny)
         raster_.DrawMeshGBuffer(*comp->mesh, xf, albedo, gbuffer_);
     }
 }
+
+// ---------------------------------------------------------------------------
+// CPU shaded raster (HW6 Q1-Q3) — Flat / Gouraud / Phong + Blinn-Phong + gamma.
+// ---------------------------------------------------------------------------
+void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag)
+{
+    UScene&        scene = world.GetScene();
+    const ACamera& cam   = world.GetCamera();
+    const int nx = scene.width, ny = scene.height;
+
+    // Single point light (HW6). Falls back to the assignment's light if none.
+    FShadeParams sp;
+    sp.lightPos   = glm::vec3(-4.0f, 4.0f, -3.0f);
+    sp.lightColor = glm::vec3(1.0f);
+    sp.ambient    = glm::vec3(0.2f);
+    sp.eye        = cam.eye;
+    for (AActor* a : scene.Actors)
+        if (ALight* L = dynamic_cast<ALight*>(a))
+            if (PointLight* pl = dynamic_cast<PointLight*>(L->lightComp))
+            { sp.lightPos = pl->LightPos; sp.lightColor = pl->LightColor * pl->LightIntensity; break; }
+
+    fb_.Init(nx, ny);
+    fb_.Clear(glm::vec3(0.0f));                 // black background (HW6 reference)
+
+    for (AActor* actor : scene.Actors)
+    {
+        UMeshComponent* comp = actor ? actor->mesh : nullptr;
+        if (!comp || !comp->mesh) continue;
+        const Material* ov = comp->hasMaterialOverride ? &comp->materialOverride : nullptr;
+        const FTransform xf = ActorTransform(comp->GetWorldMatrix(), cam, nx, ny);
+        raster_.DrawMeshShaded(*comp->mesh, xf, ov, sp, flag.shading, fb_);
+    }
+
+    if (flag.depthView) fb_.ToDepthImage(scene.outputImage);
+    else                fb_.ToOutputImage(scene.outputImage);
+}
