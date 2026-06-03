@@ -77,7 +77,7 @@ void EditorEngine::BuildEditorWorld()
 
     // A real light actor (ALight owns a LightComponent) -- inspectable in Details.
     {
-        ALight* light = new ALight(new PointLight(glm::vec3(5, 5, -3), glm::vec3(1.0f), glm::vec3(1.0f)));
+        ALight* light = new ALight(new PointLight(glm::vec3(1.0f), glm::vec3(1.0f)));
         light->SetActorLocation(glm::vec3(5.0f, 5.0f, -3.0f));
         editorWorld_.Spawn(light);
         actorNames_.push_back("PointLight");
@@ -211,7 +211,7 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
             }
         if (ALight* L = dynamic_cast<ALight*>(a))
             if (PointLight* pl = dynamic_cast<PointLight*>(L->lightComp))
-            { lightPos = pl->LightPos; lightColor = pl->LightColor * pl->LightIntensity; }
+            { lightPos = pl->GetWorldLocation(); lightColor = pl->LightColor * pl->LightIntensity; }
     }
 
     // Signature of the scene GEOMETRY (mesh identity + world transform + albedo).
@@ -538,8 +538,7 @@ void EditorEngine::DrawDetails()
             ImGui::SeparatorText("Light Component");
             ImGui::ColorEdit3("Light Color",  &lc->LightColor.x);
             ImGui::DragFloat3("Intensity",    &lc->LightIntensity.x, 0.05f, 0.0f, 50.0f);
-            if (PointLight* pl = dynamic_cast<PointLight*>(lc))
-                ImGui::DragFloat3("Light Pos", &pl->LightPos.x, 0.1f);
+            // Light position is the actor transform (edited in the Transform section).
         }
     }
 

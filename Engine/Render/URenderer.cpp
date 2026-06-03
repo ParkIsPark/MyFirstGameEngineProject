@@ -83,7 +83,7 @@ void URenderer::RasterWorld(UScene& scene, const ACamera& cam, int nx, int ny)
     for (AActor* a : scene.Actors)
         if (ALight* L = dynamic_cast<ALight*>(a))
             if (PointLight* pl = dynamic_cast<PointLight*>(L->lightComp))
-                lights.push_back({ pl->LightPos, pl->LightColor * pl->LightIntensity });
+                lights.push_back({ pl->GetWorldLocation(), pl->LightColor * pl->LightIntensity });
 
     // Deferred Lambert diffuse + ambient (Blinn-Phong specular + shadows are the
     // GPU / Hybrid path). Editing a light or material in the editor shows live.
@@ -166,7 +166,7 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag)
     for (AActor* a : scene.Actors)
         if (ALight* L = dynamic_cast<ALight*>(a))
             if (PointLight* pl = dynamic_cast<PointLight*>(L->lightComp))
-            { sp.lightPos = pl->LightPos; sp.lightColor = pl->LightColor * pl->LightIntensity; break; }
+            { sp.lightPos = pl->GetWorldLocation(); sp.lightColor = pl->LightColor * pl->LightIntensity; break; }
 
     fb_.Init(nx, ny);
     fb_.Clear(glm::vec3(0.0f));                 // black background (HW6 reference)

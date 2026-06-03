@@ -1,35 +1,22 @@
 #pragma once
 #include <glm/glm.hpp>
-#include <string>
+#include "USceneComponent.h"
+
+class FArchive;
 
 // ---------------------------------------------------------------------------
-// GPU code-generation descriptor — returned by each LightComponent subclass.
-// Carries the per-light-type GLSL snippets (constants/uniforms/functions and
-// the direct/indirect contribution lines) used to assemble the lighting code.
-// The old multi-pass shader assembler that consumed this was removed with the
-// legacy ray tracer; the descriptor is retained as the foundation for feeding
-// light parameters into the GPU shading path (future editor light controls).
+// LightComponent — base light. Now a USceneComponent, so a light has a
+// transform and lives in the scene graph; its world position is
+// GetWorldLocation(). (The old getGLSLInfo() GPU shader-assembly machinery was
+// dead code -- no callers -- and was removed in P5.)
 // ---------------------------------------------------------------------------
-struct LightGLSLInfo
-{
-    std::string constants;        // const float SOFT_OX[] / GOLDEN_ANGLE etc.
-    std::string uniforms;         // uniform declarations
-    std::string functions;        // shadePointLight / shadeEnvLight etc.
-    std::string directContrib;    // lines added to shadeDirect() body
-    std::string indirectContrib;  // lines added to shadeIndirect() body
-};
-
-class LightComponent
+class LightComponent : public USceneComponent
 {
 public:
-    glm::vec3 LightColor;
-    glm::vec3 LightIntensity;
+    glm::vec3 LightColor     = glm::vec3(1.0f);
+    glm::vec3 LightIntensity = glm::vec3(1.0f);
 
     LightComponent(glm::vec3 color = glm::vec3(1.0f), glm::vec3 intensity = glm::vec3(1.0f));
-    virtual ~LightComponent() = default;
 
-    // Returns GPU code-generation info for this light type.
-    // (The CPU illuminate() path was removed with the CPU ray tracer; lighting
-    //  is GPU-only now. This descriptor feeds the GPU shader assembler.)
-    virtual LightGLSLInfo getGLSLInfo() const = 0;
+    void Serialize(FArchive& ar) override;   // base transform + color/intensity
 };

@@ -1,30 +1,21 @@
 #pragma once
 #include "LightComponent.h"
 
-// Number of hemisphere sample rays for AO + indirect GI.
-// Higher = softer/more accurate, lower = faster.
-#define ENV_LIGHT_SAMPLES 4
-
-// Max GI bounce depth. Each bounce spawns ENV_LIGHT_SAMPLES rays,
-// so cost = ENV_LIGHT_SAMPLES^GI_BOUNCE_DEPTH per pixel.
-// depth=1 -> 8 rays, depth=2 -> 64 rays, depth=3 -> 512 rays.
-#define GI_BOUNCE_DEPTH 1
-
+// Environment (sky/ambient) light. Position-less; drives the sky gradient used
+// by the GPU shading paths' skyColor() + hemisphere ambient.
 class EnvironmentLight : public LightComponent
 {
 public:
-    // Sky gradient colors — used for both CPU illumination miss branch
-    // and GPU skyColor() uniform upload.
     glm::vec3 horizonColor = glm::vec3(0.95f, 0.92f, 0.82f); // warm hazy horizon
     glm::vec3 zenithColor  = glm::vec3(0.30f, 0.60f, 1.00f); // vivid sky blue
-    float     skyExp       = 0.6f;                            // pow exponent for gradient curve
+    float     skyExp       = 0.6f;                            // gradient curve exponent
 
     EnvironmentLight();
     EnvironmentLight(glm::vec3 color, glm::vec3 intensity);
 
-    LightGLSLInfo getGLSLInfo() const override;
+    const char* TypeName() const override { return "EnvLight"; }
+    void        Serialize(FArchive& ar) override;
 
-    // Time-of-day wrapper: tod in [-10, +10] where -10=midnight, 0=sunrise, +10=noon.
-    // Adjusts horizonColor, zenithColor, skyExp, LightIntensity, and LightColor.
+    // Time-of-day preset: tod in [-10,+10] (-10 midnight, 0 sunrise, +10 noon).
     static void applyTimeOfDay(EnvironmentLight& light, float tod);
 };
