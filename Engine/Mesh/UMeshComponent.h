@@ -17,7 +17,8 @@ struct URay;
 class UMeshComponent : public USceneComponent
 {
 public:
-    UMesh* mesh = nullptr;             // shared asset
+    UMesh* mesh = nullptr;             // shared asset (resolved from meshRef on load)
+    std::string meshRef;               // descriptor ("Sphere 2 32 16") or "Content/x.mesh"
 
     // per-instance material override (applied over mesh->material)
     Material materialOverride;

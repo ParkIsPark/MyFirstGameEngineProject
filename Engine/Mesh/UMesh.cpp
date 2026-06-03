@@ -9,6 +9,8 @@
 #include <fstream>
 #include <cstdint>
 #include <cstring>
+#include <sstream>
+#include <unordered_map>
 
 UMesh::UMesh()  = default;          // out-of-line: BVH is complete here
 UMesh::~UMesh() = default;
@@ -237,6 +239,41 @@ const Material& UMesh::materialForTri(int tri) const
     int idx = (tri >= 0 && tri < (int)triMaterial.size()) ? (int)triMaterial[tri] : 0;
     if (idx < 0 || idx >= (int)materials.size()) idx = 0;
     return materials[idx];
+}
+
+UMesh* UMesh::Resolve(const std::string& ref)
+{
+    static std::unordered_map<std::string, UMesh*> cache;
+    if (ref.empty()) return nullptr;
+    auto it = cache.find(ref);
+    if (it != cache.end()) return it->second;
+
+    UMesh* m = nullptr;
+    std::istringstream is(ref);
+    std::string kind;
+    is >> kind;
+    if (kind == "Sphere")
+    {
+        float r = 1.0f; int sw = 32, sh = 16;
+        is >> r >> sw >> sh;
+        m = GenerateSphere(r, sw > 0 ? sw : 32, sh > 0 ? sh : 16);
+    }
+    else if (kind == "Cube")
+    {
+        glm::vec3 h(1.0f); is >> h.x >> h.y >> h.z;
+        m = GenerateCube(h);
+    }
+    else if (kind == "Plane")
+    {
+        glm::vec2 s(1.0f); is >> s.x >> s.y;
+        m = GeneratePlane(s);
+    }
+    else
+    {
+        m = LoadBinary(ref.c_str());   // treat the ref as a content path
+    }
+    cache[ref] = m;                    // cache even nullptr (avoid re-resolving bad refs)
+    return m;
 }
 
 UMesh* UMesh::MergeWithSlots(const std::vector<UMesh*>& parts)

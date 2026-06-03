@@ -15,7 +15,9 @@ bool UMeshComponent::intersect(const URay& worldRay,
 void UMeshComponent::Serialize(FArchive& ar)
 {
     USceneComponent::Serialize(ar);
+    ar.Field("Mesh", meshRef);
     ar.Field("HasMatOverride", hasMaterialOverride);
     if (hasMaterialOverride) materialOverride.Serialize(ar);
-    // mesh asset reference (descriptor / .mesh path) lands in P3/P6.
+    if (ar.IsLoading() && !meshRef.empty() && !mesh)
+        mesh = UMesh::Resolve(meshRef);     // descriptor / .mesh -> shared asset
 }

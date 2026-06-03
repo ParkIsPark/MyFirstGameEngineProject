@@ -79,4 +79,10 @@ public:
     // Merge per-material parts (e.g. UObjImporter::LoadMulti) into one mesh
     // with one slot per part + per-triangle slot indices. Caller owns result.
     static UMesh* MergeWithSlots(const std::vector<UMesh*>& parts);
+
+    // Resolve a mesh reference to a cached, shared asset: a procedural
+    // descriptor ("Sphere r segW segH" / "Cube hx hy hz" / "Plane sx sy") or a
+    // content path to a .mesh. Same ref returns the same instance. nullptr if
+    // unresolvable. (The cache owns these; do not delete the result.)
+    static UMesh* Resolve(const std::string& ref);
 };
