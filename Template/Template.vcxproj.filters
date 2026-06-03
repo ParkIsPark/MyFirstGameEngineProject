@@ -32,149 +32,149 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <!-- Engine: Core -->
-    <ClCompile Include="$(SolutionDir)Engine\Core\UScene.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\Core\UScene.cpp">
       <Filter>Engine\Core</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\Core\UPostProcessFilter.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\Core\UPostProcessFilter.cpp">
       <Filter>Engine\Core</Filter>
     </ClCompile>
     <!-- Engine: World -->
-    <ClCompile Include="$(SolutionDir)Engine\World\AActor.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\World\AActor.cpp">
       <Filter>Engine\World</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\World\ACamera.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\World\ACamera.cpp">
       <Filter>Engine\World</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\World\CubeSurface.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\World\CubeSurface.cpp">
       <Filter>Engine\World</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\World\PlaneSurface.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\World\PlaneSurface.cpp">
       <Filter>Engine\World</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\World\SphereSurface.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\World\SphereSurface.cpp">
       <Filter>Engine\World</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\World\USurface.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\World\USurface.cpp">
       <Filter>Engine\World</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\World\UTilemap.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\World\UTilemap.cpp">
       <Filter>Engine\World</Filter>
     </ClCompile>
     <!-- Engine: Light -->
-    <ClCompile Include="$(SolutionDir)Engine\Light\ALight.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\Light\ALight.cpp">
       <Filter>Engine\Light</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\Light\EnvironmentLight.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\Light\EnvironmentLight.cpp">
       <Filter>Engine\Light</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\Light\LightComponent.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\Light\LightComponent.cpp">
       <Filter>Engine\Light</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\Light\PointLight.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\Light\PointLight.cpp">
       <Filter>Engine\Light</Filter>
     </ClCompile>
     <!-- Engine: Physics -->
-    <ClCompile Include="$(SolutionDir)Engine\Physics\PhysicalComponent.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\Physics\PhysicalComponent.cpp">
       <Filter>Engine\Physics</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\Physics\UPhysicsWorld.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\Physics\UPhysicsWorld.cpp">
       <Filter>Engine\Physics</Filter>
     </ClCompile>
     <!-- Engine: Player -->
-    <ClCompile Include="$(SolutionDir)Engine\Player\UPlayerCharacter.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\Player\UPlayerCharacter.cpp">
       <Filter>Engine\Player</Filter>
     </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\Player\UPlayerController.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\Player\UPlayerController.cpp">
       <Filter>Engine\Player</Filter>
     </ClCompile>
     <!-- Engine: RayTracing -->
-    <ClCompile Include="$(SolutionDir)Engine\RayTracing\URayTracing.cpp">
+    <ClCompile Include="$(EngineRootDir)Engine\RayTracing\URayTracing.cpp">
       <Filter>Engine\RayTracing</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <!-- Engine: Core headers -->
-    <ClInclude Include="$(SolutionDir)Engine\Core\UScene.h">
+    <ClInclude Include="$(EngineRootDir)Engine\Core\UScene.h">
       <Filter>Engine\Core</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\Core\UPostProcessFilter.h">
+    <ClInclude Include="$(EngineRootDir)Engine\Core\UPostProcessFilter.h">
       <Filter>Engine\Core</Filter>
     </ClInclude>
     <!-- Engine: World headers -->
-    <ClInclude Include="$(SolutionDir)Engine\World\AActor.h">
+    <ClInclude Include="$(EngineRootDir)Engine\World\AActor.h">
       <Filter>Engine\World</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\World\ACamera.h">
+    <ClInclude Include="$(EngineRootDir)Engine\World\ACamera.h">
       <Filter>Engine\World</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\World\CubeSurface.h">
+    <ClInclude Include="$(EngineRootDir)Engine\World\CubeSurface.h">
       <Filter>Engine\World</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\World\PlaneSurface.h">
+    <ClInclude Include="$(EngineRootDir)Engine\World\PlaneSurface.h">
       <Filter>Engine\World</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\World\SphereSurface.h">
+    <ClInclude Include="$(EngineRootDir)Engine\World\SphereSurface.h">
       <Filter>Engine\World</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\World\USurface.h">
+    <ClInclude Include="$(EngineRootDir)Engine\World\USurface.h">
       <Filter>Engine\World</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\World\UTilemap.h">
+    <ClInclude Include="$(EngineRootDir)Engine\World\UTilemap.h">
       <Filter>Engine\World</Filter>
     </ClInclude>
     <!-- Engine: Light headers -->
-    <ClInclude Include="$(SolutionDir)Engine\Light\ALight.h">
+    <ClInclude Include="$(EngineRootDir)Engine\Light\ALight.h">
       <Filter>Engine\Light</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\Light\EnvironmentLight.h">
+    <ClInclude Include="$(EngineRootDir)Engine\Light\EnvironmentLight.h">
       <Filter>Engine\Light</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\Light\LightComponent.h">
+    <ClInclude Include="$(EngineRootDir)Engine\Light\LightComponent.h">
       <Filter>Engine\Light</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\Light\PointLight.h">
+    <ClInclude Include="$(EngineRootDir)Engine\Light\PointLight.h">
       <Filter>Engine\Light</Filter>
     </ClInclude>
     <!-- Engine: Physics headers -->
-    <ClInclude Include="$(SolutionDir)Engine\Physics\PhysicalComponent.h">
+    <ClInclude Include="$(EngineRootDir)Engine\Physics\PhysicalComponent.h">
       <Filter>Engine\Physics</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\Physics\UPhysicsWorld.h">
+    <ClInclude Include="$(EngineRootDir)Engine\Physics\UPhysicsWorld.h">
       <Filter>Engine\Physics</Filter>
     </ClInclude>
     <!-- Engine: Player headers -->
-    <ClInclude Include="$(SolutionDir)Engine\Player\UPlayerCharacter.h">
+    <ClInclude Include="$(EngineRootDir)Engine\Player\UPlayerCharacter.h">
       <Filter>Engine\Player</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\Player\UPlayerController.h">
+    <ClInclude Include="$(EngineRootDir)Engine\Player\UPlayerController.h">
       <Filter>Engine\Player</Filter>
     </ClInclude>
     <!-- Engine: RayTracing headers -->
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\RenderConfig.h">
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\RenderConfig.h">
       <Filter>Engine\RayTracing</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\URayTracing.h">
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\URayTracing.h">
       <Filter>Engine\RayTracing</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\URay.h">
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\URay.h">
       <Filter>Engine\RayTracing</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\URayTracingPass.h">
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\URayTracingPass.h">
       <Filter>Engine\RayTracing</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\GeometryPass.h">
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\GeometryPass.h">
       <Filter>Engine\RayTracing</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\MaterialPass.h">
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\MaterialPass.h">
       <Filter>Engine\RayTracing</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\DirectLightPass.h">
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\DirectLightPass.h">
       <Filter>Engine\RayTracing</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\IndirectLightPass.h">
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\IndirectLightPass.h">
       <Filter>Engine\RayTracing</Filter>
     </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\PostProcessPass.h">
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\PostProcessPass.h">
       <Filter>Engine\RayTracing</Filter>
     </ClInclude>
   </ItemGroup>
