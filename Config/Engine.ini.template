@@ -1,0 +1,11 @@
+# Engine.ini — engine-global / machine settings (NOT per-project).
+# Copy to Config/Engine.ini and adjust paths for your machine.
+# Config/Engine.ini itself is .gitignored (machine-specific).
+[Build]
+MSBuildPath     = C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe
+VSPath          = C:\Program Files\Microsoft Visual Studio\2022\Community
+PlatformToolset = v143
+DefaultConfig   = Game        # build configuration produced by the Build button
+
+[Engine]
+Version = 1.0

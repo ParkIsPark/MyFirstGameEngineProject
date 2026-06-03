@@ -21,6 +21,11 @@ enum class EProjectRenderMode { CPU_RT, GPU_RT, Rasterizer, Hybrid };
 // ---------------------------------------------------------------------------
 struct FProjectDescriptor
 {
+    // .proj manifest (identity)
+    std::string projectName   = "Project";
+    std::string engineVersion = "1.0";
+
+    // boot settings (from Setting/DefaultEngine.ini, or the legacy flat .proj)
     std::string windowTitle  = "Engine";
     int         width        = 1280;
     int         height       = 720;
@@ -30,7 +35,12 @@ struct FProjectDescriptor
     // Parses `path`. Returns true if the file was opened and read (even if some
     // lines were ignored), false if the file was missing/unreadable (in which
     // case all fields keep their defaults). `path == nullptr` -> false+defaults.
-    bool LoadFromFile(const char* path);
+    bool LoadFromFile(const char* path);            // legacy flat Key=Value .proj
+
+    // P7 two-stage boot: .proj manifest (ProjectName/EngineVersion) then the
+    // project's Setting/DefaultEngine.ini ([Display]/[Render]/[Startup]).
+    bool LoadProject(const char* projPath);
+    bool LoadSettings(const char* iniPath);
 
     static const char* RenderModeName(EProjectRenderMode m);
 };

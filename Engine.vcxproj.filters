@@ -69,6 +69,7 @@
     <ClCompile Include="Engine\World\USceneComponent.cpp"><Filter>Engine\World</Filter></ClCompile>
     <ClCompile Include="Engine\Serialization\FArchive.cpp"><Filter>Engine\Serialization</Filter></ClCompile>
     <ClCompile Include="Engine\Serialization\FWorldSerializer.cpp"><Filter>Engine\Serialization</Filter></ClCompile>
+    <ClCompile Include="Engine\Serialization\FIniFile.cpp"><Filter>Engine\Serialization</Filter></ClCompile>
     <ClCompile Include="Engine\Mesh\Material.cpp"><Filter>Engine\Mesh</Filter></ClCompile>
     <ClCompile Include="Engine\World\ACamera.cpp"><Filter>Engine\World</Filter></ClCompile>
     <ClCompile Include="Engine\World\UWorld.cpp"><Filter>Engine\World</Filter></ClCompile>
@@ -125,6 +126,7 @@
     <ClInclude Include="Engine\World\USceneComponent.h"><Filter>Engine\World</Filter></ClInclude>
     <ClInclude Include="Engine\Serialization\FArchive.h"><Filter>Engine\Serialization</Filter></ClInclude>
     <ClInclude Include="Engine\Serialization\FWorldSerializer.h"><Filter>Engine\Serialization</Filter></ClInclude>
+    <ClInclude Include="Engine\Serialization\FIniFile.h"><Filter>Engine\Serialization</Filter></ClInclude>
     <ClInclude Include="Engine\World\ACamera.h"><Filter>Engine\World</Filter></ClInclude>
     <ClInclude Include="Engine\World\UWorld.h"><Filter>Engine\World</Filter></ClInclude>
     <!-- Mesh -->

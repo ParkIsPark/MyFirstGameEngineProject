@@ -26,3 +26,11 @@ x64/
 Win32/
 Debug/
 Release/
+
+# -------------------------------------------------------
+# Machine-specific engine config (Config/Engine.ini.template IS tracked)
+# -------------------------------------------------------
+Config/Engine.ini
+
+# Standalone test executables compiled ad-hoc with g++
+*_test.exe

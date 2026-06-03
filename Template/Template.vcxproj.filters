@@ -70,6 +70,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\World\USceneComponent.cpp"><Filter>Engine\World</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Serialization\FArchive.cpp"><Filter>Engine\Serialization</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Serialization\FWorldSerializer.cpp"><Filter>Engine\Serialization</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Serialization\FIniFile.cpp"><Filter>Engine\Serialization</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Mesh\Material.cpp"><Filter>Engine\Mesh</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\World\ACamera.cpp"><Filter>Engine\World</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\World\UWorld.cpp"><Filter>Engine\World</Filter></ClCompile>
@@ -113,6 +114,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\World\USceneComponent.h"><Filter>Engine\World</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Serialization\FArchive.h"><Filter>Engine\Serialization</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Serialization\FWorldSerializer.h"><Filter>Engine\Serialization</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Serialization\FIniFile.h"><Filter>Engine\Serialization</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\World\ACamera.h"><Filter>Engine\World</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\World\UWorld.h"><Filter>Engine\World</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Mesh\Vertex.h"><Filter>Engine\Mesh</Filter></ClInclude>

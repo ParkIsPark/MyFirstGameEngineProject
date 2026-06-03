@@ -1,4 +1,5 @@
 #include "FProjectDescriptor.h"
+#include "FIniFile.h"
 
 #include <fstream>
 #include <sstream>
@@ -71,7 +72,32 @@ bool FProjectDescriptor::LoadFromFile(const char* path)
         else if (key == "height")       { try { int h = std::stoi(val); if (h > 0) height = h; } catch (...) {} }
         else if (key == "rendermode")   { if (!val.empty()) renderMode = parseMode(val); }
         else if (key == "startupworld") { startupWorld = val; }
+        else if (key == "projectname")  { if (!val.empty()) projectName = val; }
+        else if (key == "engineversion"){ if (!val.empty()) engineVersion = val; }
         // unknown keys silently ignored
     }
+    return true;
+}
+
+// .proj manifest: flat ProjectName / EngineVersion (no sections).
+bool FProjectDescriptor::LoadProject(const char* projPath)
+{
+    FIniFile ini;
+    if (!ini.LoadFromFile(projPath)) return false;
+    projectName   = ini.GetString("", "ProjectName",   projectName);
+    engineVersion = ini.GetString("", "EngineVersion", engineVersion);
+    return true;
+}
+
+// Project boot settings: Setting/DefaultEngine.ini [Display]/[Render]/[Startup].
+bool FProjectDescriptor::LoadSettings(const char* iniPath)
+{
+    FIniFile ini;
+    if (!ini.LoadFromFile(iniPath)) return false;
+    windowTitle  = ini.GetString("Display", "Title",  windowTitle);
+    width        = ini.GetInt   ("Display", "Width",  width);
+    height       = ini.GetInt   ("Display", "Height", height);
+    if (ini.Has("Render", "Mode"))      renderMode   = parseMode(ini.GetString("Render", "Mode"));
+    if (ini.Has("Startup", "DefaultWorld")) startupWorld = ini.GetString("Startup", "DefaultWorld");
     return true;
 }
