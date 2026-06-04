@@ -34,6 +34,7 @@
 #include "UObjImporter.h"
 #include "UFbxImporter.h"
 #include "EditorEngine.h"
+#include "GameEngine.h"
 
 // Load a model trying a few candidate directories (working dir varies between
 // running from bin\ and VS's project dir).
@@ -324,6 +325,14 @@ int main(int argc, char** argv)
         MeshDemo app;
         if (!app.Init(1024, 1024, "Mesh: 1=raster 2=RT 3=depth 4=hybrid 5=OBJ 6=FBX")) return -1;
         return app.Run();
+    }
+
+    if (arg == "--game")          // standalone GAME runtime: --game <world.path>
+    {
+        const std::string worldPath = (argc > 2) ? argv[2] : "Content/EditorWorld.world";
+        GameEngine game(worldPath);
+        if (!game.Init(1280, 800, "Game")) return -1;
+        return game.Run();
     }
 
     // default: the ImGui editor (page 7)

@@ -62,6 +62,7 @@
   <ItemGroup>
     <ClCompile Include="main.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Framework\Engine.cpp"><Filter>Engine\Framework</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Framework\GameEngine.cpp"><Filter>Engine\Framework</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Framework\FProjectDescriptor.cpp"><Filter>Engine\Framework</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Framework\USubsystemManager.cpp"><Filter>Engine\Framework</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Core\UScene.cpp"><Filter>Engine\Core</Filter></ClCompile>
@@ -107,6 +108,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="$(EngineRootDir)Engine\Framework\Engine.h"><Filter>Engine\Framework</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Framework\GameEngine.h"><Filter>Engine\Framework</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Framework\FProjectDescriptor.h"><Filter>Engine\Framework</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Framework\USubsystem.h"><Filter>Engine\Framework</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Framework\USubsystemManager.h"><Filter>Engine\Framework</Filter></ClInclude>

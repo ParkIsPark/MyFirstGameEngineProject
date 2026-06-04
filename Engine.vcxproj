@@ -95,6 +95,7 @@
     <ClCompile Include="Engine\Editor\External\ImGuizmo\ImGuizmo.cpp" />
     <!-- Engine: Framework -->
     <ClCompile Include="Engine\Framework\Engine.cpp" />
+    <ClCompile Include="Engine\Framework\GameEngine.cpp" />
     <ClCompile Include="Engine\Framework\FProjectDescriptor.cpp" />
     <ClCompile Include="Engine\Framework\USubsystemManager.cpp" />
     <!-- Engine: World -->
@@ -153,6 +154,7 @@
     <ClInclude Include="Engine\Editor\External\ImGuizmo\ImGuizmo.h" />
     <!-- Engine: Framework headers -->
     <ClInclude Include="Engine\Framework\Engine.h" />
+    <ClInclude Include="Engine\Framework\GameEngine.h" />
     <ClInclude Include="Engine\Framework\FProjectDescriptor.h" />
     <ClInclude Include="Engine\Framework\USubsystem.h" />
     <ClInclude Include="Engine\Framework\USubsystemManager.h" />

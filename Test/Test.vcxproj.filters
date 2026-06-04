@@ -83,6 +83,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\backends\imgui_impl_opengl3.cpp"><Filter>Engine\Editor\External\imgui\backends</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Framework\Engine.cpp"><Filter>Engine\Framework</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Framework\GameEngine.cpp"><Filter>Engine\Framework</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Framework\FProjectDescriptor.cpp"><Filter>Engine\Framework</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Framework\USubsystemManager.cpp"><Filter>Engine\Framework</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\World\AActor.cpp"><Filter>Engine\World</Filter></ClCompile>
