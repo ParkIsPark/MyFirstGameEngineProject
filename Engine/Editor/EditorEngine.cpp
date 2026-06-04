@@ -188,17 +188,25 @@ void EditorEngine::PushUndo()
 void EditorEngine::Undo()
 {
     if (undoStack_.empty() || !editorWorld_) return;
+    const int rm = renderMode_;                                       // view settings:
+    const int sm = editorWorld_->GetScene().shadingModel;             // not part of undo
     redoStack_.push_back(CopyWorld(*editorWorld_));     // current -> redo
     UWorld* prev = undoStack_.back(); undoStack_.pop_back();
     SetEditorWorld(prev, worldName_);                   // adopts prev (takes ownership)
+    renderMode_ = rm; editorWorld_->GetScene().renderMode = rm;
+    editorWorld_->GetScene().shadingModel = sm;
 }
 
 void EditorEngine::Redo()
 {
     if (redoStack_.empty() || !editorWorld_) return;
+    const int rm = renderMode_;
+    const int sm = editorWorld_->GetScene().shadingModel;
     undoStack_.push_back(CopyWorld(*editorWorld_));     // current -> undo
     UWorld* next = redoStack_.back(); redoStack_.pop_back();
     SetEditorWorld(next, worldName_);                   // adopts next (takes ownership)
+    renderMode_ = rm; editorWorld_->GetScene().renderMode = rm;
+    editorWorld_->GetScene().shadingModel = sm;
 }
 
 void EditorEngine::NewWorld()
