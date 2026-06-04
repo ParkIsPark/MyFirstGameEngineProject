@@ -38,12 +38,22 @@ private:
     void NewWorld();                     // replace editor world with an empty one
     void LoadWorld(const std::string& path);   // replace editor world from a .world
     void SetEditorWorld(UWorld* w, const std::string& name);  // swap + rebind UI state
+
+    // Undo/redo via whole-world snapshots (FWorldSerializer text). PushUndo()
+    // captures the CURRENT state before a mutation; Undo/Redo swap states.
+    void PushUndo();
+    void Undo();
+    void Redo();
+    void ClearHistory();
     AActor* AddActor(const char* type, const std::string& name);  // factory spawn
     void ImportAsset(const std::string& path);  // .obj/.fbx -> mesh actor; .world -> load
+    UMesh* LoadMeshFile(const std::string& path);  // .obj/.fbx/.mesh/descriptor -> UMesh*
     void RebuildActorNames();            // resync actorNames_ from scene actors
     void OnPlay();                       // Editor -> PIE: deep-copy + BeginPlay
     void OnStop();                       // PIE -> Editor
-    UWorld* CopyWorld(UWorld& src);      // deep copy (shares UMesh assets)
+    // Lossless deep copy (name + transform + mesh[shared] + material + physics +
+    // lights + camera + shadingModel). resetPhysics zeroes velocity (for PIE).
+    UWorld* CopyWorld(UWorld& src, bool resetPhysics = false);
     UWorld& ActiveWorld() { return (playing_ && pieWorld_) ? *pieWorld_ : *editorWorld_; }
     void DrawUI();
     void DrawMenuBar();
@@ -72,6 +82,9 @@ private:
     bool playing_    = false;    // Editor vs PIE (Stage 5)
     int  selected_   = -1;       // index into editorWorld_ actors
     std::string worldName_ = "EditorWorld";   // -> Content/<worldName_>.world
+
+    std::vector<UWorld*> undoStack_, redoStack_;   // in-memory world snapshots (clones)
+    bool gizmoWasUsing_ = false;              // latch: snapshot once per gizmo drag
 
     UWorld*   editorWorld_ = nullptr;   // the live edited world (replaceable: New/Load)
     UWorld*   pieWorld_    = nullptr;    // spawned on Play (deep copy of editorWorld_)

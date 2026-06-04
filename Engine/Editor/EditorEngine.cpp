@@ -25,6 +25,7 @@
 #include "UPhysicsWorld.h"
 #include "ALight.h"
 #include "PointLight.h"
+#include "EnvironmentLight.h"
 #include "LightComponent.h"
 #include "FWorldSerializer.h"
 #include "FRenderShowFlag.h"
@@ -51,6 +52,8 @@ EditorEngine::~EditorEngine()
         ImGui::DestroyContext();
     }
     if (pieWorld_) { delete pieWorld_; pieWorld_ = nullptr; }
+    for (UWorld* w : undoStack_) delete w;
+    for (UWorld* w : redoStack_) delete w;
     delete editorWorld_;
     for (UMesh* m : meshAssets_) delete m;   // UScene dtor deletes the actors
 }
@@ -63,12 +66,14 @@ void EditorEngine::BuildEditorWorld()
     meshAssets_.push_back(sphere);
     meshAssets_.push_back(cube);
 
-    auto spawnMesh = [&](const char* name, UMesh* mesh, glm::vec3 pos, glm::vec3 kd)
+    auto spawnMesh = [&](const char* name, UMesh* mesh, const char* meshRef, glm::vec3 pos, glm::vec3 kd)
     {
         AActor* a = new AActor();
+        a->name = name;                    // identity for serialization / clone / undo
         a->SetActorLocation(pos);
         UMeshComponent* mc = new UMeshComponent();
         mc->mesh = mesh;
+        mc->meshRef = meshRef;             // descriptor so .world save/load round-trips
         mc->hasMaterialOverride = true;
         mc->materialOverride.kd        = kd;
         mc->materialOverride.ks        = glm::vec3(0.4f);
@@ -80,17 +85,19 @@ void EditorEngine::BuildEditorWorld()
     auto spawnEmpty = [&](const char* name, glm::vec3 pos)
     {
         AActor* a = new AActor();
+        a->name = name;
         a->SetActorLocation(pos);
         editorWorld_->Spawn(a);
         actorNames_.push_back(name);
     };
 
-    spawnMesh("Sphere_Ball", sphere, glm::vec3(-2.6f, 2.5f, -9.0f), glm::vec3(0.45f, 0.55f, 0.90f));
-    spawnMesh("Cube_Box",    cube,   glm::vec3( 2.6f, 0.0f, -9.0f), glm::vec3(0.90f, 0.55f, 0.28f));
+    spawnMesh("Sphere_Ball", sphere, "Sphere 1.6 28 14", glm::vec3(-2.6f, 2.5f, -9.0f), glm::vec3(0.45f, 0.55f, 0.90f));
+    spawnMesh("Cube_Box",    cube,   "Cube 1.4 1.4 1.4", glm::vec3( 2.6f, 0.0f, -9.0f), glm::vec3(0.90f, 0.55f, 0.28f));
 
     // A real light actor (ALight owns a LightComponent) -- inspectable in Details.
     {
         ALight* light = new ALight(new PointLight(glm::vec3(1.0f), glm::vec3(1.0f)));
+        light->name = "PointLight";
         light->SetActorLocation(glm::vec3(5.0f, 5.0f, -3.0f));
         editorWorld_->Spawn(light);
         actorNames_.push_back("PointLight");
@@ -158,9 +165,43 @@ void EditorEngine::SetEditorWorld(UWorld* w, const std::string& name)
     rtUploaded_ = false; hybridUploaded_ = false;
 }
 
+void EditorEngine::ClearHistory()
+{
+    for (UWorld* w : undoStack_) delete w;
+    for (UWorld* w : redoStack_) delete w;
+    undoStack_.clear();
+    redoStack_.clear();
+}
+
+void EditorEngine::PushUndo()
+{
+    if (!editorWorld_) return;
+    undoStack_.push_back(CopyWorld(*editorWorld_));     // lossless in-memory snapshot
+    if (undoStack_.size() > 64) { delete undoStack_.front(); undoStack_.erase(undoStack_.begin()); }
+    for (UWorld* w : redoStack_) delete w;
+    redoStack_.clear();                                 // a new edit forks the timeline
+}
+
+void EditorEngine::Undo()
+{
+    if (undoStack_.empty() || !editorWorld_) return;
+    redoStack_.push_back(CopyWorld(*editorWorld_));     // current -> redo
+    UWorld* prev = undoStack_.back(); undoStack_.pop_back();
+    SetEditorWorld(prev, worldName_);                   // adopts prev (takes ownership)
+}
+
+void EditorEngine::Redo()
+{
+    if (redoStack_.empty() || !editorWorld_) return;
+    undoStack_.push_back(CopyWorld(*editorWorld_));     // current -> undo
+    UWorld* next = redoStack_.back(); redoStack_.pop_back();
+    SetEditorWorld(next, worldName_);                   // adopts next (takes ownership)
+}
+
 void EditorEngine::NewWorld()
 {
     SetEditorWorld(new UWorld(), "Untitled");
+    ClearHistory();
 }
 
 void EditorEngine::LoadWorld(const std::string& path)
@@ -169,12 +210,14 @@ void EditorEngine::LoadWorld(const std::string& path)
     if (!w) { std::printf("[Editor] Load failed: %s\n", path.c_str()); return; }
     std::string stem = std::filesystem::path(path).stem().string();
     SetEditorWorld(w, stem);
+    ClearHistory();                          // a freshly opened world starts clean
     std::printf("[Editor] Loaded %s (%d actors)\n", path.c_str(),
                 (int)editorWorld_->GetScene().Actors.size());
 }
 
 AActor* EditorEngine::AddActor(const char* type, const std::string& name)
 {
+    PushUndo();                              // capture pre-add state
     // Spawn ~8 units in front of the editor camera so it lands in view.
     ACamera& cam = editorWorld_->GetCamera();
     glm::vec3 fwd = -cam.w;
@@ -195,6 +238,7 @@ AActor* EditorEngine::AddActor(const char* type, const std::string& name)
         a = new AActor();
         UMeshComponent* mc = new UMeshComponent();
         mc->mesh = mesh;
+        mc->meshRef = (t == "Cube") ? "Cube 1 1 1" : "Sphere 1 28 14";
         mc->hasMaterialOverride = true;
         mc->materialOverride.kd        = glm::vec3(0.7f);
         mc->materialOverride.ks        = glm::vec3(0.4f);
@@ -222,6 +266,35 @@ void EditorEngine::ImportAsset(const std::string& path)
 
     if (ext == ".world") { LoadWorld(path); return; }
 
+    UMesh* mesh = LoadMeshFile(path);
+    if (!mesh) { std::printf("[Editor] Import failed: %s\n", path.c_str()); return; }
+
+    PushUndo();                              // capture pre-import state
+
+    AActor* a = new AActor();
+    a->name = stem;
+    UMeshComponent* mc = new UMeshComponent();
+    mc->mesh = mesh;
+    mc->meshRef = path;                       // file path (best-effort round-trip)
+    a->SetMesh(mc);
+    ACamera& cam = editorWorld_->GetCamera();
+    glm::vec3 fwd = -cam.w; if (glm::length(fwd) < 0.1f) fwd = glm::vec3(0, 0, -1);
+    a->SetActorLocation(cam.eye + glm::normalize(fwd) * 8.0f);
+    editorWorld_->Spawn(a);
+    actorNames_.push_back(stem);
+    selected_ = (int)editorWorld_->GetScene().Actors.size() - 1;
+    std::printf("[Editor] Imported %s (%d tris)\n", path.c_str(), mesh->triangleCount());
+}
+
+// Load a mesh asset by path/descriptor. Imported meshes (.obj/.fbx/.mesh) are
+// owned by meshAssets_; descriptors (Sphere/Cube/Plane) come from the shared
+// Resolve cache (not owned here). Returns nullptr on failure (never crashes).
+UMesh* EditorEngine::LoadMeshFile(const std::string& path)
+{
+    namespace fs = std::filesystem;
+    std::string ext = fs::path(path).extension().string();
+    for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+
     UMesh* mesh = nullptr;
     if (ext == ".obj")
     {
@@ -236,36 +309,57 @@ void EditorEngine::ImportAsset(const std::string& path)
             for (size_t i = 1; i < parts.size(); ++i) delete parts[i];  // keep first
         }
     }
-    if (!mesh) { std::printf("[Editor] Import failed: %s\n", path.c_str()); return; }
-
-    meshAssets_.push_back(mesh);
-    AActor* a = new AActor();
-    a->name = stem;
-    UMeshComponent* mc = new UMeshComponent();
-    mc->mesh = mesh;
-    a->SetMesh(mc);
-    ACamera& cam = editorWorld_->GetCamera();
-    glm::vec3 fwd = -cam.w; if (glm::length(fwd) < 0.1f) fwd = glm::vec3(0, 0, -1);
-    a->SetActorLocation(cam.eye + glm::normalize(fwd) * 8.0f);
-    editorWorld_->Spawn(a);
-    actorNames_.push_back(stem);
-    selected_ = (int)editorWorld_->GetScene().Actors.size() - 1;
-    std::printf("[Editor] Imported %s (%d tris)\n", path.c_str(), mesh->triangleCount());
+    else if (ext == ".mesh")
+    {
+        mesh = UMesh::LoadBinary(path.c_str());
+    }
+    else
+    {
+        return UMesh::Resolve(path);          // descriptor -> shared cache (not owned)
+    }
+    if (mesh) meshAssets_.push_back(mesh);    // own imported assets
+    return mesh;
 }
 
-UWorld* EditorEngine::CopyWorld(UWorld& src)
+UWorld* EditorEngine::CopyWorld(UWorld& src, bool resetPhysics)
 {
     UWorld* dst = new UWorld();
+    dst->GetScene().shadingModel = src.GetScene().shadingModel;
+    dst->GetCamera() = src.GetCamera();                 // value copy of all camera fields
+
     for (AActor* sa : src.GetScene().Actors)
     {
-        AActor* da = new AActor();
+        AActor* da = nullptr;
+
+        // Lights: clone the concrete light component so type/params survive.
+        if (ALight* sl = dynamic_cast<ALight*>(sa))
+        {
+            LightComponent* lc = nullptr;
+            if (auto* pl = dynamic_cast<PointLight*>(sl->lightComp))
+                lc = new PointLight(pl->LightColor, pl->LightIntensity);
+            else if (auto* el = dynamic_cast<EnvironmentLight*>(sl->lightComp))
+            {
+                auto* e = new EnvironmentLight(el->LightColor, el->LightIntensity);
+                e->horizonColor = el->horizonColor; e->zenithColor = el->zenithColor; e->skyExp = el->skyExp;
+                lc = e;
+            }
+            else if (sl->lightComp)
+                lc = new LightComponent(sl->lightComp->LightColor, sl->lightComp->LightIntensity);
+            da = new ALight(lc);
+        }
+        else
+        {
+            da = new AActor();
+        }
+
+        da->name = sa->name;
         da->SetActorLocation(sa->GetActorLocation());
         da->SetActorRotation(sa->GetActorRotation());
         da->SetActorScale   (sa->GetActorScale());
 
         if (sa->mesh)
         {
-            UMeshComponent* mc = new UMeshComponent(*sa->mesh); // shares UMesh asset; copies override + rel xform
+            UMeshComponent* mc = new UMeshComponent(*sa->mesh); // shares UMesh asset; copies meshRef + override + rel xform
             da->SetMesh(mc);                                    // re-parents under da's root
         }
         if (sa->physics)
@@ -279,7 +373,7 @@ UWorld* EditorEngine::CopyWorld(UWorld& src)
             {
                 p->mass = sa->physics->mass; p->restitution = sa->physics->restitution;
                 p->friction = sa->physics->friction; p->bAffectedByGravity = sa->physics->bAffectedByGravity;
-                p->velocity = glm::vec3(0.0f);          // PIE starts at rest
+                p->velocity = resetPhysics ? glm::vec3(0.0f) : sa->physics->velocity;
                 da->SetPhysics(p);
             }
         }
@@ -290,7 +384,7 @@ UWorld* EditorEngine::CopyWorld(UWorld& src)
 
 void EditorEngine::OnPlay()
 {
-    pieWorld_ = CopyWorld(*editorWorld_);              // deep copy (UMesh shared)
+    pieWorld_ = CopyWorld(*editorWorld_, /*resetPhysics=*/true);   // deep copy (UMesh shared)
     pieWorld_->GetPhysics().enableFloor = true;
     pieWorld_->GetPhysics().floorY      = -2.5f;       // ball lands here
     pieWorld_->BeginPlay();
@@ -512,6 +606,17 @@ void EditorEngine::DrawUI()
 {
     DrawMenuBar();   // BeginMainMenuBar shrinks the viewport work area below
 
+    // Keyboard shortcuts (editor only; ignore while typing in a text field).
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        if (!playing_ && io.KeyCtrl && !io.WantTextInput)
+        {
+            if (ImGui::IsKeyPressed(ImGuiKey_Z, false)) Undo();
+            if (ImGui::IsKeyPressed(ImGuiKey_Y, false)) Redo();
+            if (ImGui::IsKeyPressed(ImGuiKey_S, false)) SaveWorld();
+        }
+    }
+
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     const ImVec2 pos = vp->WorkPos, sz = vp->WorkSize;
     const float toolH = 40.0f, statusH = 24.0f, leftW = 230.0f, rightW = 300.0f, cbH = 168.0f;
@@ -570,7 +675,12 @@ void EditorEngine::DrawMenuBar()
         if (ImGui::MenuItem("Quit")) glfwSetWindowShouldClose(window_, GL_TRUE);
         ImGui::EndMenu();
     }
-    if (ImGui::BeginMenu("Edit"))   { ImGui::MenuItem("Undo"); ImGui::MenuItem("Redo"); ImGui::EndMenu(); }
+    if (ImGui::BeginMenu("Edit"))
+    {
+        if (ImGui::MenuItem("Undo", "Ctrl+Z", false, !undoStack_.empty())) Undo();
+        if (ImGui::MenuItem("Redo", "Ctrl+Y", false, !redoStack_.empty())) Redo();
+        ImGui::EndMenu();
+    }
     if (ImGui::BeginMenu("World"))  { ImGui::MenuItem("World Settings"); ImGui::EndMenu(); }
     if (ImGui::BeginMenu("Build"))  { ImGui::MenuItem("Build Lighting"); ImGui::EndMenu(); }
     if (ImGui::BeginMenu("Window")) { ImGui::MenuItem("Reset Layout"); ImGui::EndMenu(); }
@@ -605,6 +715,15 @@ void EditorEngine::DrawContentBrowser()
         ImGui::PushID(i);
         ImGui::BeginGroup();
         ImGui::Button((std::string(e.icon) + "##icon").c_str(), ImVec2(74, 52));
+
+        // Mesh assets are drag sources -> drop onto a Details "Mesh" slot.
+        if (cat == "Mesh" && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+        {
+            std::string full = contentDir_ + "/" + e.name;
+            ImGui::SetDragDropPayload("ASSET_MESH", full.c_str(), full.size() + 1);
+            ImGui::Text("%s %s", e.icon, e.name.c_str());
+            ImGui::EndDragDropSource();
+        }
 
         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
         {
@@ -686,6 +805,17 @@ void EditorEngine::DrawToolbar()
 {
     if (!playing_) { if (ImGui::Button("|>  Play")) OnPlay(); }
     else           { if (ImGui::Button("[]  Stop")) OnStop(); }
+
+    // Undo / Redo (editor only; disabled when the stack is empty).
+    ImGui::SameLine(0, 16);
+    ImGui::BeginDisabled(playing_ || undoStack_.empty());
+    if (ImGui::Button("Undo")) Undo();
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(playing_ || redoStack_.empty());
+    if (ImGui::Button("Redo")) Redo();
+    ImGui::EndDisabled();
+
     ImGui::SameLine(0, 16);
     ImGui::TextDisabled("Render Mode"); ImGui::SameLine();
     for (int i = 0; i < 3; ++i) { if (i) ImGui::SameLine(); if (ImGui::RadioButton(kModes[i], renderMode_ == i)) renderMode_ = i; }
@@ -743,7 +873,7 @@ void EditorEngine::DrawOutliner()
             if (ImGui::IsWindowAppearing())
                 std::snprintf(cbBuf_, sizeof(cbBuf_), "%s", actorNames_[i].c_str());
             if (ImGui::InputText("Name", cbBuf_, sizeof(cbBuf_), ImGuiInputTextFlags_EnterReturnsTrue))
-            { actorNames_[i] = cbBuf_; actors[i]->name = cbBuf_; ImGui::CloseCurrentPopup(); }
+            { PushUndo(); actorNames_[i] = cbBuf_; actors[i]->name = cbBuf_; ImGui::CloseCurrentPopup(); }
             ImGui::Separator();
             if (ImGui::MenuItem("Delete")) toDelete = i;
             ImGui::EndPopup();
@@ -752,6 +882,7 @@ void EditorEngine::DrawOutliner()
 
     if (toDelete >= 0)                              // deferred: never mutate mid-iteration
     {
+        PushUndo();                                 // capture pre-delete state
         delete actors[toDelete];
         actors.erase(actors.begin() + toDelete);
         actorNames_.erase(actorNames_.begin() + toDelete);
@@ -772,25 +903,62 @@ void EditorEngine::DrawDetails()
     if (playing_)
         ImGui::TextColored(ImVec4(0.88f, 0.66f, 0.35f, 1), "PIE mode -- read-only");
 
+    // On the frame an editable widget is first activated (mouse-down), its bound
+    // value has not changed yet -> snapshot here captures the correct pre-edit
+    // state for undo. One snapshot per drag/edit session.
+    auto snap = [&] { if (ImGui::IsItemActivated()) PushUndo(); };
+
     ImGui::BeginDisabled(playing_);          // properties are read-only during PIE
     ImGui::SeparatorText("Transform");
     glm::vec3 loc = a->GetActorLocation();
     if (ImGui::DragFloat3("Position", &loc.x, 0.05f))            a->SetActorLocation(loc);
+    snap();
     glm::vec3 rot = a->GetActorRotation();
     if (ImGui::DragFloat3("Rotation", &rot.x, 1.0f))            a->SetActorRotation(rot);
+    snap();
     glm::vec3 scl = a->GetActorScale();
     if (ImGui::DragFloat3("Scale",    &scl.x, 0.05f, 0.01f, 100.0f)) a->SetActorScale(scl);
+    snap();
 
     // ---- UMeshComponent ----
-    if (a->mesh && a->mesh->mesh)
+    if (UMeshComponent* mc = a->mesh)
     {
-        Material& m = a->mesh->hasMaterialOverride ? a->mesh->materialOverride
-                                                   : a->mesh->mesh->material;
         ImGui::SeparatorText("Mesh Component");
-        ImGui::Text("Triangles: %d", a->mesh->mesh->triangleCount());
-        ImGui::ColorEdit3("Diffuse",   &m.kd.x);
-        ImGui::ColorEdit3("Specular",  &m.ks.x);
-        ImGui::DragFloat ("Shininess", &m.shininess, 1.0f, 0.0f, 256.0f);
+
+        // Mesh identity + a drop slot: drag a mesh from the Content Browser here
+        // (or click to pick a file) to assign/replace this component's mesh.
+        const std::string ref = mc->meshRef.empty()
+            ? (mc->mesh ? "(in-memory mesh)" : "(none)") : mc->meshRef;
+        ImGui::Text("Mesh: %s", ref.c_str());
+        if (mc->mesh) ImGui::Text("Triangles: %d", mc->mesh->triangleCount());
+
+        ImGui::Button(mc->mesh ? "Replace Mesh  (drop asset / click)"
+                               : "Assign Mesh  (drop asset / click)", ImVec2(-1, 0));
+        if (ImGui::BeginDragDropTarget())
+        {
+            if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_MESH"))
+            {
+                std::string p((const char*)pl->Data);     // payload is null-terminated
+                if (UMesh* nm = LoadMeshFile(p))
+                { PushUndo(); mc->mesh = nm; mc->meshRef = p; rtUploaded_ = false; hybridUploaded_ = false; }
+            }
+            ImGui::EndDragDropTarget();
+        }
+        if (ImGui::IsItemClicked())                       // click the slot -> file picker
+        {
+            std::string p = FFileDialog::OpenAsset();
+            if (!p.empty())
+                if (UMesh* nm = LoadMeshFile(p))
+                { PushUndo(); mc->mesh = nm; mc->meshRef = p; rtUploaded_ = false; hybridUploaded_ = false; }
+        }
+
+        if (mc->mesh)
+        {
+            Material& m = mc->hasMaterialOverride ? mc->materialOverride : mc->mesh->material;
+            ImGui::ColorEdit3("Diffuse",   &m.kd.x);       snap();
+            ImGui::ColorEdit3("Specular",  &m.ks.x);       snap();
+            ImGui::DragFloat ("Shininess", &m.shininess, 1.0f, 0.0f, 256.0f); snap();
+        }
     }
 
     // ---- UPrimitiveComponent (collision shape + rigid body) ----
@@ -801,14 +969,14 @@ void EditorEngine::DrawDetails()
                                                             : "Capsule Collision";
         ImGui::SeparatorText(shape);
         ImGui::TextDisabled("UPrimitiveComponent");
-        ImGui::DragFloat("Mass",        &p->mass,        0.1f,  0.0f, 100.0f);
-        ImGui::DragFloat("Restitution", &p->restitution, 0.01f, 0.0f, 1.0f);
-        ImGui::DragFloat("Friction",    &p->friction,    0.01f, 0.0f, 1.0f);
-        ImGui::Checkbox ("Affected by Gravity", &p->bAffectedByGravity);
+        ImGui::DragFloat("Mass",        &p->mass,        0.1f,  0.0f, 100.0f); snap();
+        ImGui::DragFloat("Restitution", &p->restitution, 0.01f, 0.0f, 1.0f);  snap();
+        ImGui::DragFloat("Friction",    &p->friction,    0.01f, 0.0f, 1.0f);  snap();
+        if (ImGui::Checkbox ("Affected by Gravity", &p->bAffectedByGravity))  PushUndo();
         if (p->GetShape() == EShape::Sphere)
-            ImGui::DragFloat ("Radius",       &static_cast<USphereComponent*>(p)->radius, 0.05f, 0.01f, 100.0f);
+        { ImGui::DragFloat ("Radius",       &static_cast<USphereComponent*>(p)->radius, 0.05f, 0.01f, 100.0f); snap(); }
         else if (p->GetShape() == EShape::Box)
-            ImGui::DragFloat3("Half Extents", &static_cast<UBoxComponent*>(p)->halfExtents.x, 0.05f, 0.01f, 100.0f);
+        { ImGui::DragFloat3("Half Extents", &static_cast<UBoxComponent*>(p)->halfExtents.x, 0.05f, 0.01f, 100.0f); snap(); }
     }
 
     // ---- LightComponent (ALight) ----
@@ -817,8 +985,8 @@ void EditorEngine::DrawDetails()
         if (LightComponent* lc = light->lightComp)
         {
             ImGui::SeparatorText("Light Component");
-            ImGui::ColorEdit3("Light Color",  &lc->LightColor.x);
-            ImGui::DragFloat3("Intensity",    &lc->LightIntensity.x, 0.05f, 0.0f, 50.0f);
+            ImGui::ColorEdit3("Light Color",  &lc->LightColor.x);              snap();
+            ImGui::DragFloat3("Intensity",    &lc->LightIntensity.x, 0.05f, 0.0f, 50.0f); snap();
             // Light position is the actor transform (edited in the Transform section).
         }
     }
@@ -830,9 +998,9 @@ void EditorEngine::DrawDetails()
     if (ImGui::BeginPopup("AddComponent"))
     {
         if (!a->physics && ImGui::MenuItem("Sphere Collision"))
-        { auto* s = new USphereComponent(a); s->radius = 1.0f; a->SetPhysics(s); }
+        { PushUndo(); auto* s = new USphereComponent(a); s->radius = 1.0f; a->SetPhysics(s); }
         if (!a->physics && ImGui::MenuItem("Box Collision"))
-        { auto* b = new UBoxComponent(a); b->halfExtents = glm::vec3(1.0f); a->SetPhysics(b); }
+        { PushUndo(); auto* b = new UBoxComponent(a); b->halfExtents = glm::vec3(1.0f); a->SetPhysics(b); }
         if (a->physics) ImGui::TextDisabled("(already has a collider)");
         ImGui::EndPopup();
     }
@@ -931,8 +1099,17 @@ void EditorEngine::DrawViewport()
 
             AActor* a = actors[selected_];
             glm::mat4 model = a->rootComponent.GetWorldMatrix();
-            if (ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(proj),
-                                     op, mode, glm::value_ptr(model)))
+            const bool changed = ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(proj),
+                                                      op, mode, glm::value_ptr(model));
+
+            // Snapshot once at drag start: Manipulate only edits the local `model`
+            // here -- the actor's TRS is still the pre-edit state until SetActor*
+            // below -- so PushUndo() now captures the correct "before" world.
+            const bool usingNow = ImGuizmo::IsUsing();
+            if (usingNow && !gizmoWasUsing_) PushUndo();
+            gizmoWasUsing_ = usingNow;
+
+            if (changed)
             {
                 glm::vec3 t, r, s;
                 ImGuizmo::DecomposeMatrixToComponents(glm::value_ptr(model), &t.x, &r.x, &s.x);
