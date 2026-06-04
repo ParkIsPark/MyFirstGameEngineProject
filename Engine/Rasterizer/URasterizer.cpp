@@ -88,13 +88,14 @@ void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
 namespace
 {
     // A vertex carried through clip space with the attributes we interpolate.
-    struct ClipV { glm::vec4 clip; glm::vec3 wp; glm::vec3 wn; };
+    struct ClipV { glm::vec4 clip; glm::vec3 wp; glm::vec3 wn; glm::vec2 uv; };
 
     ClipV lerpClip(const ClipV& A, const ClipV& B, float t)
     {
         return ClipV{ A.clip + t * (B.clip - A.clip),
                       A.wp   + t * (B.wp   - A.wp),
-                      A.wn   + t * (B.wn   - A.wn) };
+                      A.wn   + t * (B.wn   - A.wn),
+                      A.uv   + t * (B.uv   - A.uv) };
     }
 
     // Inside (visible side) when the vertex is in FRONT of the camera plane,
@@ -136,10 +137,12 @@ namespace
 
 void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
                                   const glm::vec3& albedo, UGBuffer& gb,
-                                  int cx0, int cy0, int cx1, int cy1, bool countStats) const
+                                  int cx0, int cy0, int cx1, int cy1, bool countStats,
+                                  const Material* mat) const
 {
     const glm::mat3 nrmM = glm::inverseTranspose(glm::mat3(xf.model));
     const int nTri = mesh.triangleCount();
+    const bool textured = mat && !mat->texData.empty();
 
     // Tile bounds (clamped to the G-buffer). A multithreaded fill gives each tile
     // a disjoint pixel rect so TestAndSet never races.
@@ -186,7 +189,13 @@ void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
             const glm::vec3 wp = (al * A.wp * iw0 + be * B.wp * iw1 + ga * C.wp * iw2) / pw;
             const glm::vec3 wn = glm::normalize(
                                  (al * A.wn * iw0 + be * B.wn * iw1 + ga * C.wn * iw2) / pw);
-            gb.TestAndSet(x, y, z, wp, wn, albedo);
+            glm::vec3 alb = albedo;
+            if (textured)
+            {
+                const glm::vec2 uv = (al * A.uv * iw0 + be * B.uv * iw1 + ga * C.uv * iw2) / pw;
+                alb = mat->SampleDiffuse(uv);
+            }
+            gb.TestAndSet(x, y, z, wp, wn, alb);
         }
     };
 
@@ -198,9 +207,9 @@ void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
         const Vertex& c = mesh.vertices[mesh.indices[3 * tri + 2]];
 
         ClipV v[3] = {
-            { xf.ToClip(a.position), glm::vec3(xf.model * glm::vec4(a.position, 1.0f)), nrmM * a.normal },
-            { xf.ToClip(b.position), glm::vec3(xf.model * glm::vec4(b.position, 1.0f)), nrmM * b.normal },
-            { xf.ToClip(c.position), glm::vec3(xf.model * glm::vec4(c.position, 1.0f)), nrmM * c.normal },
+            { xf.ToClip(a.position), glm::vec3(xf.model * glm::vec4(a.position, 1.0f)), nrmM * a.normal, a.uv },
+            { xf.ToClip(b.position), glm::vec3(xf.model * glm::vec4(b.position, 1.0f)), nrmM * b.normal, b.uv },
+            { xf.ToClip(c.position), glm::vec3(xf.model * glm::vec4(c.position, 1.0f)), nrmM * c.normal, c.uv },
         };
 
         if (frustumCull && frustumReject(v[0].clip, v[1].clip, v[2].clip))

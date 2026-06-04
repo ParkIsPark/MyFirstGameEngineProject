@@ -75,10 +75,13 @@ public:
     // cx0..cy1 restrict writes to a tile (for multithreaded fill -- disjoint
     // tiles need no sync). countStats=false skips the shared CullStats counters
     // (they would race / double-count across tiles).
+    // `mat` (optional): when it has CPU texture data, the per-pixel diffuse is
+    // sampled from it (UV-interpolated) into the G-buffer albedo -- gives the
+    // Hybrid path textured surfaces. Null -> flat `albedo`.
     void DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
                          const glm::vec3& albedo, UGBuffer& gb,
                          int cx0 = 0, int cy0 = 0, int cx1 = 0x7fffffff, int cy1 = 0x7fffffff,
-                         bool countStats = true) const;
+                         bool countStats = true, const Material* mat = nullptr) const;
 
     // ---- CPU shaded raster (HW6 Q1-Q3) ----
     // Rasterize a mesh shaded with the given model + Blinn-Phong, writing the

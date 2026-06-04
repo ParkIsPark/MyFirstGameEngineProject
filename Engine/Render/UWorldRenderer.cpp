@@ -52,6 +52,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
     std::vector<glm::mat4>    models;
     std::vector<glm::vec3>    albedos;
     std::vector<float>        mirrors;
+    std::vector<const Material*> mats;
     std::vector<glm::vec3>    lightPos, lightColor;
     for (AActor* a : scene.Actors)
     {
@@ -63,6 +64,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
                 const Material& mat = mc->hasMaterialOverride ? mc->materialOverride : mc->mesh->material;
                 albedos.push_back(mat.kd);
                 mirrors.push_back(glm::max(mat.km.x, glm::max(mat.km.y, mat.km.z)));
+                mats.push_back(&mat);
             }
         if (ALight* L = dynamic_cast<ALight*>(a))
             if (PointLightComponent* pl = dynamic_cast<PointLightComponent*>(L->lightComp))
@@ -140,7 +142,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
                 const int cy1 = std::min(cy0 + TILE - 1, h - 1);
                 for (size_t i = 0; i < meshes.size(); ++i)
                     rast_.DrawMeshGBuffer(*meshes[i], xfs[i], albedos[i], gbuf_,
-                                          cx0, cy0, cx1, cy1, /*countStats=*/false);
+                                          cx0, cy0, cx1, cy1, /*countStats=*/false, mats[i]);
             }
         });
 
