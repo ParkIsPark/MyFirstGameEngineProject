@@ -49,8 +49,9 @@ private:
     void ImportAsset(const std::string& path);  // .obj/.fbx -> mesh actor; .world -> load
     UMesh* LoadMeshFile(const std::string& path);  // .obj/.fbx/.mesh/descriptor -> UMesh*
     void RebuildActorNames();            // resync actorNames_ from scene actors
-    void OnPlay();                       // Editor -> PIE: deep-copy + BeginPlay
+    void OnPlay();                       // Editor -> PIE: deep-copy + BeginPlay (in-window)
     void OnStop();                       // PIE -> Editor
+    void LaunchGameProcess();            // save world -> spawn argv0 --game (new window)
     // Lossless deep copy (name + transform + mesh[shared] + material + physics +
     // lights + camera + shadingModel). resetPhysics zeroes velocity (for PIE).
     UWorld* CopyWorld(UWorld& src, bool resetPhysics = false);

@@ -68,12 +68,14 @@
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\FTransform.cpp"><Filter>Engine\Rasterizer</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.cpp"><Filter>Engine\Rasterizer</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\URenderer.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Render\UWorldRenderer.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\UHybridPass.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Acceleration\BVH.cpp"><Filter>Engine\Acceleration</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Import\UObjImporter.cpp"><Filter>Engine\Import</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Import\UFbxImporter.cpp"><Filter>Engine\Import</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\EditorEngine.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\FFileDialog.cpp"><Filter>Engine\Editor</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\FProcess.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_draw.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_tables.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>

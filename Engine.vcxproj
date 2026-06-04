@@ -76,6 +76,7 @@
     <ClCompile Include="Engine\Rasterizer\URasterizer.cpp" />
     <!-- Engine: Render -->
     <ClCompile Include="Engine\Render\URenderer.cpp" />
+    <ClCompile Include="Engine\Render\UWorldRenderer.cpp" />
     <ClCompile Include="Engine\Render\UHybridPass.cpp" />
     <!-- Engine: Acceleration -->
     <ClCompile Include="Engine\Acceleration\BVH.cpp" />
@@ -85,6 +86,7 @@
     <!-- Engine: Editor + ImGui -->
     <ClCompile Include="Engine\Editor\EditorEngine.cpp" />
     <ClCompile Include="Engine\Editor\FFileDialog.cpp" />
+    <ClCompile Include="Engine\Editor\FProcess.cpp" />
     <ClCompile Include="Engine\Editor\External\imgui\imgui.cpp" />
     <ClCompile Include="Engine\Editor\External\imgui\imgui_draw.cpp" />
     <ClCompile Include="Engine\Editor\External\imgui\imgui_tables.cpp" />
@@ -139,6 +141,7 @@
     <ClInclude Include="Engine\Rasterizer\UGBuffer.h" />
     <!-- Engine: Render headers -->
     <ClInclude Include="Engine\Render\URenderer.h" />
+    <ClInclude Include="Engine\Render\UWorldRenderer.h" />
     <ClInclude Include="Engine\Render\FRenderShowFlag.h" />
     <ClInclude Include="Engine\Render\UHybridPass.h" />
     <!-- Engine: Acceleration headers -->
@@ -151,6 +154,7 @@
     <!-- Engine: Editor headers -->
     <ClInclude Include="Engine\Editor\EditorEngine.h" />
     <ClInclude Include="Engine\Editor\FFileDialog.h" />
+    <ClInclude Include="Engine\Editor\FProcess.h" />
     <ClInclude Include="Engine\Editor\External\ImGuizmo\ImGuizmo.h" />
     <!-- Engine: Framework headers -->
     <ClInclude Include="Engine\Framework\Engine.h" />

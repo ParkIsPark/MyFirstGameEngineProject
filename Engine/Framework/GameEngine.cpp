@@ -6,8 +6,13 @@
 #include "UWorld.h"
 #include "UScene.h"
 #include "ACamera.h"
+#include "UPhysicsWorld.h"
 #include "FWorldSerializer.h"
-#include "FRenderShowFlag.h"
+
+void GameEngine::OnStartup()
+{
+    worldRenderer_.Init();   // compile GPU passes now that GL is ready
+}
 
 UWorld* GameEngine::WorldSetting()
 {
@@ -17,6 +22,10 @@ UWorld* GameEngine::WorldSetting()
         std::printf("[Game] could not load '%s' -- starting empty.\n", worldPath_.c_str());
         return new UWorld();
     }
+    // Play semantics: run with a ground plane so dynamic bodies land (mirrors the
+    // editor's in-window PIE). Gravity is whatever the world serialized.
+    w->GetPhysics().enableFloor = true;
+    w->GetPhysics().floorY      = -2.5f;
     std::printf("[Game] loaded '%s' (%d actors)\n",
                 worldPath_.c_str(), (int)w->GetScene().Actors.size());
     return w;
@@ -37,11 +46,5 @@ void GameEngine::Render()
     cam.SetOrientation(cam.yaw, cam.pitch);
     cam.SetFOV(cam.fov, (float)Width() / (float)Height());
 
-    FRenderShowFlag flag;
-    flag.shading = (EShadingModel)scene.shadingModel;     // world's chosen model
-    renderer_.RasterShaded(*w, flag);
-
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    if (!scene.outputImage.empty())
-        glDrawPixels(Width(), Height(), GL_RGB, GL_FLOAT, scene.outputImage.data());
+    worldRenderer_.Render(*w, scene.renderMode, Width(), Height());   // render-mode honored
 }

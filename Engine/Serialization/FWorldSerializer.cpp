@@ -9,6 +9,10 @@
 #include "UMeshComponent.h"
 #include "ALight.h"
 #include "LightComponent.h"
+#include "UPhysicsWorld.h"
+#include "UPrimitiveComponent.h"
+#include "USphereComponent.h"
+#include "UBoxComponent.h"
 
 #include <sstream>
 #include <fstream>
@@ -32,7 +36,16 @@ std::string FWorldSerializer::Save(UWorld& world)
     std::string out = "WorldFormat = 1\n\n";
 
     out += "[World]\n";
-    { FSaveArchive a; int sm = sc.shadingModel; a.Field("ShadingModel", sm); out += a.str(); }
+    {
+        FSaveArchive a;
+        int sm = sc.shadingModel; a.Field("ShadingModel", sm);
+        int rm = sc.renderMode;   a.Field("RenderMode", rm);
+        UPhysicsWorld& phys = world.GetPhysics();
+        int gravEnabled = phys.enableFloor ? 1 : 0; a.Field("FloorEnabled", gravEnabled);
+        float fy = phys.floorY; a.Field("FloorY", fy);
+        glm::vec3 g = phys.gravity; a.Field("Gravity", g);
+        out += a.str();
+    }
     out += "\n";
 
     out += "[Camera]\n";
@@ -58,6 +71,22 @@ std::string FWorldSerializer::Save(UWorld& world)
             out += "  [Component]\n";
             FSaveArchive a; std::string t = c->TypeName();
             a.Field("Type", t); c->Serialize(a); out += a.str();
+        }
+        if (UPrimitiveComponent* p = actor->physics)   // collision shape + rigid body
+        {
+            out += "  [Collision]\n";
+            FSaveArchive a;
+            std::string shape = p->GetShape() == EShape::Box ? "Box" : "Sphere";
+            a.Field("Shape", shape);
+            if (p->GetShape() == EShape::Box)
+            { glm::vec3 he = static_cast<UBoxComponent*>(p)->halfExtents; a.Field("HalfExtents", he); }
+            else
+            { float r = static_cast<USphereComponent*>(p)->radius; a.Field("Radius", r); }
+            a.Field("Mass", p->mass);
+            a.Field("Restitution", p->restitution);
+            a.Field("Friction", p->friction);
+            int grav = p->bAffectedByGravity ? 1 : 0; a.Field("Gravity", grav);
+            out += a.str();
         }
         out += "\n";
     }
@@ -86,6 +115,11 @@ UWorld* FWorldSerializer::Load(const std::string& text)
         if (hdr == "World")
         {
             int sm = sc.shadingModel; a.Field("ShadingModel", sm); sc.shadingModel = sm;
+            int rm = sc.renderMode;   a.Field("RenderMode", rm);   sc.renderMode = rm;
+            UPhysicsWorld& phys = world->GetPhysics();
+            int fe = phys.enableFloor ? 1 : 0; a.Field("FloorEnabled", fe); phys.enableFloor = (fe != 0);
+            float fy = phys.floorY; a.Field("FloorY", fy); phys.floorY = fy;
+            glm::vec3 g = phys.gravity; a.Field("Gravity", g); phys.gravity = g;
         }
         else if (hdr == "Camera")
         {
@@ -119,6 +153,29 @@ UWorld* FWorldSerializer::Load(const std::string& text)
             if (LightComponent* lc = dynamic_cast<LightComponent*>(comp))
                 if (ALight* al = dynamic_cast<ALight*>(curActor))
                     al->lightComp = lc;
+        }
+        else if (hdr == "Collision")
+        {
+            if (!curActor) return;
+            std::string shape = "Sphere"; a.Field("Shape", shape);
+            UPrimitiveComponent* p = nullptr;
+            if (shape == "Box")
+            {
+                auto* b = new UBoxComponent(curActor);
+                glm::vec3 he = b->halfExtents; a.Field("HalfExtents", he); b->halfExtents = he;
+                p = b;
+            }
+            else
+            {
+                auto* s = new USphereComponent(curActor);
+                float r = s->radius; a.Field("Radius", r); s->radius = r;
+                p = s;
+            }
+            a.Field("Mass", p->mass);
+            a.Field("Restitution", p->restitution);
+            a.Field("Friction", p->friction);
+            int grav = p->bAffectedByGravity ? 1 : 0; a.Field("Gravity", grav); p->bAffectedByGravity = (grav != 0);
+            curActor->SetPhysics(p);
         }
     };
 

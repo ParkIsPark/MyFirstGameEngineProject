@@ -32,6 +32,7 @@
 #include "UObjImporter.h"
 #include "UFbxImporter.h"
 #include "FFileDialog.h"
+#include "FProcess.h"
 
 #include <cstdio>
 #include <cctype>
@@ -154,6 +155,7 @@ void EditorEngine::SetEditorWorld(UWorld* w, const std::string& name)
     worldName_   = name;
     RebuildActorNames();
     selected_    = editorWorld_->GetScene().Actors.empty() ? -1 : 0;
+    renderMode_  = editorWorld_->GetScene().renderMode;     // adopt the world's render mode
 
     // Adopt the loaded world's camera into the editor fly-cam state.
     ACamera& cam = editorWorld_->GetCamera();
@@ -395,6 +397,20 @@ void EditorEngine::OnStop()
 {
     if (pieWorld_) { pieWorld_->EndPlay(); delete pieWorld_; pieWorld_ = nullptr; }
     playing_ = false;
+}
+
+void EditorEngine::LaunchGameProcess()
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::create_directories(contentDir_, ec);
+    const std::string tmp = contentDir_ + "/__pie.world";       // standalone snapshot
+    FWorldSerializer::SaveToFile(*editorWorld_, tmp.c_str());
+
+    const std::string exe = FProcess::ExecutablePath();
+    if (exe.empty()) { std::printf("[Editor] cannot resolve exe path\n"); return; }
+    const bool ok = FProcess::LaunchDetached(exe, "--game \"" + tmp + "\"");
+    std::printf("[Editor] Launch game (new window): %s\n", ok ? "ok" : "FAILED");
 }
 
 void EditorEngine::OnStartup()
@@ -805,6 +821,10 @@ void EditorEngine::DrawToolbar()
 {
     if (!playing_) { if (ImGui::Button("|>  Play")) OnPlay(); }
     else           { if (ImGui::Button("[]  Stop")) OnStop(); }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(playing_);
+    if (ImGui::Button(">>  Play (Window)")) LaunchGameProcess();   // separate process
+    ImGui::EndDisabled();
 
     // Undo / Redo (editor only; disabled when the stack is empty).
     ImGui::SameLine(0, 16);
@@ -819,6 +839,7 @@ void EditorEngine::DrawToolbar()
     ImGui::SameLine(0, 16);
     ImGui::TextDisabled("Render Mode"); ImGui::SameLine();
     for (int i = 0; i < 3; ++i) { if (i) ImGui::SameLine(); if (ImGui::RadioButton(kModes[i], renderMode_ == i)) renderMode_ = i; }
+    ActiveWorld().GetScene().renderMode = renderMode_;   // persist into the world (.world save)
 
     // Shading model (HW6 Q1-Q3) drives the CPU raster preview (editor + PIE raster).
     ImGui::SameLine(0, 16);

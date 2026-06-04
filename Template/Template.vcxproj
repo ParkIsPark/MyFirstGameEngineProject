@@ -88,6 +88,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\FTransform.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\URenderer.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Render\UWorldRenderer.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\UHybridPass.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Acceleration\BVH.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Import\UObjImporter.cpp" />
@@ -95,6 +96,7 @@
     <!-- Engine: Editor + ImGui -->
     <ClCompile Include="$(EngineRootDir)Engine\Editor\EditorEngine.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\FFileDialog.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\FProcess.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_draw.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_tables.cpp" />
@@ -149,6 +151,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\UGBuffer.h" />
     <!-- Engine: Render headers -->
     <ClInclude Include="$(EngineRootDir)Engine\Render\URenderer.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\UWorldRenderer.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderShowFlag.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\UHybridPass.h" />
     <!-- Engine: Acceleration + Threading headers -->
@@ -160,6 +163,7 @@
     <!-- Engine: Editor headers -->
     <ClInclude Include="$(EngineRootDir)Engine\Editor\EditorEngine.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Editor\FFileDialog.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\FProcess.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.h" />
     <!-- Engine: Framework headers -->
     <ClInclude Include="$(EngineRootDir)Engine\Framework\Engine.h" />

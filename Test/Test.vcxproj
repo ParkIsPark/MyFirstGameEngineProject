@@ -87,12 +87,14 @@
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\FTransform.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\URenderer.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Render\UWorldRenderer.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\UHybridPass.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Acceleration\BVH.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Import\UObjImporter.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Import\UFbxImporter.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\EditorEngine.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\FFileDialog.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\FProcess.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_draw.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_tables.cpp" />
