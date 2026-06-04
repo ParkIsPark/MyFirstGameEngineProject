@@ -202,14 +202,19 @@ void EditorEngine::PushUndo()
     redoStack_.clear();                                 // a new edit forks the timeline
 }
 
+// View settings (camera + render/shading mode) are NOT part of the undo history:
+// moving the camera or switching render mode must not be reverted by Ctrl+Z, and
+// undoing an edit must not jump the camera. Capture them before a snapshot swap
+// and restore after.
 void EditorEngine::Undo()
 {
     if (undoStack_.empty() || !editorWorld_) return;
-    const int rm = renderMode_;                                       // view settings:
-    const int sm = editorWorld_->GetScene().shadingModel;             // not part of undo
+    const glm::vec3 eye = camEye_; const float yaw = camYaw_, pit = camPitch_;
+    const int rm = renderMode_, sm = editorWorld_->GetScene().shadingModel;
     redoStack_.push_back(CopyWorld(*editorWorld_));     // current -> redo
     UWorld* prev = undoStack_.back(); undoStack_.pop_back();
     SetEditorWorld(prev, worldName_);                   // adopts prev (takes ownership)
+    camEye_ = eye; camYaw_ = yaw; camPitch_ = pit;
     renderMode_ = rm; editorWorld_->GetScene().renderMode = rm;
     editorWorld_->GetScene().shadingModel = sm;
 }
@@ -217,11 +222,12 @@ void EditorEngine::Undo()
 void EditorEngine::Redo()
 {
     if (redoStack_.empty() || !editorWorld_) return;
-    const int rm = renderMode_;
-    const int sm = editorWorld_->GetScene().shadingModel;
+    const glm::vec3 eye = camEye_; const float yaw = camYaw_, pit = camPitch_;
+    const int rm = renderMode_, sm = editorWorld_->GetScene().shadingModel;
     undoStack_.push_back(CopyWorld(*editorWorld_));     // current -> undo
     UWorld* next = redoStack_.back(); redoStack_.pop_back();
     SetEditorWorld(next, worldName_);                   // adopts next (takes ownership)
+    camEye_ = eye; camYaw_ = yaw; camPitch_ = pit;
     renderMode_ = rm; editorWorld_->GetScene().renderMode = rm;
     editorWorld_->GetScene().shadingModel = sm;
 }
@@ -559,7 +565,8 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
             for (size_t i = 0; i < n; ++i) { geomSig ^= b[i]; geomSig *= 1099511628211ull; }
         };
         for (size_t i = 0; i < meshes.size(); ++i)
-        { mix(&meshes[i], sizeof(meshes[i])); mix(&models[i], sizeof(glm::mat4)); mix(&albedos[i], sizeof(glm::vec3)); mix(&mirrors[i], sizeof(float)); }
+        { mix(&meshes[i], sizeof(meshes[i])); mix(&models[i], sizeof(glm::mat4)); mix(&albedos[i], sizeof(glm::vec3)); mix(&mirrors[i], sizeof(float));
+          size_t ts = mats[i] ? mats[i]->texData.size() : 0; mix(&ts, sizeof(ts)); }
     }
 
     const unsigned int skyTex = sky_.GetOrLoad(scene.skyHDRI);
@@ -574,7 +581,7 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
     {
         if (!rtUploaded_ || geomSig != rtUploadSig_)   // skip when geometry static
         {
-            worldRT_.UploadWorld(meshes, models, albedos, lightPos[0], lightColor[0], mirrors);
+            worldRT_.UploadWorld(meshes, models, albedos, lightPos[0], lightColor[0], mirrors, mats);
             rtUploadSig_ = geomSig; rtUploaded_ = true;
         }
         worldRT_.SetLights(lightPos, lightColor);    // all lights may move without geometry

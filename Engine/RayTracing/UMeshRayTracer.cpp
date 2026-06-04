@@ -19,7 +19,7 @@
 // shaders already target #version 330, so 3.3 is our baseline. Each triangle is
 // 7 RGBA32F texels: v0,v1,v2,n0,n1,n2,albedo (w unused). RGBA32F is a mandatory
 // texture-buffer format in 3.1+, unlike RGB32F.
-static const int TEXELS_PER_TRI = 7;
+static const int TEXELS_PER_TRI = 8;   // v0..v2(.w=u), n0..n2(.w=v), (albedo,km), (texLayer)
 
 static const char* VERT_SRC = R"GLSL(
 #version 330 core
@@ -45,12 +45,26 @@ uniform vec3  uLightPosArr[MAX_LIGHTS];
 uniform vec3  uLightColorArr[MAX_LIGHTS];
 uniform vec3  uKs;                    // specular coefficient (per-tri albedo = diffuse)
 uniform float uShininess;             // Phong exponent
-uniform samplerBuffer uTris;          // 7 texels per triangle (see C++ side)
+uniform samplerBuffer uTris;          // 8 texels per triangle (see C++ side)
 uniform samplerBuffer uNodes;         // BVH: 2 texels per node (bbMin|left, bbMax|count)
 uniform samplerBuffer uTriIdx;        // BVH leaf -> triangle index (R32F)
+uniform sampler2DArray uTexArr;       // per-instance diffuse textures (layer in texel 7.x)
+uniform int            uHasTex;
 
-vec3 triTexel(int tri, int slot) { return texelFetch(uTris, tri * 7 + slot).xyz; }
+vec3 triTexel(int tri, int slot) { return texelFetch(uTris, tri * 8 + slot).xyz; }
 vec3 triPos  (int tri, int slot) { return triTexel(tri, slot); }   // shadow accessor
+
+// Diffuse albedo at a barycentric hit: textured (UV packed in pos.w/normal.w +
+// layer in texel 7.x) or the flat per-triangle albedo.
+vec3 hitAlbedo(int tri, float hu, float hv) {
+    vec3 base = triTexel(tri, 6);
+    int  li   = int(texelFetch(uTris, tri * 8 + 7).x);
+    if (uHasTex == 0 || li < 0) return base;
+    float a = 1.0 - hu - hv;
+    float u = a * texelFetch(uTris, tri*8+0).w + hu * texelFetch(uTris, tri*8+1).w + hv * texelFetch(uTris, tri*8+2).w;
+    float v = a * texelFetch(uTris, tri*8+3).w + hu * texelFetch(uTris, tri*8+4).w + hv * texelFetch(uTris, tri*8+5).w;
+    return texture(uTexArr, vec3(u, v, float(li))).rgb;
+}
 )GLSL";
 
 static const char* FRAG_BODY = R"GLSL(
@@ -118,8 +132,8 @@ void main() {
     vec3 n1 = triTexel(hit, 4);
     vec3 n2 = triTexel(hit, 5);
     vec3 n  = normalize((1.0 - hu - hv) * n0 + hu * n1 + hv * n2);
-    vec3 albedo = triTexel(hit, 6);                  // per-triangle diffuse
-    float km = texelFetch(uTris, hit * 7 + 6).w;     // mirror reflectance (packed in .w)
+    vec3 albedo = hitAlbedo(hit, hu, hv);            // textured or flat diffuse
+    float km = texelFetch(uTris, hit * 8 + 6).w;     // mirror reflectance (packed in .w)
     vec3 hitPos = ro + closest * rd;
 
     vec3 col = shadeSurface(hitPos, n, albedo);
@@ -133,7 +147,7 @@ void main() {
         vec3 rcol;
         if (traceClosest(ro2, rd2, c2, hit2, u2, v2)) {
             vec3 rn = normalize((1.0 - u2 - v2) * triTexel(hit2,3) + u2 * triTexel(hit2,4) + v2 * triTexel(hit2,5));
-            rcol = shadeSurface(ro2 + c2 * rd2, rn, triTexel(hit2,6));
+            rcol = shadeSurface(ro2 + c2 * rd2, rn, hitAlbedo(hit2, u2, v2));
         } else {
             rcol = skyColor(rd2);
         }
@@ -185,7 +199,7 @@ void UMeshRayTracer::UploadMesh(const UMesh& mesh, const glm::mat4& model)
     const glm::vec3 lc = lightColor_.empty() ? glm::vec3(1)       : lightColor_[0];
     const glm::vec3 km = mesh.material.km;
     const float kmS = glm::max(km.x, glm::max(km.y, km.z));
-    UploadWorld({ &mesh }, { model }, { mesh.material.kd }, lp, lc, { kmS });
+    UploadWorld({ &mesh }, { model }, { mesh.material.kd }, lp, lc, { kmS }, { &mesh.material });
     mat_ = mesh.material;                      // restore ks/shininess for the demo path
 }
 
@@ -241,16 +255,57 @@ void UMeshRayTracer::UploadWorld(const std::vector<const UMesh*>& meshes,
                                  const std::vector<glm::mat4>& models,
                                  const std::vector<glm::vec3>& albedos,
                                  const glm::vec3& lightPos, const glm::vec3& lightColor,
-                                 const std::vector<float>& mirrors)
+                                 const std::vector<float>& mirrors,
+                                 const std::vector<const Material*>& mats)
 {
     SetLight(lightPos, lightColor);
     mat_.ks = glm::vec3(0.35f); mat_.shininess = 32.0f;
 
+    // Per-instance diffuse-texture layer (-1 = untextured). Distinct textured
+    // instances are resized into a common-size GL_TEXTURE_2D_ARRAY layer.
+    const int TS = 512;
+    std::vector<int>   instLayer(meshes.size(), -1);
+    std::vector<float> arrPixels;                       // TS*TS*3 floats per layer
+    int layers = 0;
+    for (size_t i = 0; i < meshes.size(); ++i)
+    {
+        if (i >= mats.size() || !mats[i] || mats[i]->texData.empty()) continue;
+        const Material& mt = *mats[i];
+        const int tw = mt.texWidth, th = mt.texHeight, tc = mt.texChannels > 0 ? mt.texChannels : 3;
+        if (tw <= 0 || th <= 0) continue;
+        instLayer[i] = layers++;
+        for (int y = 0; y < TS; ++y)
+        for (int x = 0; x < TS; ++x)
+        {
+            const int sx = std::min(x * tw / TS, tw - 1);
+            const int sy = std::min(y * th / TS, th - 1);
+            const size_t si = ((size_t)sy * tw + sx) * tc;
+            float r = 0, g = 0, b = 0;
+            if (si + 2 < mt.texData.size()) { r = mt.texData[si] / 255.0f; g = mt.texData[si+1] / 255.0f; b = mt.texData[si+2] / 255.0f; }
+            else if (si < mt.texData.size()) { r = g = b = mt.texData[si] / 255.0f; }
+            // sRGB -> linear (matches CPU SampleDiffuse)
+            arrPixels.push_back(std::pow(r, 2.2f)); arrPixels.push_back(std::pow(g, 2.2f)); arrPixels.push_back(std::pow(b, 2.2f));
+        }
+    }
+    texLayers_ = layers;
+    if (layers > 0)
+    {
+        if (!texArr_) glGenTextures(1, &texArr_);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, texArr_);
+        glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGB16F, TS, TS, layers, 0, GL_RGB, GL_FLOAT, arrPixels.data());
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    }
+
     // Combine all instances into one world-space mesh (+ per-triangle albedo +
-    // mirror), then build a BVH over it for accelerated GPU traversal.
+    // mirror + texture layer), then build a BVH over it for GPU traversal.
     UMesh combined;
     std::vector<glm::vec3> triAlbedo;
     std::vector<float>     triMirror;
+    std::vector<float>     triLayer;
     for (size_t i = 0; i < meshes.size(); ++i)
     {
         if (!meshes[i]) continue;
@@ -267,12 +322,14 @@ void UMeshRayTracer::UploadWorld(const std::vector<const UMesh*>& meshes,
         }
         for (uint32_t idx : m.indices) combined.indices.push_back(base + idx);
         const float km = (i < mirrors.size()) ? mirrors[i] : 0.0f;
-        for (int t = 0; t < m.triangleCount(); ++t) { triAlbedo.push_back(albedos[i]); triMirror.push_back(km); }
+        const float ly = (float)instLayer[i];
+        for (int t = 0; t < m.triangleCount(); ++t) { triAlbedo.push_back(albedos[i]); triMirror.push_back(km); triLayer.push_back(ly); }
     }
     numTris_ = combined.triangleCount();
     combined.BuildBVH();
 
-    // Bake 7 texels per triangle (combined order; BVH leaves index into this).
+    // Bake 8 texels per triangle (combined order; BVH leaves index into this).
+    // UVs are packed into the .w of the position (u) and normal (v) texels.
     std::vector<glm::vec4> texels;
     texels.reserve(static_cast<size_t>(numTris_) * TEXELS_PER_TRI);
     for (int t = 0; t < numTris_; ++t)
@@ -280,9 +337,10 @@ void UMeshRayTracer::UploadWorld(const std::vector<const UMesh*>& meshes,
         const Vertex& a = combined.vertices[combined.indices[3 * t + 0]];
         const Vertex& b = combined.vertices[combined.indices[3 * t + 1]];
         const Vertex& c = combined.vertices[combined.indices[3 * t + 2]];
-        texels.emplace_back(a.position, 0.0f); texels.emplace_back(b.position, 0.0f); texels.emplace_back(c.position, 0.0f);
-        texels.emplace_back(a.normal,   0.0f); texels.emplace_back(b.normal,   0.0f); texels.emplace_back(c.normal,   0.0f);
-        texels.emplace_back(triAlbedo[t], triMirror[t]);   // .w = mirror km (reflection)
+        texels.emplace_back(a.position, a.uv.x); texels.emplace_back(b.position, b.uv.x); texels.emplace_back(c.position, c.uv.x);
+        texels.emplace_back(a.normal,   a.uv.y); texels.emplace_back(b.normal,   b.uv.y); texels.emplace_back(c.normal,   c.uv.y);
+        texels.emplace_back(triAlbedo[t], triMirror[t]);   // .w = mirror km
+        texels.emplace_back(triLayer[t], 0.0f, 0.0f, 0.0f); // .x = diffuse texture layer (-1=none)
     }
     uploadTexels(texels);
     uploadBVH(*combined.bvh);
@@ -323,6 +381,9 @@ void UMeshRayTracer::RenderFrame(const ACamera& cam, int width, int height) cons
     glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D, skyTex_);
     glUniform1i(glGetUniformLocation(prog_, "uSky"), 7);
     glUniform1i(glGetUniformLocation(prog_, "uHasSky"), skyTex_ ? 1 : 0);
+    glActiveTexture(GL_TEXTURE4); glBindTexture(GL_TEXTURE_2D_ARRAY, texArr_);
+    glUniform1i(glGetUniformLocation(prog_, "uTexArr"), 4);
+    glUniform1i(glGetUniformLocation(prog_, "uHasTex"), texLayers_ > 0 ? 1 : 0);
 
     glBindVertexArray(vao_);
     glDrawArrays(GL_TRIANGLES, 0, 6);
@@ -339,6 +400,7 @@ void UMeshRayTracer::Cleanup()
     if (nodeTbo_) { glDeleteBuffers(1, &nodeTbo_);  nodeTbo_ = 0; }
     if (idxTex_)  { glDeleteTextures(1, &idxTex_); idxTex_ = 0; }
     if (idxTbo_)  { glDeleteBuffers(1, &idxTbo_);  idxTbo_ = 0; }
+    if (texArr_)  { glDeleteTextures(1, &texArr_); texArr_ = 0; texLayers_ = 0; }
     if (vbo_)     { glDeleteBuffers(1, &vbo_);  vbo_  = 0; }
     if (vao_)     { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
     if (prog_)    { glDeleteProgram(prog_); prog_ = 0; }

@@ -29,7 +29,8 @@ public:
                      const std::vector<glm::mat4>&    models,
                      const std::vector<glm::vec3>&    albedos,
                      const glm::vec3& lightPos, const glm::vec3& lightColor,
-                     const std::vector<float>& mirrors = {});   // per-instance km (0=matte)
+                     const std::vector<float>& mirrors = {},          // per-instance km (0=matte)
+                     const std::vector<const Material*>& mats = {});  // per-instance material (diffuse texture)
     void RenderFrame(const ACamera& cam, int width, int height) const;
     // Update the light(s) without re-uploading geometry (lights are per-frame
     // uniforms, not baked into the triangle buffer) -- lets callers cache the
@@ -61,4 +62,6 @@ private:
     std::vector<glm::vec3> lightPos_   = { glm::vec3(6.0f, 8.0f, 2.0f) };
     std::vector<glm::vec3> lightColor_ = { glm::vec3(1.0f) };
     unsigned int           skyTex_     = 0;     // equirect HDRI (0 = gradient)
+    unsigned int           texArr_     = 0;     // GL_TEXTURE_2D_ARRAY of diffuse textures
+    int                    texLayers_  = 0;     // layer count (0 = untextured world)
 };

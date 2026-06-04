@@ -81,7 +81,8 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
             for (size_t i = 0; i < n; ++i) { geomSig ^= b[i]; geomSig *= 1099511628211ull; }
         };
         for (size_t i = 0; i < meshes.size(); ++i)
-        { mix(&meshes[i], sizeof(meshes[i])); mix(&models[i], sizeof(glm::mat4)); mix(&albedos[i], sizeof(glm::vec3)); mix(&mirrors[i], sizeof(float)); }
+        { mix(&meshes[i], sizeof(meshes[i])); mix(&models[i], sizeof(glm::mat4)); mix(&albedos[i], sizeof(glm::vec3)); mix(&mirrors[i], sizeof(float));
+          size_t ts = mats[i] ? mats[i]->texData.size() : 0; mix(&ts, sizeof(ts)); }
     }
 
     const unsigned int skyTex = sky_.GetOrLoad(scene.skyHDRI);
@@ -94,7 +95,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
     {
         if (!rtUp_ || geomSig != rtSig_)
         {
-            worldRT_.UploadWorld(meshes, models, albedos, lightPos[0], lightColor[0], mirrors);
+            worldRT_.UploadWorld(meshes, models, albedos, lightPos[0], lightColor[0], mirrors, mats);
             rtSig_ = geomSig; rtUp_ = true;
         }
         worldRT_.SetLights(lightPos, lightColor);
