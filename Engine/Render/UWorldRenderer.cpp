@@ -51,6 +51,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
     std::vector<const UMesh*> meshes;
     std::vector<glm::mat4>    models;
     std::vector<glm::vec3>    albedos;
+    std::vector<float>        mirrors;
     std::vector<glm::vec3>    lightPos, lightColor;
     for (AActor* a : scene.Actors)
     {
@@ -59,7 +60,9 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
             {
                 meshes.push_back(mc->mesh);
                 models.push_back(mc->GetWorldMatrix());
-                albedos.push_back(mc->hasMaterialOverride ? mc->materialOverride.kd : mc->mesh->material.kd);
+                const Material& mat = mc->hasMaterialOverride ? mc->materialOverride : mc->mesh->material;
+                albedos.push_back(mat.kd);
+                mirrors.push_back(glm::max(mat.km.x, glm::max(mat.km.y, mat.km.z)));
             }
         if (ALight* L = dynamic_cast<ALight*>(a))
             if (PointLightComponent* pl = dynamic_cast<PointLightComponent*>(L->lightComp))
@@ -76,7 +79,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
             for (size_t i = 0; i < n; ++i) { geomSig ^= b[i]; geomSig *= 1099511628211ull; }
         };
         for (size_t i = 0; i < meshes.size(); ++i)
-        { mix(&meshes[i], sizeof(meshes[i])); mix(&models[i], sizeof(glm::mat4)); mix(&albedos[i], sizeof(glm::vec3)); }
+        { mix(&meshes[i], sizeof(meshes[i])); mix(&models[i], sizeof(glm::mat4)); mix(&albedos[i], sizeof(glm::vec3)); mix(&mirrors[i], sizeof(float)); }
     }
 
     const unsigned int skyTex = sky_.GetOrLoad(scene.skyHDRI);
@@ -89,7 +92,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
     {
         if (!rtUp_ || geomSig != rtSig_)
         {
-            worldRT_.UploadWorld(meshes, models, albedos, lightPos[0], lightColor[0]);
+            worldRT_.UploadWorld(meshes, models, albedos, lightPos[0], lightColor[0], mirrors);
             rtSig_ = geomSig; rtUp_ = true;
         }
         worldRT_.SetLights(lightPos, lightColor);

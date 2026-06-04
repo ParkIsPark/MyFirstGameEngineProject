@@ -119,9 +119,28 @@ void main() {
     vec3 n2 = triTexel(hit, 5);
     vec3 n  = normalize((1.0 - hu - hv) * n0 + hu * n1 + hv * n2);
     vec3 albedo = triTexel(hit, 6);                  // per-triangle diffuse
+    float km = texelFetch(uTris, hit * 7 + 6).w;     // mirror reflectance (packed in .w)
     vec3 hitPos = ro + closest * rd;
 
-    FragColor = vec4(tonemap(shadeSurface(hitPos, n, albedo)), 1.0);
+    vec3 col = shadeSurface(hitPos, n, albedo);
+
+    // One mirror bounce: reflect the camera ray and shade what it hits (or sky),
+    // then blend by the material's mirror factor km (Blinn-Phong + reflection).
+    if (km > 0.001) {
+        vec3 rd2 = reflect(rd, n);
+        vec3 ro2 = hitPos + n * 1e-3;
+        float c2; int hit2; float u2, v2;
+        vec3 rcol;
+        if (traceClosest(ro2, rd2, c2, hit2, u2, v2)) {
+            vec3 rn = normalize((1.0 - u2 - v2) * triTexel(hit2,3) + u2 * triTexel(hit2,4) + v2 * triTexel(hit2,5));
+            rcol = shadeSurface(ro2 + c2 * rd2, rn, triTexel(hit2,6));
+        } else {
+            rcol = skyColor(rd2);
+        }
+        col = mix(col, rcol, clamp(km, 0.0, 1.0));
+    }
+
+    FragColor = vec4(tonemap(col), 1.0);
 }
 )GLSL";
 
@@ -164,7 +183,9 @@ void UMeshRayTracer::UploadMesh(const UMesh& mesh, const glm::mat4& model)
 {
     const glm::vec3 lp = lightPos_.empty()   ? glm::vec3(6, 8, 2) : lightPos_[0];
     const glm::vec3 lc = lightColor_.empty() ? glm::vec3(1)       : lightColor_[0];
-    UploadWorld({ &mesh }, { model }, { mesh.material.kd }, lp, lc);
+    const glm::vec3 km = mesh.material.km;
+    const float kmS = glm::max(km.x, glm::max(km.y, km.z));
+    UploadWorld({ &mesh }, { model }, { mesh.material.kd }, lp, lc, { kmS });
     mat_ = mesh.material;                      // restore ks/shininess for the demo path
 }
 
@@ -219,15 +240,17 @@ void UMeshRayTracer::uploadBVH(const BVH& bvh)
 void UMeshRayTracer::UploadWorld(const std::vector<const UMesh*>& meshes,
                                  const std::vector<glm::mat4>& models,
                                  const std::vector<glm::vec3>& albedos,
-                                 const glm::vec3& lightPos, const glm::vec3& lightColor)
+                                 const glm::vec3& lightPos, const glm::vec3& lightColor,
+                                 const std::vector<float>& mirrors)
 {
     SetLight(lightPos, lightColor);
     mat_.ks = glm::vec3(0.35f); mat_.shininess = 32.0f;
 
-    // Combine all instances into one world-space mesh (+ per-triangle albedo),
-    // then build a BVH over it for accelerated GPU traversal.
+    // Combine all instances into one world-space mesh (+ per-triangle albedo +
+    // mirror), then build a BVH over it for accelerated GPU traversal.
     UMesh combined;
     std::vector<glm::vec3> triAlbedo;
+    std::vector<float>     triMirror;
     for (size_t i = 0; i < meshes.size(); ++i)
     {
         if (!meshes[i]) continue;
@@ -243,7 +266,8 @@ void UMeshRayTracer::UploadWorld(const std::vector<const UMesh*>& meshes,
             combined.vertices.push_back(w);
         }
         for (uint32_t idx : m.indices) combined.indices.push_back(base + idx);
-        for (int t = 0; t < m.triangleCount(); ++t) triAlbedo.push_back(albedos[i]);
+        const float km = (i < mirrors.size()) ? mirrors[i] : 0.0f;
+        for (int t = 0; t < m.triangleCount(); ++t) { triAlbedo.push_back(albedos[i]); triMirror.push_back(km); }
     }
     numTris_ = combined.triangleCount();
     combined.BuildBVH();
@@ -258,7 +282,7 @@ void UMeshRayTracer::UploadWorld(const std::vector<const UMesh*>& meshes,
         const Vertex& c = combined.vertices[combined.indices[3 * t + 2]];
         texels.emplace_back(a.position, 0.0f); texels.emplace_back(b.position, 0.0f); texels.emplace_back(c.position, 0.0f);
         texels.emplace_back(a.normal,   0.0f); texels.emplace_back(b.normal,   0.0f); texels.emplace_back(c.normal,   0.0f);
-        texels.emplace_back(triAlbedo[t], 0.0f);
+        texels.emplace_back(triAlbedo[t], triMirror[t]);   // .w = mirror km (reflection)
     }
     uploadTexels(texels);
     uploadBVH(*combined.bvh);

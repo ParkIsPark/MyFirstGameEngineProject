@@ -504,6 +504,7 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
     std::vector<const UMesh*> meshes;
     std::vector<glm::mat4>    models;
     std::vector<glm::vec3>    albedos;
+    std::vector<float>        mirrors;
     std::vector<glm::vec3>    lightPos, lightColor;
     for (AActor* a : scene.Actors)
     {
@@ -512,7 +513,9 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
             {
                 meshes.push_back(mc->mesh);
                 models.push_back(mc->GetWorldMatrix());
-                albedos.push_back(mc->hasMaterialOverride ? mc->materialOverride.kd : mc->mesh->material.kd);
+                const Material& mat = mc->hasMaterialOverride ? mc->materialOverride : mc->mesh->material;
+                albedos.push_back(mat.kd);
+                mirrors.push_back(glm::max(mat.km.x, glm::max(mat.km.y, mat.km.z)));
             }
         if (ALight* L = dynamic_cast<ALight*>(a))
             if (PointLightComponent* pl = dynamic_cast<PointLightComponent*>(L->lightComp))
@@ -530,7 +533,7 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
             for (size_t i = 0; i < n; ++i) { geomSig ^= b[i]; geomSig *= 1099511628211ull; }
         };
         for (size_t i = 0; i < meshes.size(); ++i)
-        { mix(&meshes[i], sizeof(meshes[i])); mix(&models[i], sizeof(glm::mat4)); mix(&albedos[i], sizeof(glm::vec3)); }
+        { mix(&meshes[i], sizeof(meshes[i])); mix(&models[i], sizeof(glm::mat4)); mix(&albedos[i], sizeof(glm::vec3)); mix(&mirrors[i], sizeof(float)); }
     }
 
     const unsigned int skyTex = sky_.GetOrLoad(scene.skyHDRI);
@@ -545,7 +548,7 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
     {
         if (!rtUploaded_ || geomSig != rtUploadSig_)   // skip when geometry static
         {
-            worldRT_.UploadWorld(meshes, models, albedos, lightPos[0], lightColor[0]);
+            worldRT_.UploadWorld(meshes, models, albedos, lightPos[0], lightColor[0], mirrors);
             rtUploadSig_ = geomSig; rtUploaded_ = true;
         }
         worldRT_.SetLights(lightPos, lightColor);    // all lights may move without geometry
@@ -1093,6 +1096,10 @@ void EditorEngine::DrawDetails()
             ImGui::ColorEdit3("Diffuse",   &m.kd.x);       snap();
             ImGui::ColorEdit3("Specular",  &m.ks.x);       snap();
             ImGui::DragFloat ("Shininess", &m.shininess, 1.0f, 0.0f, 256.0f); snap();
+            float mir = glm::max(m.km.x, glm::max(m.km.y, m.km.z));
+            if (ImGui::SliderFloat("Mirror", &mir, 0.0f, 1.0f)) m.km = glm::vec3(mir);
+            snap();
+            ImGui::TextDisabled("(Mirror reflection shows in GPU RT mode)");
         }
     }
     // ---- Collision component: its own transform (offset + size) + rigid body ----
