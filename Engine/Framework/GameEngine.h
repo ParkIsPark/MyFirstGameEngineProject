@@ -26,4 +26,5 @@ protected:
 private:
     std::string    worldPath_;
     UWorldRenderer worldRenderer_;
+    bool           worldInit_ = false;   // one-time physics-floor setup
 };

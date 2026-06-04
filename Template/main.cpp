@@ -1,36 +1,41 @@
 // main.cpp -- entry point for a project built on MyFirstGameEngine.
 //
-// The engine (Engine.h) owns the GLFW window, GL context, main loop and resize
-// handling -- no global state, no GL bootstrap boilerplate. Subclass Engine and
-// override only the hooks you need, then call Init() + Run():
+// One executable, two roles (like Unreal's editor/standalone):
+//   * EDITOR build  (no GAME_BUILD)  -> opens the ImGui editor on this project.
+//   * GAME   build  (GAME_BUILD set) -> boots straight into the standalone game.
+// Either build also honors `--game [world]` on the command line, so the editor's
+// "Play (Window)" can spawn this same exe as a standalone game window.
 //
-//   OnStartup()        once, after GL is ready
-//   WorldSetting()     build a UWorld and spawn actors (return it)
-//   Tick(float dt)     per-frame update (default: world->Tick then Render)
-//   Render()           draw the frame
-//   OnResize(w, h)     viewport changed
-//
-// See Engine.h for the full lifecycle, and the engine's Test demo / EditorEngine
-// for examples that build a world and drive URenderer.
+// The boot reads <name>.proj -> Setting/DefaultEngine.ini -> Content/<StartupWorld>
+// (Engine::Run wires this); GAME_BUILD just flips the no-argument default.
 
-#include <GL/glew.h>
-#include "Engine.h"
+#include <string>
+#include "EditorEngine.h"
+#include "GameEngine.h"
 
-class MyApp : public Engine
+static const char* kProj = "__PROJECT_NAME__.proj";
+
+int main(int argc, char** argv)
 {
-protected:
-    void Render() override
+    const std::string arg = (argc > 1) ? argv[1] : "";
+
+    // Explicit standalone game request (editor Play-in-new-window spawns this).
+    if (arg == "--game")
     {
-        // Minimal frame: clear to a dark background. Replace with your own
-        // rendering -- spawn a world in WorldSetting() and let URenderer draw it.
-        glClearColor(0.10f, 0.11f, 0.13f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        GameEngine game((argc > 2) ? argv[2] : "");   // ""=boot StartupWorld from .proj
+        if (!game.Init(1280, 720, "__PROJECT_NAME__")) return -1;
+        return game.Run(kProj);
     }
-};
 
-int main()
-{
-    MyApp app;
-    if (!app.Init(1280, 720, "My Project")) return -1;
-    return app.Run();   // no .proj -> default loop calling Render() each frame
+#ifdef GAME_BUILD
+    // Packaged game: double-click -> play.
+    GameEngine game("");
+    if (!game.Init(1280, 720, "__PROJECT_NAME__")) return -1;
+    return game.Run(kProj);
+#else
+    // Editor build: author the project.
+    EditorEngine editor;
+    if (!editor.Init(1280, 800, "__PROJECT_NAME__ Editor")) return -1;
+    return editor.Run(kProj);
+#endif
 }
