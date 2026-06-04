@@ -37,6 +37,7 @@
 #include <cstdio>
 #include <cctype>
 #include <cmath>
+#include <sstream>
 #include <filesystem>
 #include <algorithm>
 #include "stb_image.h"          // declaration only; impl lives in USkyHDRI.cpp
@@ -1093,6 +1094,32 @@ void EditorEngine::DrawDetails()
             ? (mc->mesh ? "(in-memory mesh)" : "(none)") : mc->meshRef;
         ImGui::Text("Mesh: %s", ref.c_str());
         if (mc->mesh) ImGui::Text("Triangles: %d", mc->mesh->triangleCount());
+
+        // Procedural primitive tessellation: a sphere's polygon count is its
+        // segment counts. Editing regenerates the (cached) mesh via the descriptor.
+        {
+            std::istringstream iss(mc->meshRef);
+            std::string kind; iss >> kind;
+            float r = 1.0f; int sw = 32, sh = 16;
+            if (kind == "Sphere" && (iss >> r >> sw >> sh))
+            {
+                ImGui::SeparatorText("Tessellation (Sphere)");
+                bool ch = false;
+                ch |= ImGui::SliderInt("Segments W", &sw, 3, 128);  if (ImGui::IsItemActivated()) PushUndo();
+                ch |= ImGui::SliderInt("Segments H", &sh, 2, 128);  if (ImGui::IsItemActivated()) PushUndo();
+                ch |= ImGui::DragFloat("Mesh Radius", &r, 0.02f, 0.05f, 100.0f); if (ImGui::IsItemActivated()) PushUndo();
+                if (ch)
+                {
+                    char buf[64];
+                    std::snprintf(buf, sizeof(buf), "Sphere %g %d %d", r, sw, sh);
+                    mc->meshRef = buf;
+                    mc->mesh = UMesh::Resolve(buf);            // cached generate/share
+                    rtUploaded_ = false; hybridUploaded_ = false;
+                }
+            }
+            else if (kind == "Cube")
+                ImGui::TextDisabled("Cube: 12 triangles (fixed)");
+        }
 
         glm::vec3 mloc = mc->relLocation;
         if (ImGui::DragFloat3("Position", &mloc.x, 0.05f)) { mc->relLocation = mloc; mc->MarkDirty(); }
