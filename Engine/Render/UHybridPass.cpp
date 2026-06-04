@@ -257,6 +257,9 @@ void UHybridPass::Render(const ACamera& cam, const std::vector<glm::vec3>& light
     glUniform1i(glGetUniformLocation(prog_, "uNodes"), 5);
     glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER, idxTex_);
     glUniform1i(glGetUniformLocation(prog_, "uTriIdx"), 6);
+    glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D, skyTex_);
+    glUniform1i(glGetUniformLocation(prog_, "uSky"), 7);
+    glUniform1i(glGetUniformLocation(prog_, "uHasSky"), skyTex_ ? 1 : 0);
 
     glBindVertexArray(vao_);
     glDrawArrays(GL_TRIANGLES, 0, 6);

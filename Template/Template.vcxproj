@@ -89,6 +89,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\URenderer.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\UWorldRenderer.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Render\USkyHDRI.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\UHybridPass.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Acceleration\BVH.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Import\UObjImporter.cpp" />
@@ -153,6 +154,7 @@
     <!-- Engine: Render headers -->
     <ClInclude Include="$(EngineRootDir)Engine\Render\URenderer.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\UWorldRenderer.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\USkyHDRI.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderShowFlag.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\UHybridPass.h" />
     <!-- Engine: Acceleration + Threading headers -->

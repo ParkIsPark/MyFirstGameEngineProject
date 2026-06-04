@@ -6,6 +6,7 @@
 #include "UHybridPass.h"
 #include "UGBuffer.h"
 #include "URasterizer.h"
+#include "USkyHDRI.h"
 #include "ThreadPool.h"
 #include "BuildManager.h"
 
@@ -116,6 +117,7 @@ private:
     URasterizer    rast_;        // builds the hybrid G-buffer
     UGBuffer       gbuf_;
     ThreadPool     pool_;        // tile-parallel G-buffer fill (hybrid mode)
+    USkyHDRI       sky_;         // equirect HDRI for GPU sky/ambient
 
     // Geometry-upload cache. The BVH + triangle TBOs depend only on the scene
     // geometry (mesh identity + world transform + albedo), NOT the camera, so we

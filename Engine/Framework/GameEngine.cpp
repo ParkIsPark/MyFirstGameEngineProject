@@ -38,16 +38,6 @@ void GameEngine::Render()
     UWorld* w = World();
     if (!w) return;
 
-    // Play semantics: run with a ground plane so dynamic bodies land (mirrors the
-    // editor's in-window PIE). Done once, after the world (explicit or StartupWorld
-    // boot) exists. Gravity is whatever the world serialized.
-    if (!worldInit_)
-    {
-        w->GetPhysics().enableFloor = true;
-        w->GetPhysics().floorY      = -2.5f;
-        worldInit_ = true;
-    }
-
     UScene&  scene = w->GetScene();
     ACamera& cam   = w->GetCamera();
     scene.width  = Width();

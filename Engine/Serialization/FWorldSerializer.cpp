@@ -40,6 +40,7 @@ std::string FWorldSerializer::Save(UWorld& world)
         FSaveArchive a;
         int sm = sc.shadingModel; a.Field("ShadingModel", sm);
         int rm = sc.renderMode;   a.Field("RenderMode", rm);
+        std::string sky = sc.skyHDRI; a.Field("SkyHDRI", sky);
         UPhysicsWorld& phys = world.GetPhysics();
         int gravEnabled = phys.enableFloor ? 1 : 0; a.Field("FloorEnabled", gravEnabled);
         float fy = phys.floorY; a.Field("FloorY", fy);
@@ -116,6 +117,7 @@ UWorld* FWorldSerializer::Load(const std::string& text)
         {
             int sm = sc.shadingModel; a.Field("ShadingModel", sm); sc.shadingModel = sm;
             int rm = sc.renderMode;   a.Field("RenderMode", rm);   sc.renderMode = rm;
+            std::string sky = sc.skyHDRI; a.Field("SkyHDRI", sky); sc.skyHDRI = sky;
             UPhysicsWorld& phys = world->GetPhysics();
             int fe = phys.enableFloor ? 1 : 0; a.Field("FloorEnabled", fe); phys.enableFloor = (fe != 0);
             float fy = phys.floorY; a.Field("FloorY", fy); phys.floorY = fy;

@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <vector>
+#include <string>
 #include "AActor.h"
 #include "../Light/ALight.h"
 #include "UPostProcessFilter.h"
@@ -23,6 +24,10 @@ public:
     // The editor toolbar drives it; the standalone game honors it. Serialized in
     // [World] so a saved/played world renders the same way it did in the editor.
     int renderMode = 0;
+
+    // Equirectangular .hdr environment map path (empty = procedural gradient).
+    // Sampled by the GPU paths' skyColor() for background + ambient. [World].
+    std::string skyHDRI;
 
     // Post-process filter applied after CPU ray-tracing (before glDrawPixels).
     // Default values are identity (no change).

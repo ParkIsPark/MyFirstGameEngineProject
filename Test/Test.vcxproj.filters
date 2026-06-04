@@ -69,6 +69,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.cpp"><Filter>Engine\Rasterizer</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\URenderer.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\UWorldRenderer.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Render\USkyHDRI.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\UHybridPass.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Acceleration\BVH.cpp"><Filter>Engine\Acceleration</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Import\UObjImporter.cpp"><Filter>Engine\Import</Filter></ClCompile>

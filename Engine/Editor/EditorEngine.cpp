@@ -241,15 +241,21 @@ AActor* EditorEngine::AddActor(const char* type, const std::string& name)
     {
         a = new ALight(new PointLightComponent(glm::vec3(1.0f), glm::vec3(1.0f)));
     }
-    else if (t == "Cube" || t == "Sphere")
+    else if (t == "EnvLight")
     {
-        UMesh* mesh = (t == "Cube") ? UMesh::GenerateCube(glm::vec3(1.0f))
-                                    : UMesh::GenerateSphere(1.0f, 28, 14);
+        a = new ALight(new EnvironmentLightComponent(glm::vec3(1.0f), glm::vec3(1.0f)));
+    }
+    else if (t == "Cube" || t == "Sphere" || t == "Plane")
+    {
+        UMesh* mesh; const char* ref;
+        if      (t == "Cube")  { mesh = UMesh::GenerateCube(glm::vec3(1.0f));        ref = "Cube 1 1 1"; }
+        else if (t == "Plane") { mesh = UMesh::GeneratePlane(glm::vec2(5.0f));       ref = "Plane 5 5"; }
+        else                   { mesh = UMesh::GenerateSphere(1.0f, 28, 14);         ref = "Sphere 1 28 14"; }
         meshAssets_.push_back(mesh);
         a = new AActor();
         UMeshComponent* mc = new UMeshComponent();
         mc->mesh = mesh;
-        mc->meshRef = (t == "Cube") ? "Cube 1 1 1" : "Sphere 1 28 14";
+        mc->meshRef = ref;
         mc->hasMaterialOverride = true;
         mc->materialOverride.kd        = glm::vec3(0.7f);
         mc->materialOverride.ks        = glm::vec3(0.4f);
@@ -414,8 +420,8 @@ UWorld* EditorEngine::CopyWorld(UWorld& src, bool resetPhysics)
 void EditorEngine::OnPlay()
 {
     pieWorld_ = CopyWorld(*editorWorld_, /*resetPhysics=*/true);   // deep copy (UMesh shared)
-    pieWorld_->GetPhysics().enableFloor = true;
-    pieWorld_->GetPhysics().floorY      = -2.5f;       // ball lands here
+    // No forced floor: bodies fall freely unless the world enables one (a Plane
+    // actor with a Box collider can serve as ground).
     pieWorld_->BeginPlay();
     playing_ = true;
 }
@@ -527,6 +533,8 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
         { mix(&meshes[i], sizeof(meshes[i])); mix(&models[i], sizeof(glm::mat4)); mix(&albedos[i], sizeof(glm::vec3)); }
     }
 
+    const unsigned int skyTex = sky_.GetOrLoad(scene.skyHDRI);
+
     EnsureFBO(w, h);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
     glViewport(0, 0, w, h);
@@ -541,6 +549,7 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
             rtUploadSig_ = geomSig; rtUploaded_ = true;
         }
         worldRT_.SetLights(lightPos, lightColor);    // all lights may move without geometry
+        worldRT_.SetSky(skyTex);
         worldRT_.RenderFrame(cam, w, h);             // camera/light uniforms each frame
     }
     else                                             // Hybrid: CPU G-buffer + GPU shadow
@@ -595,6 +604,7 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
             }
         });
 
+        hybrid_.SetSky(skyTex);
         hybrid_.UploadGBuffer(gbuf_);                // camera-dependent -> every frame
         hybrid_.Render(cam, lightPos, lightColor, w, h);
     }
@@ -754,7 +764,16 @@ void EditorEngine::DrawMenuBar()
         if (ImGui::MenuItem("Redo", "Ctrl+Y", false, !redoStack_.empty())) Redo();
         ImGui::EndMenu();
     }
-    if (ImGui::BeginMenu("World"))  { ImGui::MenuItem("World Settings"); ImGui::EndMenu(); }
+    if (ImGui::BeginMenu("World"))
+    {
+        std::string& sky = ActiveWorld().GetScene().skyHDRI;
+        ImGui::TextDisabled("Sky HDRI: %s", sky.empty() ? "(gradient)" : sky.c_str());
+        if (ImGui::MenuItem("Set Sky HDRI..."))
+        { std::string p = FFileDialog::OpenAsset(); if (!p.empty()) sky = p; }
+        if (ImGui::MenuItem("Clear Sky HDRI", nullptr, false, !sky.empty())) sky.clear();
+        ImGui::TextDisabled("(visible in GPU RT / Hybrid modes)");
+        ImGui::EndMenu();
+    }
     if (ImGui::BeginMenu("Build"))
     {
         if (ImGui::MenuItem("Build Engine", nullptr, false, !buildMgr_.IsRunning()))
@@ -808,11 +827,13 @@ void EditorEngine::DrawContentBrowser()
         {
             if      (cat == "World") LoadWorld(contentDir_ + "/" + e.name);
             else if (cat == "Mesh")  ImportAsset(contentDir_ + "/" + e.name);
+            else if (cat == "HDRI")  editorWorld_->GetScene().skyHDRI = contentDir_ + "/" + e.name;
         }
         if (ImGui::BeginPopupContextItem("ctx"))
         {
             if (cat == "World" && ImGui::MenuItem("Open"))         LoadWorld(contentDir_ + "/" + e.name);
             if (cat == "Mesh"  && ImGui::MenuItem("Add to Scene")) ImportAsset(contentDir_ + "/" + e.name);
+            if (cat == "HDRI"  && ImGui::MenuItem("Set as Sky"))   editorWorld_->GetScene().skyHDRI = contentDir_ + "/" + e.name;
             if (ImGui::MenuItem("Rename")) { cbRename_ = i; std::snprintf(cbBuf_, sizeof(cbBuf_), "%s", e.name.c_str()); }
             if (ImGui::MenuItem("Delete")) toDelete = e.name;
             ImGui::EndPopup();
@@ -932,10 +953,12 @@ void EditorEngine::DrawOutliner()
     if (ImGui::Button("+ Add Actor")) ImGui::OpenPopup("AddActorMenu");
     if (ImGui::BeginPopup("AddActorMenu"))
     {
-        if (ImGui::MenuItem("Empty Actor")) AddActor("Empty",  "Actor");
-        if (ImGui::MenuItem("Cube"))        AddActor("Cube",   "Cube");
-        if (ImGui::MenuItem("Sphere"))      AddActor("Sphere", "Sphere");
-        if (ImGui::MenuItem("Point Light")) AddActor("Light",  "PointLight");
+        if (ImGui::MenuItem("Empty Actor")) AddActor("Empty",   "Actor");
+        if (ImGui::MenuItem("Cube"))        AddActor("Cube",    "Cube");
+        if (ImGui::MenuItem("Sphere"))      AddActor("Sphere",  "Sphere");
+        if (ImGui::MenuItem("Plane"))       AddActor("Plane",   "Plane");
+        if (ImGui::MenuItem("Point Light")) AddActor("Light",   "PointLight");
+        if (ImGui::MenuItem("Env Light"))   AddActor("EnvLight","EnvLight");
         ImGui::EndPopup();
     }
     ImGui::EndDisabled();

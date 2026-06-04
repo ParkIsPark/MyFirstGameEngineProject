@@ -296,6 +296,9 @@ void UMeshRayTracer::RenderFrame(const ACamera& cam, int width, int height) cons
     glUniform1i(glGetUniformLocation(prog_, "uNodes"), 1);
     glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_BUFFER, idxTex_);
     glUniform1i(glGetUniformLocation(prog_, "uTriIdx"), 2);
+    glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D, skyTex_);
+    glUniform1i(glGetUniformLocation(prog_, "uSky"), 7);
+    glUniform1i(glGetUniformLocation(prog_, "uHasSky"), skyTex_ ? 1 : 0);
 
     glBindVertexArray(vao_);
     glDrawArrays(GL_TRIANGLES, 0, 6);

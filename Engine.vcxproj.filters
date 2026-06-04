@@ -84,6 +84,7 @@
     <!-- Render -->
     <ClCompile Include="Engine\Render\URenderer.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\UWorldRenderer.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="Engine\Render\USkyHDRI.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\UHybridPass.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <!-- RayTracing -->
     <ClCompile Include="Engine\RayTracing\UMeshRayTracer.cpp"><Filter>Engine\RayTracing</Filter></ClCompile>
@@ -150,6 +151,7 @@
     <!-- Render -->
     <ClInclude Include="Engine\Render\URenderer.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\UWorldRenderer.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="Engine\Render\USkyHDRI.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderShowFlag.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\UHybridPass.h"><Filter>Engine\Render</Filter></ClInclude>
     <!-- RayTracing -->

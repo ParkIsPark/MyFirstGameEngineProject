@@ -36,6 +36,9 @@ public:
     void Render(const ACamera& cam, const std::vector<glm::vec3>& lightPos,
                 const std::vector<glm::vec3>& lightColor, int width, int height) const;
 
+    // Equirectangular HDRI sky texture (0 = none -> procedural gradient).
+    void SetSky(unsigned int tex) { skyTex_ = tex; }
+
     void Cleanup();
     bool ready() const { return prog_ != 0; }
 
@@ -45,6 +48,7 @@ private:
     unsigned int tbo_ = 0, triTex_ = 0;
     unsigned int nodeTbo_ = 0, nodeTex_ = 0;   // BVH nodes
     unsigned int idxTbo_  = 0, idxTex_  = 0;   // BVH leaf -> triangle index
+    unsigned int skyTex_  = 0;                 // equirect HDRI (0 = gradient)
     int numTris_  = 0;
     int numNodes_ = 0;
     int gw_ = 0, gh_ = 0;

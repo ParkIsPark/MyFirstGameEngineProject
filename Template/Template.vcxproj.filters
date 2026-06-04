@@ -82,6 +82,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.cpp"><Filter>Engine\Rasterizer</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\URenderer.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\UWorldRenderer.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Render\USkyHDRI.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\UHybridPass.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\RayTracing\UMeshRayTracer.cpp"><Filter>Engine\RayTracing</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Acceleration\BVH.cpp"><Filter>Engine\Acceleration</Filter></ClCompile>
@@ -135,6 +136,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\UGBuffer.h"><Filter>Engine\Rasterizer</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\URenderer.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\UWorldRenderer.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\USkyHDRI.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderShowFlag.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\UHybridPass.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Acceleration\BVH.h"><Filter>Engine\Acceleration</Filter></ClInclude>

@@ -38,6 +38,8 @@ public:
     // Multiple point lights (editor). Each gets its own shadow ray in the shader.
     void SetLights(const std::vector<glm::vec3>& pos, const std::vector<glm::vec3>& color)
     { lightPos_ = pos; lightColor_ = color; }
+    // Equirectangular HDRI sky texture (0 = none -> procedural gradient).
+    void SetSky(unsigned int tex) { skyTex_ = tex; }
     void Cleanup();
     bool ready() const { return prog_ != 0; }
 
@@ -57,4 +59,5 @@ private:
     Material     mat_;         // material (ks/shininess) of the uploaded mesh
     std::vector<glm::vec3> lightPos_   = { glm::vec3(6.0f, 8.0f, 2.0f) };
     std::vector<glm::vec3> lightColor_ = { glm::vec3(1.0f) };
+    unsigned int           skyTex_     = 0;     // equirect HDRI (0 = gradient)
 };

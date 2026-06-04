@@ -5,6 +5,7 @@
 #include "UHybridPass.h"
 #include "UGBuffer.h"
 #include "ThreadPool.h"
+#include "USkyHDRI.h"
 
 class UWorld;
 
@@ -35,6 +36,7 @@ private:
     UHybridPass    hybrid_;       // hybrid shadow pass (mode 2)
     UGBuffer       gbuf_;
     ThreadPool     pool_;
+    USkyHDRI       sky_;
 
     size_t rtSig_ = 0, hySig_ = 0;
     bool   rtUp_ = false, hyUp_ = false;

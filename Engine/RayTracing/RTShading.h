@@ -29,7 +29,15 @@
 static const char* RT_SHADING_GLSL = R"GLSL(
 // ---- shared ray-traced shading (GPU-RT and Hybrid use this identical code) --
 
+uniform sampler2D uSky;     // equirectangular HDRI (sampled when uHasSky != 0)
+uniform int       uHasSky;
 vec3 skyColor(vec3 rd) {
+    if (uHasSky != 0) {
+        vec3 d = normalize(rd);
+        float u = atan(d.z, d.x) * 0.15915494 + 0.5;            // 1/(2*pi)
+        float v = asin(clamp(d.y, -1.0, 1.0)) * 0.31830989 + 0.5; // 1/pi
+        return texture(uSky, vec2(u, v)).rgb;
+    }
     float k = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
     return mix(vec3(0.10, 0.12, 0.16), vec3(0.40, 0.55, 0.80), k);
 }

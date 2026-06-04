@@ -79,6 +79,8 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
         { mix(&meshes[i], sizeof(meshes[i])); mix(&models[i], sizeof(glm::mat4)); mix(&albedos[i], sizeof(glm::vec3)); }
     }
 
+    const unsigned int skyTex = sky_.GetOrLoad(scene.skyHDRI);
+
     glViewport(0, 0, w, h);
     glClearColor(0.10f, 0.11f, 0.13f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -91,6 +93,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
             rtSig_ = geomSig; rtUp_ = true;
         }
         worldRT_.SetLights(lightPos, lightColor);
+        worldRT_.SetSky(skyTex);
         worldRT_.RenderFrame(cam, w, h);
     }
     else                                             // Hybrid: CPU G-buffer + GPU shadow
@@ -138,6 +141,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
             }
         });
 
+        hybrid_.SetSky(skyTex);
         hybrid_.UploadGBuffer(gbuf_);
         hybrid_.Render(cam, lightPos, lightColor, w, h);
     }
