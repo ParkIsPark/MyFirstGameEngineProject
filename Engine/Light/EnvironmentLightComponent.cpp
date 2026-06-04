@@ -1,21 +1,21 @@
-#include "EnvironmentLight.h"
+#include "EnvironmentLightComponent.h"
 #include "FArchive.h"
 
 #include <algorithm>
 
-REGISTER_COMPONENT("EnvLight", EnvironmentLight)
+REGISTER_COMPONENT("EnvLight", EnvironmentLightComponent)
 
-EnvironmentLight::EnvironmentLight()
+EnvironmentLightComponent::EnvironmentLightComponent()
     : LightComponent(glm::vec3(1.0f), glm::vec3(1.0f))
 {
 }
 
-EnvironmentLight::EnvironmentLight(glm::vec3 color, glm::vec3 intensity)
+EnvironmentLightComponent::EnvironmentLightComponent(glm::vec3 color, glm::vec3 intensity)
     : LightComponent(color, intensity)
 {
 }
 
-void EnvironmentLight::Serialize(FArchive& ar)
+void EnvironmentLightComponent::Serialize(FArchive& ar)
 {
     LightComponent::Serialize(ar);
     ar.Color("Horizon", horizonColor);
@@ -27,7 +27,7 @@ void EnvironmentLight::Serialize(FArchive& ar)
 //  applyTimeOfDay — sets sky gradient + light color/intensity from a
 //  time-of-day value in [-10, +10] (-10 midnight, 0 sunrise, +10 noon).
 // ---------------------------------------------------------------------------
-void EnvironmentLight::applyTimeOfDay(EnvironmentLight& light, float tod)
+void EnvironmentLightComponent::applyTimeOfDay(EnvironmentLightComponent& light, float tod)
 {
     tod = glm::clamp(tod, -10.0f, 10.0f);
 

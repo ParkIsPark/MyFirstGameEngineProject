@@ -106,9 +106,9 @@
     <ClCompile Include="Engine\Editor\External\ImGuizmo\ImGuizmo.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <!-- Light -->
     <ClCompile Include="Engine\Light\ALight.cpp"><Filter>Engine\Light</Filter></ClCompile>
-    <ClCompile Include="Engine\Light\EnvironmentLight.cpp"><Filter>Engine\Light</Filter></ClCompile>
+    <ClCompile Include="Engine\Light\EnvironmentLightComponent.cpp"><Filter>Engine\Light</Filter></ClCompile>
     <ClCompile Include="Engine\Light\LightComponent.cpp"><Filter>Engine\Light</Filter></ClCompile>
-    <ClCompile Include="Engine\Light\PointLight.cpp"><Filter>Engine\Light</Filter></ClCompile>
+    <ClCompile Include="Engine\Light\PointLightComponent.cpp"><Filter>Engine\Light</Filter></ClCompile>
     <!-- Physics -->
     <ClCompile Include="Engine\Physics\UPrimitiveComponent.cpp"><Filter>Engine\Physics</Filter></ClCompile>
     <ClCompile Include="Engine\Physics\USphereComponent.cpp"><Filter>Engine\Physics</Filter></ClCompile>
@@ -170,9 +170,9 @@
     <ClInclude Include="Engine\Editor\External\ImGuizmo\ImGuizmo.h"><Filter>Engine\Editor</Filter></ClInclude>
     <!-- Light -->
     <ClInclude Include="Engine\Light\ALight.h"><Filter>Engine\Light</Filter></ClInclude>
-    <ClInclude Include="Engine\Light\EnvironmentLight.h"><Filter>Engine\Light</Filter></ClInclude>
+    <ClInclude Include="Engine\Light\EnvironmentLightComponent.h"><Filter>Engine\Light</Filter></ClInclude>
     <ClInclude Include="Engine\Light\LightComponent.h"><Filter>Engine\Light</Filter></ClInclude>
-    <ClInclude Include="Engine\Light\PointLight.h"><Filter>Engine\Light</Filter></ClInclude>
+    <ClInclude Include="Engine\Light\PointLightComponent.h"><Filter>Engine\Light</Filter></ClInclude>
     <!-- Physics -->
     <ClInclude Include="Engine\Physics\UPrimitiveComponent.h"><Filter>Engine\Physics</Filter></ClInclude>
     <ClInclude Include="Engine\Physics\UShapeComponent.h"><Filter>Engine\Physics</Filter></ClInclude>

@@ -99,9 +99,9 @@
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\backends\imgui_impl_opengl3.cpp"><Filter>Engine\Editor\External\imgui\backends</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Light\ALight.cpp"><Filter>Engine\Light</Filter></ClCompile>
-    <ClCompile Include="$(EngineRootDir)Engine\Light\EnvironmentLight.cpp"><Filter>Engine\Light</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Light\EnvironmentLightComponent.cpp"><Filter>Engine\Light</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Light\LightComponent.cpp"><Filter>Engine\Light</Filter></ClCompile>
-    <ClCompile Include="$(EngineRootDir)Engine\Light\PointLight.cpp"><Filter>Engine\Light</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Light\PointLightComponent.cpp"><Filter>Engine\Light</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Physics\UPrimitiveComponent.cpp"><Filter>Engine\Physics</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Physics\USphereComponent.cpp"><Filter>Engine\Physics</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Physics\UBoxComponent.cpp"><Filter>Engine\Physics</Filter></ClCompile>
@@ -146,9 +146,9 @@
     <ClInclude Include="$(EngineRootDir)Engine\Editor\FProcess.h"><Filter>Engine\Editor</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.h"><Filter>Engine\Editor</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Light\ALight.h"><Filter>Engine\Light</Filter></ClInclude>
-    <ClInclude Include="$(EngineRootDir)Engine\Light\EnvironmentLight.h"><Filter>Engine\Light</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Light\EnvironmentLightComponent.h"><Filter>Engine\Light</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Light\LightComponent.h"><Filter>Engine\Light</Filter></ClInclude>
-    <ClInclude Include="$(EngineRootDir)Engine\Light\PointLight.h"><Filter>Engine\Light</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Light\PointLightComponent.h"><Filter>Engine\Light</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Physics\UPrimitiveComponent.h"><Filter>Engine\Physics</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Physics\UShapeComponent.h"><Filter>Engine\Physics</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Physics\USphereComponent.h"><Filter>Engine\Physics</Filter></ClInclude>

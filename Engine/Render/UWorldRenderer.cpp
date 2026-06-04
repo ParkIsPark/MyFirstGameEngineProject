@@ -12,7 +12,7 @@
 #include "UMesh.h"
 #include "UMeshComponent.h"
 #include "ALight.h"
-#include "PointLight.h"
+#include "PointLightComponent.h"
 #include "FTransform.h"
 #include "FRenderShowFlag.h"
 
@@ -62,7 +62,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
                 albedos.push_back(mc->hasMaterialOverride ? mc->materialOverride.kd : mc->mesh->material.kd);
             }
         if (ALight* L = dynamic_cast<ALight*>(a))
-            if (PointLight* pl = dynamic_cast<PointLight*>(L->lightComp))
+            if (PointLightComponent* pl = dynamic_cast<PointLightComponent*>(L->lightComp))
             { lightPos.push_back(pl->GetWorldLocation()); lightColor.push_back(pl->LightColor * pl->LightIntensity); }
     }
     if (lightPos.empty()) { lightPos = { glm::vec3(6, 8, 2) }; lightColor = { glm::vec3(1.0f) }; }

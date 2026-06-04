@@ -24,8 +24,8 @@
 #include "UBoxComponent.h"
 #include "UPhysicsWorld.h"
 #include "ALight.h"
-#include "PointLight.h"
-#include "EnvironmentLight.h"
+#include "PointLightComponent.h"
+#include "EnvironmentLightComponent.h"
 #include "LightComponent.h"
 #include "FWorldSerializer.h"
 #include "FRenderShowFlag.h"
@@ -97,7 +97,7 @@ void EditorEngine::BuildEditorWorld()
 
     // A real light actor (ALight owns a LightComponent) -- inspectable in Details.
     {
-        ALight* light = new ALight(new PointLight(glm::vec3(1.0f), glm::vec3(1.0f)));
+        ALight* light = new ALight(new PointLightComponent(glm::vec3(1.0f), glm::vec3(1.0f)));
         light->name = "PointLight";
         light->SetActorLocation(glm::vec3(5.0f, 5.0f, -3.0f));
         editorWorld_->Spawn(light);
@@ -230,7 +230,7 @@ AActor* EditorEngine::AddActor(const char* type, const std::string& name)
     std::string t = type;
     if (t == "Light")
     {
-        a = new ALight(new PointLight(glm::vec3(1.0f), glm::vec3(1.0f)));
+        a = new ALight(new PointLightComponent(glm::vec3(1.0f), glm::vec3(1.0f)));
     }
     else if (t == "Cube" || t == "Sphere")
     {
@@ -337,11 +337,11 @@ UWorld* EditorEngine::CopyWorld(UWorld& src, bool resetPhysics)
         if (ALight* sl = dynamic_cast<ALight*>(sa))
         {
             LightComponent* lc = nullptr;
-            if (auto* pl = dynamic_cast<PointLight*>(sl->lightComp))
-                lc = new PointLight(pl->LightColor, pl->LightIntensity);
-            else if (auto* el = dynamic_cast<EnvironmentLight*>(sl->lightComp))
+            if (auto* pl = dynamic_cast<PointLightComponent*>(sl->lightComp))
+                lc = new PointLightComponent(pl->LightColor, pl->LightIntensity);
+            else if (auto* el = dynamic_cast<EnvironmentLightComponent*>(sl->lightComp))
             {
-                auto* e = new EnvironmentLight(el->LightColor, el->LightIntensity);
+                auto* e = new EnvironmentLightComponent(el->LightColor, el->LightIntensity);
                 e->horizonColor = el->horizonColor; e->zenithColor = el->zenithColor; e->skyExp = el->skyExp;
                 lc = e;
             }
@@ -482,7 +482,7 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
                 albedos.push_back(mc->hasMaterialOverride ? mc->materialOverride.kd : mc->mesh->material.kd);
             }
         if (ALight* L = dynamic_cast<ALight*>(a))
-            if (PointLight* pl = dynamic_cast<PointLight*>(L->lightComp))
+            if (PointLightComponent* pl = dynamic_cast<PointLightComponent*>(L->lightComp))
             { lightPos.push_back(pl->GetWorldLocation()); lightColor.push_back(pl->LightColor * pl->LightIntensity); }
     }
     if (lightPos.empty()) { lightPos = { glm::vec3(6, 8, 2) }; lightColor = { glm::vec3(1.0f) }; }

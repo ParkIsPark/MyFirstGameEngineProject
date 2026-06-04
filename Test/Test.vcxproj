@@ -119,9 +119,9 @@
     <ClCompile Include="$(EngineRootDir)Engine\World\UWorld.cpp" />
     <!-- Engine: Light -->
     <ClCompile Include="$(EngineRootDir)Engine\Light\ALight.cpp" />
-    <ClCompile Include="$(EngineRootDir)Engine\Light\EnvironmentLight.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Light\EnvironmentLightComponent.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Light\LightComponent.cpp" />
-    <ClCompile Include="$(EngineRootDir)Engine\Light\PointLight.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Light\PointLightComponent.cpp" />
     <!-- Engine: Physics -->
     <ClCompile Include="$(EngineRootDir)Engine\Physics\UPrimitiveComponent.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Physics\USphereComponent.cpp" />
@@ -146,9 +146,9 @@
     <ClInclude Include="$(EngineRootDir)Engine\World\ACamera.h" />
     <!-- Engine: Light headers -->
     <ClInclude Include="$(EngineRootDir)Engine\Light\ALight.h" />
-    <ClInclude Include="$(EngineRootDir)Engine\Light\EnvironmentLight.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Light\EnvironmentLightComponent.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Light\LightComponent.h" />
-    <ClInclude Include="$(EngineRootDir)Engine\Light\PointLight.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Light\PointLightComponent.h" />
     <!-- Engine: Physics headers -->
     <ClInclude Include="$(EngineRootDir)Engine\Physics\UPrimitiveComponent.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Physics\UShapeComponent.h" />

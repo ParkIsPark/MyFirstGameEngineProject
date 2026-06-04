@@ -12,8 +12,8 @@
 //       Engine/Core/UPostProcessFilter.cpp Engine/Mesh/UMesh.cpp \
 //       Engine/Mesh/UMeshComponent.cpp Engine/Mesh/Material.cpp \
 //       Engine/Acceleration/BVH.cpp Engine/Light/ALight.cpp \
-//       Engine/Light/LightComponent.cpp Engine/Light/PointLight.cpp \
-//       Engine/Light/EnvironmentLight.cpp Engine/Physics/UPhysicsWorld.cpp \
+//       Engine/Light/LightComponent.cpp Engine/Light/PointLightComponent.cpp \
+//       Engine/Light/EnvironmentLightComponent.cpp Engine/Physics/UPhysicsWorld.cpp \
 //       Engine/Physics/UPrimitiveComponent.cpp Engine/Physics/USphereComponent.cpp \
 //       Engine/Physics/UBoxComponent.cpp -o world_serialize_test && ./world_serialize_test
 // ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@
 #include "UMeshComponent.h"
 #include "UMesh.h"
 #include "ALight.h"
-#include "PointLight.h"
+#include "PointLightComponent.h"
 #include <cstdio>
 #include <cmath>
 #include <string>
@@ -55,7 +55,7 @@ static UWorld* buildWorld()
     s->SetMesh(mc);
     w->Spawn(s);
 
-    ALight* L = new ALight(new PointLight({1,1,1}, {1,1,1}));
+    ALight* L = new ALight(new PointLightComponent({1,1,1}, {1,1,1}));
     L->name = "Sun"; L->SetActorLocation({-4,4,-3});
     L->lightComp->name = "Light";
     w->Spawn(L);

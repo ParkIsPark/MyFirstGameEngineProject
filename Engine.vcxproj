@@ -112,9 +112,9 @@
     <ClCompile Include="Engine\World\UWorld.cpp" />
     <!-- Engine: Light -->
     <ClCompile Include="Engine\Light\ALight.cpp" />
-    <ClCompile Include="Engine\Light\EnvironmentLight.cpp" />
+    <ClCompile Include="Engine\Light\EnvironmentLightComponent.cpp" />
     <ClCompile Include="Engine\Light\LightComponent.cpp" />
-    <ClCompile Include="Engine\Light\PointLight.cpp" />
+    <ClCompile Include="Engine\Light\PointLightComponent.cpp" />
     <!-- Engine: Physics -->
     <ClCompile Include="Engine\Physics\UPrimitiveComponent.cpp" />
     <ClCompile Include="Engine\Physics\USphereComponent.cpp" />
@@ -174,9 +174,9 @@
     <ClInclude Include="Engine\World\UWorld.h" />
     <!-- Engine: Light headers -->
     <ClInclude Include="Engine\Light\ALight.h" />
-    <ClInclude Include="Engine\Light\EnvironmentLight.h" />
+    <ClInclude Include="Engine\Light\EnvironmentLightComponent.h" />
     <ClInclude Include="Engine\Light\LightComponent.h" />
-    <ClInclude Include="Engine\Light\PointLight.h" />
+    <ClInclude Include="Engine\Light\PointLightComponent.h" />
     <!-- Engine: Physics headers -->
     <ClInclude Include="Engine\Physics\UPrimitiveComponent.h" />
     <ClInclude Include="Engine\Physics\UShapeComponent.h" />

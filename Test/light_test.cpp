@@ -7,13 +7,13 @@
 // Build (msys2 ucrt64):
 //   g++ -std=c++17 -I include -I Engine/Light -I Engine/World -I Engine/Mesh \
 //       -I Engine/Serialization \
-//       Test/light_test.cpp Engine/Light/PointLight.cpp Engine/Light/EnvironmentLight.cpp \
+//       Test/light_test.cpp Engine/Light/PointLightComponent.cpp Engine/Light/EnvironmentLightComponent.cpp \
 //       Engine/Light/LightComponent.cpp Engine/Light/ALight.cpp Engine/World/AActor.cpp \
 //       Engine/World/USceneComponent.cpp Engine/Serialization/FArchive.cpp \
 //       -o light_test && ./light_test
 // ---------------------------------------------------------------------------
-#include "PointLight.h"
-#include "EnvironmentLight.h"
+#include "PointLightComponent.h"
+#include "EnvironmentLightComponent.h"
 #include "ALight.h"
 #include "FArchive.h"
 #include <cstdio>
@@ -34,29 +34,29 @@ int main()
 {
     // T1: light world position comes from the actor transform
     {
-        ALight l(new PointLight(glm::vec3(1), glm::vec3(1)));
+        ALight l(new PointLightComponent(glm::vec3(1), glm::vec3(1)));
         l.SetActorLocation({5, 5, -3});
         ck("T1", "PointLight world pos == actor location", veq(l.lightComp->GetWorldLocation(), {5,5,-3}));
     }
     // T2: lightComp is attached under the actor's root
     {
-        ALight l(new PointLight(glm::vec3(1), glm::vec3(1)));
+        ALight l(new PointLightComponent(glm::vec3(1), glm::vec3(1)));
         ck("T2", "lightComp attached to root", l.lightComp->attachParent == &l.rootComponent);
     }
     // T3: PointLight serialize round-trip (color/intensity + transform)
     {
-        PointLight p; p.LightColor = {1,0.5f,0.2f}; p.LightIntensity = {2,2,2};
+        PointLightComponent p; p.LightColor = {1,0.5f,0.2f}; p.LightIntensity = {2,2,2};
         p.SetRelativeLocation({4,-1,7});
         FSaveArchive sa; p.Serialize(sa);
-        PointLight q; FLoadArchive la(sa.str()); q.Serialize(la);
+        PointLightComponent q; FLoadArchive la(sa.str()); q.Serialize(la);
         ck("T3", "PointLight round-trip",
            veq(q.LightColor, {1,0.5f,0.2f}) && veq(q.LightIntensity, {2,2,2}) && veq(q.relLocation, {4,-1,7}));
     }
     // T4: EnvironmentLight serialize round-trip (sky params)
     {
-        EnvironmentLight e; e.horizonColor = {0.9f,0.5f,0.2f}; e.zenithColor = {0.3f,0.5f,0.9f}; e.skyExp = 0.7f;
+        EnvironmentLightComponent e; e.horizonColor = {0.9f,0.5f,0.2f}; e.zenithColor = {0.3f,0.5f,0.9f}; e.skyExp = 0.7f;
         FSaveArchive sa; e.Serialize(sa);
-        EnvironmentLight f; FLoadArchive la(sa.str()); f.Serialize(la);
+        EnvironmentLightComponent f; FLoadArchive la(sa.str()); f.Serialize(la);
         ck("T4", "EnvironmentLight round-trip",
            veq(f.horizonColor, {0.9f,0.5f,0.2f}) && veq(f.zenithColor, {0.3f,0.5f,0.9f}) && std::fabs(f.skyExp-0.7f)<1e-4f);
     }
@@ -69,23 +69,23 @@ int main()
     }
     // T7: noon preset (tod=+10)
     {
-        EnvironmentLight e; EnvironmentLight::applyTimeOfDay(e, 10.0f);
+        EnvironmentLightComponent e; EnvironmentLightComponent::applyTimeOfDay(e, 10.0f);
         ck("T7", "applyTimeOfDay noon", veq(e.zenithColor, {0.25f,0.55f,1.0f}) && e.LightIntensity.x > 0.9f);
     }
     // T8: midnight preset (tod=-10) -> ~no light
     {
-        EnvironmentLight e; EnvironmentLight::applyTimeOfDay(e, -10.0f);
+        EnvironmentLightComponent e; EnvironmentLightComponent::applyTimeOfDay(e, -10.0f);
         ck("T8", "applyTimeOfDay midnight intensity ~0", e.LightIntensity.x < 0.01f);
     }
     // T9: LightComponent IS-A USceneComponent (upcast + type tag)
     {
-        PointLight p;
+        PointLightComponent p;
         USceneComponent* sc = &p;          // compiles only if LightComponent : USceneComponent
         ck("T9", "PointLight is-a USceneComponent", std::string(sc->TypeName()) == "PointLight");
     }
     // T10: moving the actor moves the light
     {
-        ALight l(new PointLight(glm::vec3(1), glm::vec3(1)));
+        ALight l(new PointLightComponent(glm::vec3(1), glm::vec3(1)));
         l.SetActorLocation({1,2,3});
         glm::vec3 a = l.lightComp->GetWorldLocation();
         l.SetActorLocation({4,5,6});

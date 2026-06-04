@@ -7,7 +7,7 @@
 #include "UScene.h"
 #include "UWorld.h"
 #include "ALight.h"
-#include "PointLight.h"
+#include "PointLightComponent.h"
 
 #include <vector>
 #include <algorithm>
@@ -82,7 +82,7 @@ void URenderer::RasterWorld(UScene& scene, const ACamera& cam, int nx, int ny)
     std::vector<PL> lights;
     for (AActor* a : scene.Actors)
         if (ALight* L = dynamic_cast<ALight*>(a))
-            if (PointLight* pl = dynamic_cast<PointLight*>(L->lightComp))
+            if (PointLightComponent* pl = dynamic_cast<PointLightComponent*>(L->lightComp))
                 lights.push_back({ pl->GetWorldLocation(), pl->LightColor * pl->LightIntensity });
 
     // Deferred Lambert diffuse + ambient (Blinn-Phong specular + shadows are the
@@ -165,7 +165,7 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag)
     std::vector<std::pair<glm::vec3, glm::vec3>> lights;   // (pos, color*intensity)
     for (AActor* a : scene.Actors)
         if (ALight* L = dynamic_cast<ALight*>(a))
-            if (PointLight* pl = dynamic_cast<PointLight*>(L->lightComp))
+            if (PointLightComponent* pl = dynamic_cast<PointLightComponent*>(L->lightComp))
                 lights.emplace_back(pl->GetWorldLocation(), pl->LightColor * pl->LightIntensity);
 
     if (lights.empty())                                   // fallback: assignment light
