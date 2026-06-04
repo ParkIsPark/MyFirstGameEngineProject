@@ -39,10 +39,27 @@
 #include <cmath>
 #include <filesystem>
 #include <algorithm>
+#include "stb_image.h"          // declaration only; impl lives in USkyHDRI.cpp
 
 namespace {
     const char* kModes[]   = { "Rasterizer", "GPU RT", "Hybrid" };
     const char* kShading[] = { "Flat", "Gouraud", "Phong" };
+
+    // Load an image file into a Material's CPU diffuse texture (used by the CPU
+    // raster's SampleDiffuse). stb impl is in USkyHDRI.cpp.
+    bool LoadMaterialTexture(Material& m, const std::string& path)
+    {
+        int w = 0, h = 0, n = 0;
+        stbi_set_flip_vertically_on_load(0);
+        unsigned char* d = stbi_load(path.c_str(), &w, &h, &n, 0);
+        if (!d) { std::printf("[Editor] texture load failed: %s\n", path.c_str()); return false; }
+        m.texData.assign(d, d + (size_t)w * h * n);
+        m.texWidth = w; m.texHeight = h; m.texChannels = n;
+        m.diffuseTexPath = path;
+        stbi_image_free(d);
+        std::printf("[Editor] texture %s (%dx%d, %dch)\n", path.c_str(), w, h, n);
+        return true;
+    }
 }
 
 EditorEngine::~EditorEngine()
@@ -221,6 +238,13 @@ void EditorEngine::LoadWorld(const std::string& path)
     if (!w) { std::printf("[Editor] Load failed: %s\n", path.c_str()); return; }
     std::string stem = std::filesystem::path(path).stem().string();
     SetEditorWorld(w, stem);
+
+    // Reload CPU diffuse textures from their serialized paths (pixels aren't saved).
+    auto reload = [](Material& m) { if (!m.diffuseTexPath.empty() && m.texData.empty()) LoadMaterialTexture(m, m.diffuseTexPath); };
+    for (AActor* act : editorWorld_->GetScene().Actors)
+        if (UMeshComponent* mc = act->mesh)
+        { if (mc->hasMaterialOverride) reload(mc->materialOverride); if (mc->mesh) reload(mc->mesh->material); }
+
     ClearHistory();                          // a freshly opened world starts clean
     std::printf("[Editor] Loaded %s (%d actors)\n", path.c_str(),
                 (int)editorWorld_->GetScene().Actors.size());
@@ -817,11 +841,11 @@ void EditorEngine::DrawContentBrowser()
         ImGui::BeginGroup();
         ImGui::Button((std::string(e.icon) + "##icon").c_str(), ImVec2(74, 52));
 
-        // Mesh assets are drag sources -> drop onto a Details "Mesh" slot.
-        if (cat == "Mesh" && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+        // Mesh / Texture assets are drag sources -> drop onto a Details slot.
+        if ((cat == "Mesh" || cat == "Texture") && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
         {
             std::string full = contentDir_ + "/" + e.name;
-            ImGui::SetDragDropPayload("ASSET_MESH", full.c_str(), full.size() + 1);
+            ImGui::SetDragDropPayload(cat == "Mesh" ? "ASSET_MESH" : "ASSET_TEX", full.c_str(), full.size() + 1);
             ImGui::Text("%s %s", e.icon, e.name.c_str());
             ImGui::EndDragDropSource();
         }
@@ -1100,6 +1124,25 @@ void EditorEngine::DrawDetails()
             if (ImGui::SliderFloat("Mirror", &mir, 0.0f, 1.0f)) m.km = glm::vec3(mir);
             snap();
             ImGui::TextDisabled("(Mirror reflection shows in GPU RT mode)");
+
+            // Diffuse texture slot: drag an image from the Content Browser, or
+            // click to pick a file. Sampled by the CPU raster (Rasterizer mode).
+            const std::string tex = m.diffuseTexPath.empty() ? "(none)" : m.diffuseTexPath;
+            ImGui::Text("Texture: %s", tex.c_str());
+            ImGui::Button("Set Diffuse Texture  (drop image / click)", ImVec2(-1, 0));
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_TEX"))
+                { PushUndo(); LoadMaterialTexture(m, std::string((const char*)pl->Data)); }
+                ImGui::EndDragDropTarget();
+            }
+            if (ImGui::IsItemClicked())
+            {
+                std::string p = FFileDialog::OpenAsset();
+                if (!p.empty()) { PushUndo(); LoadMaterialTexture(m, p); }
+            }
+            if (!m.diffuseTexPath.empty() && ImGui::SmallButton("Clear Texture"))
+            { PushUndo(); m.texData.clear(); m.texWidth = m.texHeight = 0; m.diffuseTexPath.clear(); }
         }
     }
     // ---- Collision component: its own transform (offset + size) + rigid body ----

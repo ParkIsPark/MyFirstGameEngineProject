@@ -13,7 +13,7 @@ namespace FFileDialog
         char buf[2048] = {};
         // Filter is a double-null-terminated "label\0pattern\0...\0\0" block.
         static const char kFilter[] =
-            "Importable (*.obj;*.fbx;*.world;*.hdr)\0*.obj;*.fbx;*.world;*.hdr\0"
+            "Assets (*.obj;*.fbx;*.world;*.hdr;*.png;*.jpg)\0*.obj;*.fbx;*.world;*.hdr;*.png;*.jpg;*.jpeg\0"
             "All Files (*.*)\0*.*\0";
 
         OPENFILENAMEA ofn = {};

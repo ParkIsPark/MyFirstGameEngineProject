@@ -225,13 +225,14 @@ void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
 // ---------------------------------------------------------------------------
 namespace
 {
-    // Shaded vertex carried through clip space (col used by Gouraud).
-    struct SV { glm::vec4 clip; glm::vec3 wp; glm::vec3 wn; glm::vec3 col; };
+    // Shaded vertex carried through clip space (col used by Gouraud, uv for texture).
+    struct SV { glm::vec4 clip; glm::vec3 wp; glm::vec3 wn; glm::vec3 col; glm::vec2 uv; };
 
     SV lerpSV(const SV& A, const SV& B, float t)
     {
         return SV{ A.clip + t * (B.clip - A.clip), A.wp + t * (B.wp - A.wp),
-                   A.wn + t * (B.wn - A.wn), A.col + t * (B.col - A.col) };
+                   A.wn + t * (B.wn - A.wn), A.col + t * (B.col - A.col),
+                   A.uv + t * (B.uv - A.uv) };
     }
     void clipNearSV(const SV in[3], std::vector<SV>& out)
     {
@@ -249,12 +250,13 @@ namespace
     // Blinn-Phong (LINEAR; gamma is applied at the pixel). HW6 formula:
     //   L = ka*Ia + kd*I*max(0,n.l) + ks*I*max(0,n.h)^p
     glm::vec3 shadeLinear(const glm::vec3& P, const glm::vec3& N,
-                          const Material& m, const FShadeParams& sp)
+                          const Material& m, const FShadeParams& sp, const glm::vec3& kd)
     {
         const glm::vec3 v = glm::normalize(sp.eye - P);
         const float     p = glm::max(m.shininess, 1.0f);
 
         // Per-light Blinn-Phong diffuse + specular (no ambient -- added once below).
+        // kd is the (possibly textured) diffuse color; ka/ks/shininess come from m.
         auto contrib = [&](const glm::vec3& lpos, const glm::vec3& lcol) -> glm::vec3
         {
             const glm::vec3 toL = lpos - P;
@@ -263,7 +265,7 @@ namespace
             const glm::vec3 h   = glm::normalize(l + v);
             const float ndl = glm::max(0.0f, glm::dot(N, l));
             const float ndh = glm::max(0.0f, glm::dot(N, h));
-            return m.kd * lcol * ndl + m.ks * lcol * std::pow(ndh, p);
+            return kd * lcol * ndl + m.ks * lcol * std::pow(ndh, p);
         };
 
         glm::vec3 col = m.ka * sp.ambient + contrib(sp.lightPos, sp.lightColor);
@@ -325,7 +327,13 @@ void URasterizer::DrawMeshShaded(const UMesh& mesh, const FTransform& xf, const 
                 {
                     const glm::vec3 wp = (al * A.wp * iw0 + be * B.wp * iw1 + ga * C.wp * iw2) / pw;
                     const glm::vec3 wn = glm::normalize((al * A.wn * iw0 + be * B.wn * iw1 + ga * C.wn * iw2) / pw);
-                    lin = shadeLinear(wp, wn, *curMat, sp);
+                    glm::vec3 kd = curMat->kd;
+                    if (!curMat->texData.empty())
+                    {
+                        const glm::vec2 uv = (al * A.uv * iw0 + be * B.uv * iw1 + ga * C.uv * iw2) / pw;
+                        kd = curMat->SampleDiffuse(uv);
+                    }
+                    lin = shadeLinear(wp, wn, *curMat, sp, kd);
                 }
             }
             fb.TestAndSet(x, y, z, glm::pow(glm::clamp(lin, 0.0f, 1.0f), invG));
@@ -342,13 +350,16 @@ void URasterizer::DrawMeshShaded(const UMesh& mesh, const FTransform& xf, const 
         const Vertex& c = mesh.vertices[mesh.indices[3 * tri + 2]];
 
         SV v[3];
-        v[0] = { xf.ToClip(a.position), glm::vec3(xf.model * glm::vec4(a.position, 1.0f)), nrmM * a.normal, glm::vec3(0.0f) };
-        v[1] = { xf.ToClip(b.position), glm::vec3(xf.model * glm::vec4(b.position, 1.0f)), nrmM * b.normal, glm::vec3(0.0f) };
-        v[2] = { xf.ToClip(c.position), glm::vec3(xf.model * glm::vec4(c.position, 1.0f)), nrmM * c.normal, glm::vec3(0.0f) };
+        v[0] = { xf.ToClip(a.position), glm::vec3(xf.model * glm::vec4(a.position, 1.0f)), nrmM * a.normal, glm::vec3(0.0f), a.uv };
+        v[1] = { xf.ToClip(b.position), glm::vec3(xf.model * glm::vec4(b.position, 1.0f)), nrmM * b.normal, glm::vec3(0.0f), b.uv };
+        v[2] = { xf.ToClip(c.position), glm::vec3(xf.model * glm::vec4(c.position, 1.0f)), nrmM * c.normal, glm::vec3(0.0f), c.uv };
+
+        const bool textured = !M.texData.empty();
 
         if (model == EShadingModel::Gouraud)
             for (int i = 0; i < 3; ++i)
-                v[i].col = shadeLinear(v[i].wp, glm::normalize(v[i].wn), M, sp);
+                v[i].col = shadeLinear(v[i].wp, glm::normalize(v[i].wn), M, sp,
+                                       textured ? M.SampleDiffuse(v[i].uv) : M.kd);
 
         const bool flat = (model == EShadingModel::Flat);
         glm::vec3 flatCol(0.0f);
@@ -357,7 +368,8 @@ void URasterizer::DrawMeshShaded(const UMesh& mesh, const FTransform& xf, const 
             const glm::vec3 cen = (v[0].wp + v[1].wp + v[2].wp) / 3.0f;
             glm::vec3 fn = glm::normalize(glm::cross(v[1].wp - v[0].wp, v[2].wp - v[0].wp));
             if (glm::dot(fn, v[0].wn + v[1].wn + v[2].wn) < 0.0f) fn = -fn; // outward
-            flatCol = shadeLinear(cen, fn, M, sp);
+            const glm::vec2 cuv = (v[0].uv + v[1].uv + v[2].uv) / 3.0f;
+            flatCol = shadeLinear(cen, fn, M, sp, textured ? M.SampleDiffuse(cuv) : M.kd);
         }
 
         if (frustumCull && frustumReject(v[0].clip, v[1].clip, v[2].clip)) continue;
