@@ -16,8 +16,12 @@
 // Each shader must declare, BEFORE this block, the uniforms it references:
 //   uniform samplerBuffer uNodes;   // BVH nodes  (2 RGBA32F texels/node)
 //   uniform samplerBuffer uTriIdx;  // BVH leaf -> triangle index (R32F)
-//   uniform vec3  uEye, uLightPos, uLightColor, uKs;
+//   uniform vec3  uEye, uKs;
 //   uniform float uShininess;
+//   #define MAX_LIGHTS 8
+//   uniform int   uNumLights;                  // active light count (<= MAX_LIGHTS)
+//   uniform vec3  uLightPosArr[MAX_LIGHTS];
+//   uniform vec3  uLightColorArr[MAX_LIGHTS];
 // and define a triangle-position accessor (stride differs per mode):
 //   vec3 triPos(int tri, int slot);   // slot 0..2 -> the three vertices
 // ---------------------------------------------------------------------------
@@ -87,24 +91,32 @@ vec3 tonemap(vec3 c) {
 }
 
 // THE lighting model. Given a visible surface point, return its linear (pre-
-// tonemap) radiance: sky ambient + Blinn-Phong direct light gated by a single
-// BVH-traced hard shadow ray. Used unchanged by both render modes.
+// tonemap) radiance: sky ambient (added once) + the sum over every scene light
+// of its Blinn-Phong direct term, each gated by its OWN BVH-traced hard shadow
+// ray. Used unchanged by both render modes.
 vec3 shadeSurface(vec3 P, vec3 N, vec3 albedo) {
-    vec3  toL  = uLightPos - P;
-    float dist = length(toL);
-    vec3  L    = toL / dist;
-    float NdotL = max(dot(N, L), 0.0);
-
-    // offset along the normal to avoid shadow acne
-    float shadow = (NdotL > 0.0 && occluded(P + N * 1e-3, L, dist)) ? 0.0 : 1.0;
-
-    vec3  Vv = normalize(uEye - P);
-    vec3  H  = normalize(L + Vv);
-    float NdotH = max(dot(N, H), 0.0);
-
+    vec3 Vv      = normalize(uEye - P);
     vec3 ambient = albedo * skyColor(N) * 0.5;
-    vec3 diffuse = albedo * NdotL;
-    vec3 spec    = (NdotL > 0.0) ? uKs * pow(NdotH, max(uShininess, 1.0)) : vec3(0.0);
-    return ambient + (diffuse + spec) * uLightColor * shadow;
+
+    vec3 lit = vec3(0.0);
+    for (int i = 0; i < uNumLights; ++i) {
+        vec3  toL  = uLightPosArr[i] - P;
+        float dist = length(toL);
+        if (dist < 1e-5) continue;
+        vec3  L     = toL / dist;
+        float NdotL = max(dot(N, L), 0.0);
+        if (NdotL <= 0.0) continue;
+
+        // each light casts its own shadow ray (offset along N to avoid acne)
+        float shadow = occluded(P + N * 1e-3, L, dist) ? 0.0 : 1.0;
+        if (shadow <= 0.0) continue;
+
+        vec3  H     = normalize(L + Vv);
+        float NdotH = max(dot(N, H), 0.0);
+        vec3  diffuse = albedo * NdotL;
+        vec3  spec    = uKs * pow(NdotH, max(uShininess, 1.0));
+        lit += (diffuse + spec) * uLightColorArr[i] * shadow;
+    }
+    return ambient + lit;
 }
 )GLSL";

@@ -33,6 +33,7 @@
         $(EngineRootDir)Engine\Editor;
         $(EngineRootDir)Engine\Editor\External\imgui;
         $(EngineRootDir)Engine\Editor\External\imgui\backends;
+        $(EngineRootDir)Engine\Editor\External\ImGuizmo;
         %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
     </ClCompile>

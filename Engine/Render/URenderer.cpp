@@ -157,16 +157,28 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag)
     const ACamera& cam   = world.GetCamera();
     const int nx = scene.width, ny = scene.height;
 
-    // Single point light (HW6). Falls back to the assignment's light if none.
+    // Gather every point light in the scene. HW6 uses one; the editor may place
+    // several -- all contribute (extras beyond the first go to extraLight*).
     FShadeParams sp;
-    sp.lightPos   = glm::vec3(-4.0f, 4.0f, -3.0f);
-    sp.lightColor = glm::vec3(1.0f);
-    sp.ambient    = glm::vec3(0.2f);
-    sp.eye        = cam.eye;
+    sp.ambient = glm::vec3(0.2f);
+    sp.eye     = cam.eye;
+    std::vector<std::pair<glm::vec3, glm::vec3>> lights;   // (pos, color*intensity)
     for (AActor* a : scene.Actors)
         if (ALight* L = dynamic_cast<ALight*>(a))
             if (PointLight* pl = dynamic_cast<PointLight*>(L->lightComp))
-            { sp.lightPos = pl->GetWorldLocation(); sp.lightColor = pl->LightColor * pl->LightIntensity; break; }
+                lights.emplace_back(pl->GetWorldLocation(), pl->LightColor * pl->LightIntensity);
+
+    if (lights.empty())                                   // fallback: assignment light
+    {
+        sp.lightPos = glm::vec3(-4.0f, 4.0f, -3.0f);
+        sp.lightColor = glm::vec3(1.0f);
+    }
+    else
+    {
+        sp.lightPos = lights[0].first; sp.lightColor = lights[0].second;
+        for (size_t i = 1; i < lights.size(); ++i)
+        { sp.extraLightPos.push_back(lights[i].first); sp.extraLightColor.push_back(lights[i].second); }
+    }
 
     fb_.Init(nx, ny);
     fb_.Clear(glm::vec3(0.0f));                 // black background (HW6 reference)

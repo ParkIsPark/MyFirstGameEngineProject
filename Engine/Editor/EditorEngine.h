@@ -35,10 +35,16 @@ protected:
 private:
     void BuildEditorWorld();
     void SaveWorld();                    // editor world -> Content/<name>.world
+    void NewWorld();                     // replace editor world with an empty one
+    void LoadWorld(const std::string& path);   // replace editor world from a .world
+    void SetEditorWorld(UWorld* w, const std::string& name);  // swap + rebind UI state
+    AActor* AddActor(const char* type, const std::string& name);  // factory spawn
+    void ImportAsset(const std::string& path);  // .obj/.fbx -> mesh actor; .world -> load
+    void RebuildActorNames();            // resync actorNames_ from scene actors
     void OnPlay();                       // Editor -> PIE: deep-copy + BeginPlay
     void OnStop();                       // PIE -> Editor
     UWorld* CopyWorld(UWorld& src);      // deep copy (shares UMesh assets)
-    UWorld& ActiveWorld() { return (playing_ && pieWorld_) ? *pieWorld_ : editorWorld_; }
+    UWorld& ActiveWorld() { return (playing_ && pieWorld_) ? *pieWorld_ : *editorWorld_; }
     void DrawUI();
     void DrawMenuBar();
     void DrawToolbar();
@@ -54,16 +60,21 @@ private:
     void UpdateEditorCamera(int w, int h);   // RMB-fly + WASD (when viewport active)
     void PickActor(int w, int h);            // left-click ray pick
 
+    // OS file drag-drop -> ImportAsset (routes through the window user-pointer).
+    static void dropTrampoline(struct GLFWwindow* win, int count, const char** paths);
+
     bool imguiReady_ = false;
     bool showDemo_   = false;
     int  renderMode_ = 0;        // 0=Rasterizer 1=GPU RT 2=Hybrid
     bool depthView_  = false;    // CPU raster preview: grayscale depth instead of shade
+    int  gizmoOp_    = 0;        // ImGuizmo op: 0=Translate 1=Rotate 2=Scale
+    bool gizmoLocal_ = false;    // gizmo space: false=World, true=Local
     bool playing_    = false;    // Editor vs PIE (Stage 5)
     int  selected_   = -1;       // index into editorWorld_ actors
     std::string worldName_ = "EditorWorld";   // -> Content/<worldName_>.world
 
-    UWorld    editorWorld_;
-    UWorld*   pieWorld_ = nullptr;      // spawned on Play (deep copy of editorWorld_)
+    UWorld*   editorWorld_ = nullptr;   // the live edited world (replaceable: New/Load)
+    UWorld*   pieWorld_    = nullptr;    // spawned on Play (deep copy of editorWorld_)
     URenderer renderer_;
 
     std::vector<UMesh*>      meshAssets_;   // owned shared mesh assets
@@ -71,7 +82,10 @@ private:
 
     struct ContentEntry { std::string name; const char* cat; const char* icon; };
     std::vector<ContentEntry> content_;     // scanned Content/ assets
+    std::string contentDir_ = "Content";    // dir ScanContent actually read from
     int  cbFilter_ = 0;                     // 0=All 1=World 2=Mesh 3=Texture
+    int  cbRename_ = -1;                     // content entry index being renamed (-1 none)
+    char cbBuf_[128] = {};                   // rename / import-path text buffer
 
     unsigned int vpTex_  = 0;    // viewport texture (CPU outputImage upload, raster)
     int          vpTexW_ = 0;

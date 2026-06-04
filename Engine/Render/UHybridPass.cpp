@@ -2,6 +2,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>
 #include <vector>
+#include <algorithm>
 
 #include "UHybridPass.h"
 #include "UGBuffer.h"
@@ -44,7 +45,10 @@ uniform samplerBuffer uTriIdx;       // BVH leaf -> triangle index (R32F)
 uniform vec3  uEye, uU, uV, uW;
 uniform float uL, uR, uB, uT, uD;
 uniform int   uWidth, uHeight, uNumTris, uNumNodes;
-uniform vec3  uLightPos, uLightColor;
+#define MAX_LIGHTS 8
+uniform int   uNumLights;
+uniform vec3  uLightPosArr[MAX_LIGHTS];
+uniform vec3  uLightColorArr[MAX_LIGHTS];
 uniform vec3  uKs;                    // specular coefficient (Blinn-Phong)
 uniform float uShininess;
 
@@ -208,6 +212,12 @@ void UHybridPass::UploadGBuffer(const UGBuffer& gb)
 void UHybridPass::Render(const ACamera& cam, const glm::vec3& lightPos,
                          const glm::vec3& lightColor, int width, int height) const
 {
+    Render(cam, std::vector<glm::vec3>{ lightPos }, std::vector<glm::vec3>{ lightColor }, width, height);
+}
+
+void UHybridPass::Render(const ACamera& cam, const std::vector<glm::vec3>& lightPos,
+                         const std::vector<glm::vec3>& lightColor, int width, int height) const
+{
     glUseProgram(prog_);
     glUniform3fv(glGetUniformLocation(prog_, "uEye"), 1, glm::value_ptr(cam.eye));
     glUniform3fv(glGetUniformLocation(prog_, "uU"),   1, glm::value_ptr(cam.u));
@@ -222,8 +232,13 @@ void UHybridPass::Render(const ACamera& cam, const glm::vec3& lightPos,
     glUniform1i (glGetUniformLocation(prog_, "uHeight"), height);
     glUniform1i (glGetUniformLocation(prog_, "uNumTris"), numTris_);
     glUniform1i (glGetUniformLocation(prog_, "uNumNodes"), numNodes_);
-    glUniform3fv(glGetUniformLocation(prog_, "uLightPos"),   1, glm::value_ptr(lightPos));
-    glUniform3fv(glGetUniformLocation(prog_, "uLightColor"), 1, glm::value_ptr(lightColor));
+    const int nL = (int)std::min({ lightPos.size(), lightColor.size(), (size_t)8 });
+    glUniform1i(glGetUniformLocation(prog_, "uNumLights"), nL);
+    if (nL > 0)
+    {
+        glUniform3fv(glGetUniformLocation(prog_, "uLightPosArr"),   nL, glm::value_ptr(lightPos[0]));
+        glUniform3fv(glGetUniformLocation(prog_, "uLightColorArr"), nL, glm::value_ptr(lightColor[0]));
+    }
     glm::vec3 ks(0.35f);   // match GPU RT mode (UMeshRayTracer) so the shared
     glUniform3fv(glGetUniformLocation(prog_, "uKs"), 1, glm::value_ptr(ks));
     glUniform1f (glGetUniformLocation(prog_, "uShininess"), 32.0f);   // shadeSurface() looks identical

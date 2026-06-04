@@ -73,6 +73,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Import\UObjImporter.cpp"><Filter>Engine\Import</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Import\UFbxImporter.cpp"><Filter>Engine\Import</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\EditorEngine.cpp"><Filter>Engine\Editor</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\FFileDialog.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_draw.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_tables.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
@@ -80,6 +81,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_demo.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\backends\imgui_impl_glfw.cpp"><Filter>Engine\Editor\External\imgui\backends</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\backends\imgui_impl_opengl3.cpp"><Filter>Engine\Editor\External\imgui\backends</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Framework\Engine.cpp"><Filter>Engine\Framework</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Framework\FProjectDescriptor.cpp"><Filter>Engine\Framework</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Framework\USubsystemManager.cpp"><Filter>Engine\Framework</Filter></ClCompile>

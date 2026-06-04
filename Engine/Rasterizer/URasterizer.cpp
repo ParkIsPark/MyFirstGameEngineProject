@@ -251,17 +251,25 @@ namespace
     glm::vec3 shadeLinear(const glm::vec3& P, const glm::vec3& N,
                           const Material& m, const FShadeParams& sp)
     {
-        const glm::vec3 toL = sp.lightPos - P;
-        const float     d   = glm::length(toL);
-        const glm::vec3 l   = (d > 1e-6f) ? toL / d : glm::vec3(0, 1, 0);
-        const glm::vec3 v   = glm::normalize(sp.eye - P);
-        const glm::vec3 h   = glm::normalize(l + v);
-        const float ndl = glm::max(0.0f, glm::dot(N, l));
-        const float ndh = glm::max(0.0f, glm::dot(N, h));
-        const float p   = glm::max(m.shininess, 1.0f);
-        return m.ka * sp.ambient
-             + m.kd * sp.lightColor * ndl
-             + m.ks * sp.lightColor * std::pow(ndh, p);
+        const glm::vec3 v = glm::normalize(sp.eye - P);
+        const float     p = glm::max(m.shininess, 1.0f);
+
+        // Per-light Blinn-Phong diffuse + specular (no ambient -- added once below).
+        auto contrib = [&](const glm::vec3& lpos, const glm::vec3& lcol) -> glm::vec3
+        {
+            const glm::vec3 toL = lpos - P;
+            const float     d   = glm::length(toL);
+            const glm::vec3 l   = (d > 1e-6f) ? toL / d : glm::vec3(0, 1, 0);
+            const glm::vec3 h   = glm::normalize(l + v);
+            const float ndl = glm::max(0.0f, glm::dot(N, l));
+            const float ndh = glm::max(0.0f, glm::dot(N, h));
+            return m.kd * lcol * ndl + m.ks * lcol * std::pow(ndh, p);
+        };
+
+        glm::vec3 col = m.ka * sp.ambient + contrib(sp.lightPos, sp.lightColor);
+        for (size_t i = 0; i < sp.extraLightPos.size(); ++i)
+            col += contrib(sp.extraLightPos[i], sp.extraLightColor[i]);
+        return col;
     }
 }
 

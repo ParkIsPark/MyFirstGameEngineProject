@@ -1,5 +1,6 @@
 #pragma once
 #include <glm/glm.hpp>
+#include <vector>
 
 class UMesh;
 struct FTransform;
@@ -17,9 +18,15 @@ enum class EShadingModel { Flat, Gouraud, Phong };
 struct FShadeParams
 {
     glm::vec3 lightPos   = glm::vec3(0.0f);
-    glm::vec3 lightColor = glm::vec3(1.0f);   // I  (color * intensity)
+    glm::vec3 lightColor = glm::vec3(1.0f);   // I  (color * intensity) -- primary light
     glm::vec3 ambient    = glm::vec3(0.2f);   // Ia (white ambient)
     glm::vec3 eye        = glm::vec3(0.0f);
+
+    // Additional point lights (editor multi-light). Empty -> single-light HW6
+    // path (bit-identical to before). Each contributes diffuse + specular; the
+    // ambient term is added once regardless of light count.
+    std::vector<glm::vec3> extraLightPos;
+    std::vector<glm::vec3> extraLightColor;
 };
 
 // ---------------------------------------------------------------------------

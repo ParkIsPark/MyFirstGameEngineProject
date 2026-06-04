@@ -94,6 +94,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Import\UFbxImporter.cpp" />
     <!-- Engine: Editor + ImGui -->
     <ClCompile Include="$(EngineRootDir)Engine\Editor\EditorEngine.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\FFileDialog.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_draw.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_tables.cpp" />
@@ -101,6 +102,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_demo.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\backends\imgui_impl_glfw.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\backends\imgui_impl_opengl3.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.cpp" />
     <!-- Engine: Framework -->
     <ClCompile Include="$(EngineRootDir)Engine\Framework\Engine.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Framework\FProjectDescriptor.cpp" />
@@ -156,6 +158,8 @@
     <ClInclude Include="$(EngineRootDir)Engine\Import\UFbxImporter.h" />
     <!-- Engine: Editor headers -->
     <ClInclude Include="$(EngineRootDir)Engine\Editor\EditorEngine.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\FFileDialog.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.h" />
     <!-- Engine: Framework headers -->
     <ClInclude Include="$(EngineRootDir)Engine\Framework\Engine.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Framework\FProjectDescriptor.h" />

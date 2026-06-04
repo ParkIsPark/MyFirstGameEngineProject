@@ -30,10 +30,13 @@ public:
                      const std::vector<glm::vec3>&    albedos,
                      const glm::vec3& lightPos, const glm::vec3& lightColor);
     void RenderFrame(const ACamera& cam, int width, int height) const;
-    // Update the light without re-uploading geometry (light is a per-frame
-    // uniform, not baked into the triangle buffer) -- lets callers cache the
-    // BVH/TBO upload across frames while still animating the light.
+    // Update the light(s) without re-uploading geometry (lights are per-frame
+    // uniforms, not baked into the triangle buffer) -- lets callers cache the
+    // BVH/TBO upload across frames while still animating lights.
     void SetLight(const glm::vec3& pos, const glm::vec3& color)
+    { lightPos_ = { pos }; lightColor_ = { color }; }
+    // Multiple point lights (editor). Each gets its own shadow ray in the shader.
+    void SetLights(const std::vector<glm::vec3>& pos, const std::vector<glm::vec3>& color)
     { lightPos_ = pos; lightColor_ = color; }
     void Cleanup();
     bool ready() const { return prog_ != 0; }
@@ -52,6 +55,6 @@ private:
     int          numTris_  = 0;
     int          numNodes_ = 0;
     Material     mat_;         // material (ks/shininess) of the uploaded mesh
-    glm::vec3    lightPos_   = glm::vec3(6.0f, 8.0f, 2.0f);
-    glm::vec3    lightColor_ = glm::vec3(1.0f);
+    std::vector<glm::vec3> lightPos_   = { glm::vec3(6.0f, 8.0f, 2.0f) };
+    std::vector<glm::vec3> lightColor_ = { glm::vec3(1.0f) };
 };

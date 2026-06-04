@@ -7,8 +7,11 @@
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
+#include "ImGuizmo.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include "UMesh.h"
 #include "FTransform.h"
 #include "UMeshComponent.h"
@@ -25,6 +28,9 @@
 #include "LightComponent.h"
 #include "FWorldSerializer.h"
 #include "FRenderShowFlag.h"
+#include "UObjImporter.h"
+#include "UFbxImporter.h"
+#include "FFileDialog.h"
 
 #include <cstdio>
 #include <cctype>
@@ -44,6 +50,8 @@ EditorEngine::~EditorEngine()
         ImGui_ImplGlfw_Shutdown();
         ImGui::DestroyContext();
     }
+    if (pieWorld_) { delete pieWorld_; pieWorld_ = nullptr; }
+    delete editorWorld_;
     for (UMesh* m : meshAssets_) delete m;   // UScene dtor deletes the actors
 }
 
@@ -66,14 +74,14 @@ void EditorEngine::BuildEditorWorld()
         mc->materialOverride.ks        = glm::vec3(0.4f);
         mc->materialOverride.shininess = 32.0f;
         a->SetMesh(mc);
-        editorWorld_.Spawn(a);
+        editorWorld_->Spawn(a);
         actorNames_.push_back(name);
     };
     auto spawnEmpty = [&](const char* name, glm::vec3 pos)
     {
         AActor* a = new AActor();
         a->SetActorLocation(pos);
-        editorWorld_.Spawn(a);
+        editorWorld_->Spawn(a);
         actorNames_.push_back(name);
     };
 
@@ -84,21 +92,21 @@ void EditorEngine::BuildEditorWorld()
     {
         ALight* light = new ALight(new PointLight(glm::vec3(1.0f), glm::vec3(1.0f)));
         light->SetActorLocation(glm::vec3(5.0f, 5.0f, -3.0f));
-        editorWorld_.Spawn(light);
+        editorWorld_->Spawn(light);
         actorNames_.push_back("PointLight");
     }
     spawnEmpty("PlayerStart", glm::vec3(0.0f, -1.0f, -6.0f));
 
     // Ball: dynamic sphere collider (falls under gravity in PIE).
     {
-        AActor* ball = editorWorld_.GetScene().Actors[0];
+        AActor* ball = editorWorld_->GetScene().Actors[0];
         USphereComponent* sc = new USphereComponent(ball);
         sc->radius = 1.6f; sc->mass = 1.0f; sc->restitution = 0.4f;
         ball->SetPhysics(sc);
     }
     // Cube: static box collider (mass 0) -- inspectable, doesn't move.
     {
-        AActor* box = editorWorld_.GetScene().Actors[1];
+        AActor* box = editorWorld_->GetScene().Actors[1];
         UBoxComponent* bc = new UBoxComponent(box);
         bc->halfExtents = glm::vec3(1.4f); bc->mass = 0.0f;
         box->SetPhysics(bc);
@@ -111,12 +119,138 @@ void EditorEngine::SaveWorld()
 {
     namespace fs = std::filesystem;
     std::error_code ec;
-    fs::create_directories("Content", ec);
-    const std::string path = "Content/" + worldName_ + ".world";
-    FWorldSerializer::SaveToFile(editorWorld_, path.c_str());
+    fs::create_directories(contentDir_, ec);
+    const std::string path = contentDir_ + "/" + worldName_ + ".world";
+    FWorldSerializer::SaveToFile(*editorWorld_, path.c_str());
     content_.clear();          // refresh so the new .world shows in the browser
     ScanContent();
     std::printf("[Editor] Saved %s\n", path.c_str());
+}
+
+void EditorEngine::RebuildActorNames()
+{
+    actorNames_.clear();
+    for (AActor* a : editorWorld_->GetScene().Actors)
+    {
+        std::string n = a->name;
+        if (n.empty()) n = dynamic_cast<ALight*>(a) ? "Light" : (a->mesh ? "Mesh" : "Actor");
+        actorNames_.push_back(n);
+    }
+}
+
+void EditorEngine::SetEditorWorld(UWorld* w, const std::string& name)
+{
+    if (!w) return;
+    if (playing_) OnStop();                  // leave PIE before swapping worlds
+    delete editorWorld_;
+    editorWorld_ = w;
+    worldName_   = name;
+    RebuildActorNames();
+    selected_    = editorWorld_->GetScene().Actors.empty() ? -1 : 0;
+
+    // Adopt the loaded world's camera into the editor fly-cam state.
+    ACamera& cam = editorWorld_->GetCamera();
+    camEye_   = cam.eye;
+    camYaw_   = cam.yaw;
+    camPitch_ = cam.pitch;
+
+    // Geometry changed -> invalidate the GPU upload caches (RT / Hybrid).
+    rtUploaded_ = false; hybridUploaded_ = false;
+}
+
+void EditorEngine::NewWorld()
+{
+    SetEditorWorld(new UWorld(), "Untitled");
+}
+
+void EditorEngine::LoadWorld(const std::string& path)
+{
+    UWorld* w = FWorldSerializer::LoadFromFile(path.c_str());
+    if (!w) { std::printf("[Editor] Load failed: %s\n", path.c_str()); return; }
+    std::string stem = std::filesystem::path(path).stem().string();
+    SetEditorWorld(w, stem);
+    std::printf("[Editor] Loaded %s (%d actors)\n", path.c_str(),
+                (int)editorWorld_->GetScene().Actors.size());
+}
+
+AActor* EditorEngine::AddActor(const char* type, const std::string& name)
+{
+    // Spawn ~8 units in front of the editor camera so it lands in view.
+    ACamera& cam = editorWorld_->GetCamera();
+    glm::vec3 fwd = -cam.w;
+    if (glm::length(fwd) < 0.1f) fwd = glm::vec3(0, 0, -1);
+    const glm::vec3 pos = cam.eye + glm::normalize(fwd) * 8.0f;
+
+    AActor* a = nullptr;
+    std::string t = type;
+    if (t == "Light")
+    {
+        a = new ALight(new PointLight(glm::vec3(1.0f), glm::vec3(1.0f)));
+    }
+    else if (t == "Cube" || t == "Sphere")
+    {
+        UMesh* mesh = (t == "Cube") ? UMesh::GenerateCube(glm::vec3(1.0f))
+                                    : UMesh::GenerateSphere(1.0f, 28, 14);
+        meshAssets_.push_back(mesh);
+        a = new AActor();
+        UMeshComponent* mc = new UMeshComponent();
+        mc->mesh = mesh;
+        mc->hasMaterialOverride = true;
+        mc->materialOverride.kd        = glm::vec3(0.7f);
+        mc->materialOverride.ks        = glm::vec3(0.4f);
+        mc->materialOverride.shininess = 32.0f;
+        a->SetMesh(mc);
+    }
+    else  // "Empty" / "Actor"
+    {
+        a = new AActor();
+    }
+    a->name = name;
+    a->SetActorLocation(pos);
+    editorWorld_->Spawn(a);
+    actorNames_.push_back(name);
+    selected_ = (int)editorWorld_->GetScene().Actors.size() - 1;
+    return a;
+}
+
+void EditorEngine::ImportAsset(const std::string& path)
+{
+    namespace fs = std::filesystem;
+    std::string ext = fs::path(path).extension().string();
+    for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+    const std::string stem = fs::path(path).stem().string();
+
+    if (ext == ".world") { LoadWorld(path); return; }
+
+    UMesh* mesh = nullptr;
+    if (ext == ".obj")
+    {
+        mesh = UObjImporter::Load(path.c_str());
+    }
+    else if (ext == ".fbx")
+    {
+        std::vector<UMesh*> parts = UFbxImporter::Load(path.c_str());
+        if (!parts.empty())
+        {
+            mesh = parts[0];
+            for (size_t i = 1; i < parts.size(); ++i) delete parts[i];  // keep first
+        }
+    }
+    if (!mesh) { std::printf("[Editor] Import failed: %s\n", path.c_str()); return; }
+
+    meshAssets_.push_back(mesh);
+    AActor* a = new AActor();
+    a->name = stem;
+    UMeshComponent* mc = new UMeshComponent();
+    mc->mesh = mesh;
+    a->SetMesh(mc);
+    ACamera& cam = editorWorld_->GetCamera();
+    glm::vec3 fwd = -cam.w; if (glm::length(fwd) < 0.1f) fwd = glm::vec3(0, 0, -1);
+    a->SetActorLocation(cam.eye + glm::normalize(fwd) * 8.0f);
+    editorWorld_->Spawn(a);
+    actorNames_.push_back(stem);
+    selected_ = (int)editorWorld_->GetScene().Actors.size() - 1;
+    std::printf("[Editor] Imported %s (%d tris)\n", path.c_str(), mesh->triangleCount());
 }
 
 UWorld* EditorEngine::CopyWorld(UWorld& src)
@@ -156,7 +290,7 @@ UWorld* EditorEngine::CopyWorld(UWorld& src)
 
 void EditorEngine::OnPlay()
 {
-    pieWorld_ = CopyWorld(editorWorld_);               // deep copy (UMesh shared)
+    pieWorld_ = CopyWorld(*editorWorld_);              // deep copy (UMesh shared)
     pieWorld_->GetPhysics().enableFloor = true;
     pieWorld_->GetPhysics().floorY      = -2.5f;       // ball lands here
     pieWorld_->BeginPlay();
@@ -183,8 +317,19 @@ void EditorEngine::OnStartup()
     hybrid_.Init();            // hybrid shadow pass (PIE: Hybrid mode)
     gpuReady_ = true;
 
+    editorWorld_ = new UWorld();
     BuildEditorWorld();
     ScanContent();
+
+    // OS drag-drop of .obj/.fbx/.world files -> import into the editor world.
+    glfwSetDropCallback(window_, &EditorEngine::dropTrampoline);
+}
+
+void EditorEngine::dropTrampoline(GLFWwindow* win, int count, const char** paths)
+{
+    auto* self = static_cast<EditorEngine*>(glfwGetWindowUserPointer(win));
+    if (!self) return;
+    for (int i = 0; i < count; ++i) self->ImportAsset(paths[i]);
 }
 
 void EditorEngine::EnsureFBO(int w, int h)
@@ -212,11 +357,11 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
     UScene& scene  = world.GetScene();
     ACamera& cam   = world.GetCamera();
 
-    // Gather the world's mesh instances (+ per-instance albedo) and the light.
+    // Gather the world's mesh instances (+ per-instance albedo) and every light.
     std::vector<const UMesh*> meshes;
     std::vector<glm::mat4>    models;
     std::vector<glm::vec3>    albedos;
-    glm::vec3 lightPos(6, 8, 2), lightColor(1.0f);
+    std::vector<glm::vec3>    lightPos, lightColor;
     for (AActor* a : scene.Actors)
     {
         if (UMeshComponent* mc = a->mesh)
@@ -228,8 +373,9 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
             }
         if (ALight* L = dynamic_cast<ALight*>(a))
             if (PointLight* pl = dynamic_cast<PointLight*>(L->lightComp))
-            { lightPos = pl->GetWorldLocation(); lightColor = pl->LightColor * pl->LightIntensity; }
+            { lightPos.push_back(pl->GetWorldLocation()); lightColor.push_back(pl->LightColor * pl->LightIntensity); }
     }
+    if (lightPos.empty()) { lightPos = { glm::vec3(6, 8, 2) }; lightColor = { glm::vec3(1.0f) }; }
 
     // Signature of the scene GEOMETRY (mesh identity + world transform + albedo).
     // O(numMeshes), independent of resolution/camera. When it is unchanged the
@@ -254,10 +400,10 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
     {
         if (!rtUploaded_ || geomSig != rtUploadSig_)   // skip when geometry static
         {
-            worldRT_.UploadWorld(meshes, models, albedos, lightPos, lightColor);
+            worldRT_.UploadWorld(meshes, models, albedos, lightPos[0], lightColor[0]);
             rtUploadSig_ = geomSig; rtUploaded_ = true;
         }
-        worldRT_.SetLight(lightPos, lightColor);     // light may move without geometry
+        worldRT_.SetLights(lightPos, lightColor);    // all lights may move without geometry
         worldRT_.RenderFrame(cam, w, h);             // camera/light uniforms each frame
     }
     else                                             // Hybrid: CPU G-buffer + GPU shadow
@@ -328,6 +474,7 @@ void EditorEngine::ScanContent()
     {
         std::error_code ec;
         if (!fs::is_directory(d, ec)) continue;
+        contentDir_ = d;
         for (const auto& e : fs::directory_iterator(d, ec))
         {
             if (!e.is_regular_file()) continue;
@@ -352,6 +499,7 @@ void EditorEngine::Render()
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
+    ImGuizmo::BeginFrame();
     if (playing_ && pieWorld_)
         pieWorld_->Tick(ImGui::GetIO().DeltaTime);     // PIE: physics + actor ticks
     DrawUI();
@@ -407,8 +555,17 @@ void EditorEngine::DrawMenuBar()
     if (!ImGui::BeginMainMenuBar()) return;
     if (ImGui::BeginMenu("File"))
     {
-        ImGui::MenuItem("New World");
+        if (ImGui::MenuItem("New World")) NewWorld();
         if (ImGui::MenuItem("Save World", "Ctrl+S")) SaveWorld();
+        if (ImGui::BeginMenu("Open World"))
+        {
+            bool any = false;
+            for (const ContentEntry& e : content_)
+                if (std::string(e.cat) == "World")
+                { any = true; if (ImGui::MenuItem(e.name.c_str())) LoadWorld(contentDir_ + "/" + e.name); }
+            if (!any) ImGui::TextDisabled("(no .world in Content/)");
+            ImGui::EndMenu();
+        }
         ImGui::Separator();
         if (ImGui::MenuItem("Quit")) glfwSetWindowShouldClose(window_, GL_TRUE);
         ImGui::EndMenu();
@@ -427,27 +584,83 @@ void EditorEngine::DrawMenuBar()
 
 void EditorEngine::DrawContentBrowser()
 {
+    namespace fs = std::filesystem;
     const char* tabs[] = { "All", "World", "Mesh", "Texture" };
     for (int i = 0; i < 4; ++i) { if (i) ImGui::SameLine(); if (ImGui::RadioButton(tabs[i], cbFilter_ == i)) cbFilter_ = i; }
-    ImGui::SameLine(); ImGui::TextDisabled("   Content/");
+    ImGui::SameLine(); if (ImGui::SmallButton("Refresh"))   { content_.clear(); ScanContent(); }
+    ImGui::SameLine(); bool importClicked = ImGui::SmallButton("Import...");
+    ImGui::SameLine(); ImGui::TextDisabled("  %s/", contentDir_.c_str());
     ImGui::Separator();
 
     const float cell = 96.0f;
     const int cols = (int)(ImGui::GetContentRegionAvail().x / cell);
     int shown = 0;
-    for (const ContentEntry& e : content_)
+    std::string toDelete, renFrom, renTo;
+    for (int i = 0; i < (int)content_.size(); ++i)
     {
-        if (cbFilter_ != 0 && std::string(e.cat) != tabs[cbFilter_]) continue;
+        const ContentEntry& e = content_[i];
+        const std::string cat = e.cat;
+        if (cbFilter_ != 0 && cat != tabs[cbFilter_]) continue;
         if (shown % (cols < 1 ? 1 : cols) != 0) ImGui::SameLine();
+        ImGui::PushID(i);
         ImGui::BeginGroup();
-        ImGui::Button((std::string(e.icon) + "##" + e.name).c_str(), ImVec2(74, 52));
-        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 80);
-        ImGui::TextWrapped("%s", e.name.c_str());
-        ImGui::PopTextWrapPos();
+        ImGui::Button((std::string(e.icon) + "##icon").c_str(), ImVec2(74, 52));
+
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+        {
+            if      (cat == "World") LoadWorld(contentDir_ + "/" + e.name);
+            else if (cat == "Mesh")  ImportAsset(contentDir_ + "/" + e.name);
+        }
+        if (ImGui::BeginPopupContextItem("ctx"))
+        {
+            if (cat == "World" && ImGui::MenuItem("Open"))         LoadWorld(contentDir_ + "/" + e.name);
+            if (cat == "Mesh"  && ImGui::MenuItem("Add to Scene")) ImportAsset(contentDir_ + "/" + e.name);
+            if (ImGui::MenuItem("Rename")) { cbRename_ = i; std::snprintf(cbBuf_, sizeof(cbBuf_), "%s", e.name.c_str()); }
+            if (ImGui::MenuItem("Delete")) toDelete = e.name;
+            ImGui::EndPopup();
+        }
+
+        if (cbRename_ == i)
+        {
+            ImGui::SetNextItemWidth(80);
+            if (ImGui::InputText("##ren", cbBuf_, sizeof(cbBuf_), ImGuiInputTextFlags_EnterReturnsTrue))
+            { renFrom = e.name; renTo = cbBuf_; cbRename_ = -1; }
+            if (ImGui::IsItemDeactivated()) cbRename_ = -1;
+        }
+        else
+        {
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 80);
+            ImGui::TextWrapped("%s", e.name.c_str());
+            ImGui::PopTextWrapPos();
+        }
         ImGui::EndGroup();
+        ImGui::PopID();
         ++shown;
     }
     if (shown == 0) ImGui::TextDisabled("(no assets in this filter)");
+
+    if (ImGui::BeginPopupContextWindow("cbWin",
+            ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
+    {
+        if (ImGui::MenuItem("New World"))         NewWorld();
+        if (ImGui::MenuItem("Import OBJ/FBX...")) importClicked = true;
+        if (ImGui::MenuItem("Refresh"))           { content_.clear(); ScanContent(); }
+        ImGui::EndPopup();
+    }
+
+    // Native OS file picker (blocks until the user picks/cancels). Deferred to
+    // here so it is never invoked while an ImGui popup is mid-frame.
+    if (importClicked)
+    {
+        std::string p = FFileDialog::OpenAsset();
+        if (!p.empty()) ImportAsset(p);
+    }
+
+    std::error_code ec;
+    if (!toDelete.empty())
+    { fs::remove(contentDir_ + "/" + toDelete, ec); content_.clear(); ScanContent(); }
+    if (!renFrom.empty() && !renTo.empty() && renFrom != renTo)
+    { fs::rename(contentDir_ + "/" + renFrom, contentDir_ + "/" + renTo, ec); content_.clear(); ScanContent(); }
 }
 
 void EditorEngine::DrawStatusBar(float x, float y, float w, float h)
@@ -484,6 +697,13 @@ void EditorEngine::DrawToolbar()
     for (int i = 0; i < 3; ++i) { if (i) ImGui::SameLine(); if (ImGui::RadioButton(kShading[i], sm == i)) sm = i; }
     ImGui::SameLine(0, 12); ImGui::Checkbox("Depth", &depthView_);
 
+    // Transform gizmo op + space (ImGuizmo, editor only).
+    ImGui::SameLine(0, 16);
+    ImGui::TextDisabled("Gizmo"); ImGui::SameLine();
+    const char* gops[] = { "Move", "Rotate", "Scale" };
+    for (int i = 0; i < 3; ++i) { if (i) ImGui::SameLine(); if (ImGui::RadioButton(gops[i], gizmoOp_ == i)) gizmoOp_ = i; }
+    ImGui::SameLine(0, 8); ImGui::Checkbox("Local", &gizmoLocal_);
+
     const float fps = ImGui::GetIO().Framerate;
     ImGui::SameLine(ImGui::GetWindowWidth() - 210);
     ImGui::Text("FPS %.0f  (%.2f ms)", fps, 1000.0f / fps);
@@ -493,14 +713,50 @@ void EditorEngine::DrawToolbar()
 void EditorEngine::DrawOutliner()
 {
     auto& actors = ActiveWorld().GetScene().Actors;
-    ImGui::TextDisabled("%d actors", (int)actors.size());
+
+    ImGui::BeginDisabled(playing_);                 // structure edits are editor-only
+    if (ImGui::Button("+ Add Actor")) ImGui::OpenPopup("AddActorMenu");
+    if (ImGui::BeginPopup("AddActorMenu"))
+    {
+        if (ImGui::MenuItem("Empty Actor")) AddActor("Empty",  "Actor");
+        if (ImGui::MenuItem("Cube"))        AddActor("Cube",   "Cube");
+        if (ImGui::MenuItem("Sphere"))      AddActor("Sphere", "Sphere");
+        if (ImGui::MenuItem("Point Light")) AddActor("Light",  "PointLight");
+        ImGui::EndPopup();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine(); ImGui::TextDisabled("%d actors", (int)actors.size());
     ImGui::Separator();
+
+    int toDelete = -1;
     for (int i = 0; i < (int)actors.size(); ++i)
     {
-        const bool isMesh = actors[i]->mesh != nullptr;
-        char label[128];
-        std::snprintf(label, sizeof(label), "%s %s", isMesh ? "[M]" : "[*]", actorNames_[i].c_str());
+        const char* icon = actors[i]->mesh ? "[M]"
+                         : (dynamic_cast<ALight*>(actors[i]) ? "[L]" : "[*]");
+        char label[160];
+        std::snprintf(label, sizeof(label), "%s %s##act%d", icon, actorNames_[i].c_str(), i);
         if (ImGui::Selectable(label, selected_ == i)) selected_ = i;
+
+        if (!playing_ && ImGui::BeginPopupContextItem())
+        {
+            selected_ = i;
+            if (ImGui::IsWindowAppearing())
+                std::snprintf(cbBuf_, sizeof(cbBuf_), "%s", actorNames_[i].c_str());
+            if (ImGui::InputText("Name", cbBuf_, sizeof(cbBuf_), ImGuiInputTextFlags_EnterReturnsTrue))
+            { actorNames_[i] = cbBuf_; actors[i]->name = cbBuf_; ImGui::CloseCurrentPopup(); }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Delete")) toDelete = i;
+            ImGui::EndPopup();
+        }
+    }
+
+    if (toDelete >= 0)                              // deferred: never mutate mid-iteration
+    {
+        delete actors[toDelete];
+        actors.erase(actors.begin() + toDelete);
+        actorNames_.erase(actorNames_.begin() + toDelete);
+        if (selected_ >= (int)actors.size()) selected_ = (int)actors.size() - 1;
+        rtUploaded_ = false; hybridUploaded_ = false;   // geometry changed
     }
 }
 
@@ -598,7 +854,7 @@ void EditorEngine::EnsureViewportTex(int w, int h)
 
 void EditorEngine::DrawViewport()
 {
-    const int hintMode = playing_ ? renderMode_ : 0;     // editor preview is always raster
+    const int hintMode = renderMode_;
     ImGui::TextDisabled("[%s%s%s] %s   (RMB-drag + WASD/QE to fly, LMB to pick)",
                         kModes[hintMode],
                         hintMode == 0 ? " / " : "", hintMode == 0 ? kShading[ActiveWorld().GetScene().shadingModel] : "",
@@ -616,9 +872,9 @@ void EditorEngine::DrawViewport()
     cam.SetOrientation(camYaw_, camPitch_);
     cam.SetFOV(60.0f, (float)w / (float)h);
 
-    // Editor world: always lit rasterizer (fast editing preview).
-    // PIE (playing): render per the toolbar Render Mode (Rasterizer/GPU RT/Hybrid).
-    const int effMode = playing_ ? renderMode_ : 0;
+    // Render per the toolbar Render Mode (Rasterizer / GPU RT / Hybrid) in both
+    // editor and PIE. Rasterizer is the lit shaded preview (Flat/Gouraud/Phong).
+    const int effMode = renderMode_;
 
     bool shown = false;
     if (effMode == 0)                                  // CPU lit rasterizer -> texture
@@ -648,6 +904,46 @@ void EditorEngine::DrawViewport()
 
     if (shown)
     {
+        // ---- transform gizmo (ImGuizmo) over the selected actor, editor only ----
+        // ImGuizmo needs standard GL matrices, but the engine renders with the FCG
+        // convention; we build a matching glm lookAt/perspective (same eye/fwd/up/
+        // fov/aspect) purely to drive the gizmo overlay -- it lines up with the
+        // rendered image in screen space. Edits decompose back into actor TRS.
+        bool gizmoBusy = false;
+        auto& actors = world.GetScene().Actors;
+        if (!playing_ && selected_ >= 0 && selected_ < (int)actors.size())
+        {
+            ImGuizmo::SetOrthographic(false);
+            ImGuizmo::AllowAxisFlip(false);   // keep axes fixed (no camera-facing flip)
+            ImGuizmo::SetDrawlist();
+            const ImVec2 rmin = ImGui::GetItemRectMin();
+            ImGuizmo::SetRect(rmin.x, rmin.y, (float)w, (float)h);
+
+            const glm::mat4 view = glm::lookAt(cam.eye, cam.eye - cam.w, cam.v);
+            // Build the projection from the camera's actual frustum planes (l/r/b/t
+            // at near distance d) -- matches the rendered image exactly and avoids
+            // any radians/degrees ambiguity in glm::perspective.
+            const glm::mat4 proj = glm::frustum(cam.l, cam.r, cam.b, cam.t, cam.d, 3000.0f);
+            const ImGuizmo::OPERATION op = gizmoOp_ == 1 ? ImGuizmo::ROTATE
+                                         : gizmoOp_ == 2 ? ImGuizmo::SCALE
+                                                         : ImGuizmo::TRANSLATE;
+            const ImGuizmo::MODE mode = gizmoLocal_ ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
+
+            AActor* a = actors[selected_];
+            glm::mat4 model = a->rootComponent.GetWorldMatrix();
+            if (ImGuizmo::Manipulate(glm::value_ptr(view), glm::value_ptr(proj),
+                                     op, mode, glm::value_ptr(model)))
+            {
+                glm::vec3 t, r, s;
+                ImGuizmo::DecomposeMatrixToComponents(glm::value_ptr(model), &t.x, &r.x, &s.x);
+                a->SetActorLocation(t);
+                a->SetActorRotation(r);
+                a->SetActorScale(s);
+                rtUploaded_ = false; hybridUploaded_ = false;   // geometry moved
+            }
+            gizmoBusy = ImGuizmo::IsOver() || ImGuizmo::IsUsing();
+        }
+
         // Latch fly-mode while RMB is held (so hover flicker during a drag does
         // not interrupt simultaneous rotate + WASD movement).
         if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
@@ -657,7 +953,7 @@ void EditorEngine::DrawViewport()
 
         if (flying_)
             UpdateEditorCamera(w, h);
-        else if (!playing_ && ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        else if (!playing_ && !gizmoBusy && ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             PickActor(w, h);
     }
 }
@@ -672,7 +968,7 @@ void EditorEngine::UpdateEditorCamera(int /*w*/, int /*h*/)
     camPitch_  = (camPitch_ >  89.0f) ?  89.0f : (camPitch_ < -89.0f ? -89.0f : camPitch_);
 
     // WASD/QE fly along the current basis -- applied together with rotation.
-    ACamera& cam = editorWorld_.GetCamera();
+    ACamera& cam = editorWorld_->GetCamera();
     cam.SetOrientation(camYaw_, camPitch_);
     const glm::vec3 fwd = -cam.w, right = cam.u, up = cam.v;
     const float speed = (io.KeyShift ? 14.0f : 5.0f) * io.DeltaTime;

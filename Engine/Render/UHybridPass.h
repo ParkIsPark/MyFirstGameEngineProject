@@ -27,10 +27,14 @@ public:
     // Upload the per-frame G-buffer (worldPos / normal / albedo / depth).
     void UploadGBuffer(const UGBuffer& gb);
 
-    // Draw the fullscreen shaded result. lightDir is the (normalized) direction
-    // TOWARD the light for a distant light; lightPos is used for local lights.
+    // Draw the fullscreen shaded result. Single-light convenience overload
+    // (delegates to the multi-light version with one light).
     void Render(const ACamera& cam, const glm::vec3& lightPos,
                 const glm::vec3& lightColor, int width, int height) const;
+    // Multi-light: each light casts its own shadow ray and contributes
+    // Blinn-Phong direct light (ambient added once). Up to MAX_LIGHTS (8).
+    void Render(const ACamera& cam, const std::vector<glm::vec3>& lightPos,
+                const std::vector<glm::vec3>& lightColor, int width, int height) const;
 
     void Cleanup();
     bool ready() const { return prog_ != 0; }

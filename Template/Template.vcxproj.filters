@@ -85,6 +85,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Import\UObjImporter.cpp"><Filter>Engine\Import</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Import\UFbxImporter.cpp"><Filter>Engine\Import</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\EditorEngine.cpp"><Filter>Engine\Editor</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\FFileDialog.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_draw.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_tables.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
@@ -92,6 +93,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_demo.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\backends\imgui_impl_glfw.cpp"><Filter>Engine\Editor\External\imgui\backends</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\backends\imgui_impl_opengl3.cpp"><Filter>Engine\Editor\External\imgui\backends</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Light\ALight.cpp"><Filter>Engine\Light</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Light\EnvironmentLight.cpp"><Filter>Engine\Light</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Light\LightComponent.cpp"><Filter>Engine\Light</Filter></ClCompile>
@@ -133,6 +135,8 @@
     <ClInclude Include="$(EngineRootDir)Engine\Import\UObjImporter.h"><Filter>Engine\Import</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Import\UFbxImporter.h"><Filter>Engine\Import</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Editor\EditorEngine.h"><Filter>Engine\Editor</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\FFileDialog.h"><Filter>Engine\Editor</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.h"><Filter>Engine\Editor</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Light\ALight.h"><Filter>Engine\Light</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Light\EnvironmentLight.h"><Filter>Engine\Light</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Light\LightComponent.h"><Filter>Engine\Light</Filter></ClInclude>

@@ -3,6 +3,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <iostream>
 #include <vector>
+#include <algorithm>
 
 #include "UMeshRayTracer.h"
 #include "UMesh.h"
@@ -38,7 +39,10 @@ out vec4 FragColor;
 uniform vec3  uEye, uU, uV, uW;
 uniform float uL, uR, uB, uT, uD;
 uniform int   uWidth, uHeight, uNumTris, uNumNodes;
-uniform vec3  uLightPos, uLightColor;
+#define MAX_LIGHTS 8
+uniform int   uNumLights;
+uniform vec3  uLightPosArr[MAX_LIGHTS];
+uniform vec3  uLightColorArr[MAX_LIGHTS];
 uniform vec3  uKs;                    // specular coefficient (per-tri albedo = diffuse)
 uniform float uShininess;             // Phong exponent
 uniform samplerBuffer uTris;          // 7 texels per triangle (see C++ side)
@@ -96,9 +100,10 @@ bool traceClosest(vec3 ro, vec3 rd, out float t, out int tri, out float u, out f
 }
 
 void main() {
-    float aspect = float(uWidth) / float(uHeight);
-    float su = (uL + (uR - uL) * (gl_FragCoord.x / float(uWidth))) * aspect;
-    float sv =  uB + (uT - uB) * (gl_FragCoord.y / float(uHeight));
+    // uL/uR/uB/uT already include the aspect ratio (ACamera::SetFOV bakes it into
+    // l/r), matching the rasterizer's MakeProjFCG -- do NOT multiply by aspect again.
+    float su = uL + (uR - uL) * (gl_FragCoord.x / float(uWidth));
+    float sv = uB + (uT - uB) * (gl_FragCoord.y / float(uHeight));
     vec3 rd = normalize(-uD * uW + su * uU + sv * uV);   // ACamera convention
     vec3 ro = uEye;
 
@@ -157,7 +162,9 @@ void UMeshRayTracer::Init()
 
 void UMeshRayTracer::UploadMesh(const UMesh& mesh, const glm::mat4& model)
 {
-    UploadWorld({ &mesh }, { model }, { mesh.material.kd }, lightPos_, lightColor_);
+    const glm::vec3 lp = lightPos_.empty()   ? glm::vec3(6, 8, 2) : lightPos_[0];
+    const glm::vec3 lc = lightColor_.empty() ? glm::vec3(1)       : lightColor_[0];
+    UploadWorld({ &mesh }, { model }, { mesh.material.kd }, lp, lc);
     mat_ = mesh.material;                      // restore ks/shininess for the demo path
 }
 
@@ -214,7 +221,7 @@ void UMeshRayTracer::UploadWorld(const std::vector<const UMesh*>& meshes,
                                  const std::vector<glm::vec3>& albedos,
                                  const glm::vec3& lightPos, const glm::vec3& lightColor)
 {
-    lightPos_ = lightPos; lightColor_ = lightColor;
+    SetLight(lightPos, lightColor);
     mat_.ks = glm::vec3(0.35f); mat_.shininess = 32.0f;
 
     // Combine all instances into one world-space mesh (+ per-triangle albedo),
@@ -273,8 +280,13 @@ void UMeshRayTracer::RenderFrame(const ACamera& cam, int width, int height) cons
     glUniform1i (glGetUniformLocation(prog_, "uHeight"), height);
     glUniform1i (glGetUniformLocation(prog_, "uNumTris"), numTris_);
     glUniform1i (glGetUniformLocation(prog_, "uNumNodes"), numNodes_);
-    glUniform3fv(glGetUniformLocation(prog_, "uLightPos"),   1, glm::value_ptr(lightPos_));
-    glUniform3fv(glGetUniformLocation(prog_, "uLightColor"), 1, glm::value_ptr(lightColor_));
+    const int nL = (int)std::min(lightPos_.size(), (size_t)8);
+    glUniform1i(glGetUniformLocation(prog_, "uNumLights"), nL);
+    if (nL > 0)
+    {
+        glUniform3fv(glGetUniformLocation(prog_, "uLightPosArr"),   nL, glm::value_ptr(lightPos_[0]));
+        glUniform3fv(glGetUniformLocation(prog_, "uLightColorArr"), nL, glm::value_ptr(lightColor_[0]));
+    }
     glUniform3fv(glGetUniformLocation(prog_, "uKs"), 1, glm::value_ptr(mat_.ks));
     glUniform1f (glGetUniformLocation(prog_, "uShininess"), mat_.shininess);
 
