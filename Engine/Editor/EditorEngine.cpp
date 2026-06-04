@@ -36,6 +36,7 @@
 
 #include <cstdio>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <algorithm>
 
@@ -279,13 +280,31 @@ void EditorEngine::ImportAsset(const std::string& path)
     mc->mesh = mesh;
     mc->meshRef = path;                       // file path (best-effort round-trip)
     a->SetMesh(mc);
+
+    // Auto-frame: imported meshes keep their raw coordinates, which may be far
+    // from the origin and at any scale (a downloaded model can be huge/tiny/
+    // off-center -> invisible at a fixed spawn). Compute the mesh AABB and place
+    // the actor so the mesh centroid lands ~8 units ahead, scaled to ~3 units.
+    glm::vec3 mn(1e30f), mx(-1e30f);
+    for (const Vertex& v : mesh->vertices) { mn = glm::min(mn, v.position); mx = glm::max(mx, v.position); }
+    glm::vec3 center(0.0f); float scale = 1.0f;
+    if (!mesh->vertices.empty())
+    {
+        center = (mn + mx) * 0.5f;
+        const float extent = glm::max(mx.x - mn.x, glm::max(mx.y - mn.y, mx.z - mn.z));
+        if (extent > 1e-4f) scale = 3.0f / extent;
+    }
     ACamera& cam = editorWorld_->GetCamera();
     glm::vec3 fwd = -cam.w; if (glm::length(fwd) < 0.1f) fwd = glm::vec3(0, 0, -1);
-    a->SetActorLocation(cam.eye + glm::normalize(fwd) * 8.0f);
+    const glm::vec3 spawn = cam.eye + glm::normalize(fwd) * 8.0f;
+    a->SetActorScale(glm::vec3(scale));
+    a->SetActorLocation(spawn - center * scale);   // centroid -> spawn point
+
     editorWorld_->Spawn(a);
     actorNames_.push_back(stem);
     selected_ = (int)editorWorld_->GetScene().Actors.size() - 1;
-    std::printf("[Editor] Imported %s (%d tris)\n", path.c_str(), mesh->triangleCount());
+    std::printf("[Editor] Imported %s (%d tris, fit scale %.3g)\n",
+                path.c_str(), mesh->triangleCount(), scale);
 }
 
 // Load a mesh asset by path/descriptor. Imported meshes (.obj/.fbx/.mesh) are
@@ -923,6 +942,8 @@ void EditorEngine::DrawOutliner()
         char label[160];
         std::snprintf(label, sizeof(label), "%s %s##act%d", icon, actorNames_[i].c_str(), i);
         if (ImGui::Selectable(label, selected_ == i)) selected_ = i;
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+            FocusActor(i);                       // double-click -> fly camera to it
 
         if (!playing_ && ImGui::BeginPopupContextItem())
         {
@@ -988,6 +1009,18 @@ void EditorEngine::DrawDetails()
             ? (mc->mesh ? "(in-memory mesh)" : "(none)") : mc->meshRef;
         ImGui::Text("Mesh: %s", ref.c_str());
         if (mc->mesh) ImGui::Text("Triangles: %d", mc->mesh->triangleCount());
+
+        // The mesh component is itself a USceneComponent: its relative transform
+        // is the offset from the actor root. Expose it (component-space edit).
+        glm::vec3 mloc = mc->relLocation;
+        if (ImGui::DragFloat3("Comp Position", &mloc.x, 0.05f)) { mc->relLocation = mloc; mc->MarkDirty(); }
+        snap();
+        glm::vec3 mrot = mc->relRotation;
+        if (ImGui::DragFloat3("Comp Rotation", &mrot.x, 1.0f))  { mc->relRotation = mrot; mc->MarkDirty(); }
+        snap();
+        glm::vec3 mscl = mc->relScale;
+        if (ImGui::DragFloat3("Comp Scale",    &mscl.x, 0.05f, 0.01f, 100.0f)) { mc->relScale = mscl; mc->MarkDirty(); }
+        snap();
 
         ImGui::Button(mc->mesh ? "Replace Mesh  (drop asset / click)"
                                : "Assign Mesh  (drop asset / click)", ImVec2(-1, 0));
@@ -1189,6 +1222,18 @@ void EditorEngine::DrawViewport()
             UpdateEditorCamera(w, h);
         else if (!playing_ && !gizmoBusy && ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             PickActor(w, h);
+
+        // Mouse wheel over the viewport: dolly the camera along its forward axis
+        // (zoom in/out). Shift = faster. -w is forward (ACamera convention).
+        if (ImGui::IsItemHovered() && !flying_)
+        {
+            const float wheel = ImGui::GetIO().MouseWheel;
+            if (wheel != 0.0f)
+            {
+                const float step = (ImGui::GetIO().KeyShift ? 4.0f : 1.2f) * wheel;
+                camEye_ += (-cam.w) * step;
+            }
+        }
     }
 }
 
@@ -1236,4 +1281,30 @@ void EditorEngine::PickActor(int w, int h)
         if (mc->intersect(ray, t, tri, u, v) && t < best) { best = t; bestIdx = i; }
     }
     if (bestIdx >= 0) selected_ = bestIdx;
+}
+
+void EditorEngine::FocusActor(int idx)
+{
+    auto& actors = ActiveWorld().GetScene().Actors;
+    if (idx < 0 || idx >= (int)actors.size()) return;
+    AActor* a = actors[idx];
+    selected_ = idx;
+
+    glm::vec3 target = a->GetActorLocation();
+    float dist = 6.0f;
+    if (a->mesh && a->mesh->mesh && !a->mesh->mesh->vertices.empty())
+    {
+        glm::vec3 mn(1e30f), mx(-1e30f);
+        for (const Vertex& v : a->mesh->mesh->vertices) { mn = glm::min(mn, v.position); mx = glm::max(mx, v.position); }
+        const glm::vec3 s = a->GetActorScale();
+        target = a->GetActorLocation() + (mn + mx) * 0.5f * s;          // mesh centroid (no rotation)
+        const glm::vec3 ext = (mx - mn) * s;
+        dist = glm::max(4.0f, glm::max(ext.x, glm::max(ext.y, ext.z)) * 1.6f);
+    }
+
+    // Forward from the current yaw/pitch (matches ACamera::SetOrientation).
+    const float cy = std::cos(glm::radians(camYaw_)),  sy = std::sin(glm::radians(camYaw_));
+    const float cp = std::cos(glm::radians(camPitch_)), sp = std::sin(glm::radians(camPitch_));
+    const glm::vec3 fwd(sy * cp, sp, -cy * cp);
+    camEye_ = target - fwd * dist;                                       // look at the actor
 }

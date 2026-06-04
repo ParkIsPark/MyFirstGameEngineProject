@@ -72,6 +72,7 @@ private:
     void RenderWorldGPU(int w, int h, int mode);  // mode 1=GPU RT, 2=Hybrid -> fbo_
     void UpdateEditorCamera(int w, int h);   // RMB-fly + WASD (when viewport active)
     void PickActor(int w, int h);            // left-click ray pick
+    void FocusActor(int idx);                // frame the editor camera on an actor
 
     // OS file drag-drop -> ImportAsset (routes through the window user-pointer).
     static void dropTrampoline(struct GLFWwindow* win, int count, const char** paths);
