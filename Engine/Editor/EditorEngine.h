@@ -7,6 +7,7 @@
 #include "UGBuffer.h"
 #include "URasterizer.h"
 #include "ThreadPool.h"
+#include "BuildManager.h"
 
 #include <vector>
 #include <string>
@@ -63,6 +64,7 @@ private:
     void DrawDetails();
     void DrawViewport();
     void DrawContentBrowser();
+    void DrawBuildLog();                  // background-build output panel
     void DrawStatusBar(float x, float y, float w, float h);
     void ScanContent();
     void EnsureViewportTex(int w, int h);
@@ -74,8 +76,10 @@ private:
     // OS file drag-drop -> ImportAsset (routes through the window user-pointer).
     static void dropTrampoline(struct GLFWwindow* win, int count, const char** paths);
 
-    bool imguiReady_ = false;
-    bool showDemo_   = false;
+    bool imguiReady_   = false;
+    bool showDemo_     = false;
+    bool showBuildLog_ = false;
+    BuildManager buildMgr_;
     int  renderMode_ = 0;        // 0=Rasterizer 1=GPU RT 2=Hybrid
     bool depthView_  = false;    // CPU raster preview: grayscale depth instead of shade
     int  gizmoOp_    = 0;        // ImGuizmo op: 0=Translate 1=Rotate 2=Scale

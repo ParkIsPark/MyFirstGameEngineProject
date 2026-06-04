@@ -60,6 +60,7 @@
     <!-- Framework -->
     <ClCompile Include="Engine\Framework\Engine.cpp"><Filter>Engine\Framework</Filter></ClCompile>
     <ClCompile Include="Engine\Framework\GameEngine.cpp"><Filter>Engine\Framework</Filter></ClCompile>
+    <ClCompile Include="Engine\Framework\BuildManager.cpp"><Filter>Engine\Framework</Filter></ClCompile>
     <ClCompile Include="Engine\Framework\FProjectDescriptor.cpp"><Filter>Engine\Framework</Filter></ClCompile>
     <ClCompile Include="Engine\Framework\USubsystemManager.cpp"><Filter>Engine\Framework</Filter></ClCompile>
     <!-- Core -->
@@ -121,6 +122,7 @@
     <!-- Framework -->
     <ClInclude Include="Engine\Framework\Engine.h"><Filter>Engine\Framework</Filter></ClInclude>
     <ClInclude Include="Engine\Framework\GameEngine.h"><Filter>Engine\Framework</Filter></ClInclude>
+    <ClInclude Include="Engine\Framework\BuildManager.h"><Filter>Engine\Framework</Filter></ClInclude>
     <ClInclude Include="Engine\Framework\FProjectDescriptor.h"><Filter>Engine\Framework</Filter></ClInclude>
     <ClInclude Include="Engine\Framework\USubsystem.h"><Filter>Engine\Framework</Filter></ClInclude>
     <ClInclude Include="Engine\Framework\USubsystemManager.h"><Filter>Engine\Framework</Filter></ClInclude>

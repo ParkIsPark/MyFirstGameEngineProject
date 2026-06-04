@@ -108,6 +108,7 @@
     <!-- Engine: Framework -->
     <ClCompile Include="$(EngineRootDir)Engine\Framework\Engine.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Framework\GameEngine.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Framework\BuildManager.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Framework\FProjectDescriptor.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Framework\USubsystemManager.cpp" />
     <!-- Engine: World -->
@@ -168,6 +169,7 @@
     <!-- Engine: Framework headers -->
     <ClInclude Include="$(EngineRootDir)Engine\Framework\Engine.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Framework\GameEngine.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Framework\BuildManager.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Framework\FProjectDescriptor.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Framework\USubsystem.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Framework\USubsystemManager.h" />

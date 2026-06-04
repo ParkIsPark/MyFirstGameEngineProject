@@ -105,6 +105,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Framework\Engine.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Framework\GameEngine.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Framework\BuildManager.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Framework\FProjectDescriptor.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Framework\USubsystemManager.cpp" />
     <!-- Engine: World -->

@@ -668,7 +668,37 @@ void EditorEngine::DrawUI()
 
     DrawStatusBar(pos.x, by + bh, sz.x, statusH);
 
+    if (showBuildLog_) DrawBuildLog();
     if (showDemo_) ImGui::ShowDemoWindow(&showDemo_);
+}
+
+void EditorEngine::DrawBuildLog()
+{
+    ImGui::SetNextWindowSize(ImVec2(620, 360), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Build Log", &showBuildLog_))
+    {
+        const char* status = buildMgr_.IsRunning() ? "Building..."
+                           : buildMgr_.Done() ? (buildMgr_.Succeeded() ? "Succeeded" : "Failed")
+                           : "Idle";
+        const ImVec4 col = buildMgr_.IsRunning() ? ImVec4(0.88f, 0.78f, 0.25f, 1)
+                         : (buildMgr_.Done() && buildMgr_.Succeeded()) ? ImVec4(0.30f, 0.78f, 0.42f, 1)
+                         : (buildMgr_.Done()) ? ImVec4(0.90f, 0.35f, 0.30f, 1)
+                                              : ImVec4(0.6f, 0.6f, 0.6f, 1);
+        ImGui::TextColored(col, "Status: %s", status);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(buildMgr_.IsRunning());
+        if (ImGui::SmallButton("Rebuild Engine")) buildMgr_.Start("Engine.sln", "Debug", "Engine");
+        ImGui::EndDisabled();
+        ImGui::Separator();
+
+        ImGui::BeginChild("##buildout", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
+        for (const std::string& line : buildMgr_.Snapshot())
+            ImGui::TextUnformatted(line.c_str());
+        if (buildMgr_.IsRunning() && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f)
+            ImGui::SetScrollHereY(1.0f);     // autoscroll while building
+        ImGui::EndChild();
+    }
+    ImGui::End();
 }
 
 void EditorEngine::DrawMenuBar()
@@ -698,7 +728,13 @@ void EditorEngine::DrawMenuBar()
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("World"))  { ImGui::MenuItem("World Settings"); ImGui::EndMenu(); }
-    if (ImGui::BeginMenu("Build"))  { ImGui::MenuItem("Build Lighting"); ImGui::EndMenu(); }
+    if (ImGui::BeginMenu("Build"))
+    {
+        if (ImGui::MenuItem("Build Engine", nullptr, false, !buildMgr_.IsRunning()))
+        { buildMgr_.Start("Engine.sln", "Debug", "Engine"); showBuildLog_ = true; }
+        if (ImGui::MenuItem("Build Log", nullptr, showBuildLog_)) showBuildLog_ = !showBuildLog_;
+        ImGui::EndMenu();
+    }
     if (ImGui::BeginMenu("Window")) { ImGui::MenuItem("Reset Layout"); ImGui::EndMenu(); }
     if (ImGui::BeginMenu("Help"))   { ImGui::MenuItem("About"); ImGui::EndMenu(); }
 
