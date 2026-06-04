@@ -87,6 +87,8 @@ std::string FWorldSerializer::Save(UWorld& world)
             a.Field("Restitution", p->restitution);
             a.Field("Friction", p->friction);
             int grav = p->bAffectedByGravity ? 1 : 0; a.Field("Gravity", grav);
+            int sim  = p->bSimulate ? 1 : 0;           a.Field("Simulate", sim);
+            glm::vec3 off = p->localOffset;            a.Field("Offset", off);
             out += a.str();
         }
         out += "\n";
@@ -177,6 +179,8 @@ UWorld* FWorldSerializer::Load(const std::string& text)
             a.Field("Restitution", p->restitution);
             a.Field("Friction", p->friction);
             int grav = p->bAffectedByGravity ? 1 : 0; a.Field("Gravity", grav); p->bAffectedByGravity = (grav != 0);
+            int sim  = p->bSimulate ? 1 : 0;           a.Field("Simulate", sim); p->bSimulate = (sim != 0);
+            glm::vec3 off = p->localOffset;            a.Field("Offset", off); p->localOffset = off;
             curActor->SetPhysics(p);
         }
     };

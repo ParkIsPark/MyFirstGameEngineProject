@@ -1,6 +1,11 @@
 #include "UPrimitiveComponent.h"
 #include "../World/AActor.h"
 
+glm::vec3 UPrimitiveComponent::WorldCenter() const
+{
+    return owner ? owner->GetActorLocation() + localOffset : localOffset;
+}
+
 // Dynamics are identical to the old PhysicalComponent -- this is the promotion
 // target, so behaviour stays bit-for-bit the same.
 void UPrimitiveComponent::AddForce(const glm::vec3& f)

@@ -74,6 +74,8 @@ private:
     void UpdateEditorCamera(int w, int h);   // RMB-fly + WASD (when viewport active)
     void PickActor(int w, int h);            // left-click ray pick
     void FocusActor(int idx);                // frame the editor camera on an actor
+    // Draw green collision-shape wireframes over the viewport (Unreal-style).
+    void DrawColliders(const ACamera& cam, float imgX, float imgY, int w, int h);
 
     // OS file drag-drop -> ImportAsset (routes through the window user-pointer).
     static void dropTrampoline(struct GLFWwindow* win, int count, const char** paths);
@@ -88,6 +90,7 @@ private:
     bool gizmoLocal_ = false;    // gizmo space: false=World, true=Local
     bool playing_    = false;    // Editor vs PIE (Stage 5)
     int  selected_   = -1;       // index into editorWorld_ actors
+    int  detailComp_ = 0;        // selected component in Details: 0 Actor 1 Mesh 2 Collision 3 Light
     std::string worldName_ = "EditorWorld";   // -> Content/<worldName_>.world
 
     std::vector<UWorld*> undoStack_, redoStack_;   // in-memory world snapshots (clones)

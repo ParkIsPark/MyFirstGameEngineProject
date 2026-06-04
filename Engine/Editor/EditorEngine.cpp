@@ -1007,50 +1007,65 @@ void EditorEngine::DrawDetails()
     { ImGui::TextDisabled("Select an actor in the World Outliner."); return; }
 
     AActor* a = actors[selected_];
+    UMeshComponent*      mc    = a->mesh;
+    UPrimitiveComponent* phys  = a->physics;
+    ALight*              light = dynamic_cast<ALight*>(a);
+
     ImGui::Text("%s", actorNames_[selected_].c_str());
+    if (playing_) { ImGui::SameLine(); ImGui::TextColored(ImVec4(0.88f, 0.66f, 0.35f, 1), "(PIE read-only)"); }
     ImGui::Separator();
-    if (playing_)
-        ImGui::TextColored(ImVec4(0.88f, 0.66f, 0.35f, 1), "PIE mode -- read-only");
 
-    // On the frame an editable widget is first activated (mouse-down), its bound
-    // value has not changed yet -> snapshot here captures the correct pre-edit
-    // state for undo. One snapshot per drag/edit session.
+    // ---- Component selector: click a component to inspect it ----
+    ImGui::TextDisabled("Components");
+    if (ImGui::Selectable("Actor (Root)", detailComp_ == 0)) detailComp_ = 0;
+    if (mc    && ImGui::Selectable("Mesh Component", detailComp_ == 1)) detailComp_ = 1;
+    if (phys)
+    {
+        const char* cs = phys->GetShape() == EShape::Sphere ? "Collision (Sphere)"
+                       : phys->GetShape() == EShape::Box    ? "Collision (Box)" : "Collision";
+        if (ImGui::Selectable(cs, detailComp_ == 2)) detailComp_ = 2;
+    }
+    if (light && light->lightComp && ImGui::Selectable("Light Component", detailComp_ == 3)) detailComp_ = 3;
+    // fall back to Root if the selected component does not exist on this actor
+    if ((detailComp_ == 1 && !mc) || (detailComp_ == 2 && !phys) ||
+        (detailComp_ == 3 && !(light && light->lightComp))) detailComp_ = 0;
+    ImGui::Separator();
+
+    // Snapshot on edit-start (value unchanged that frame -> correct "before" undo).
     auto snap = [&] { if (ImGui::IsItemActivated()) PushUndo(); };
+    ImGui::BeginDisabled(playing_);
 
-    ImGui::BeginDisabled(playing_);          // properties are read-only during PIE
-    ImGui::SeparatorText("Transform");
-    glm::vec3 loc = a->GetActorLocation();
-    if (ImGui::DragFloat3("Position", &loc.x, 0.05f))            a->SetActorLocation(loc);
-    snap();
-    glm::vec3 rot = a->GetActorRotation();
-    if (ImGui::DragFloat3("Rotation", &rot.x, 1.0f))            a->SetActorRotation(rot);
-    snap();
-    glm::vec3 scl = a->GetActorScale();
-    if (ImGui::DragFloat3("Scale",    &scl.x, 0.05f, 0.01f, 100.0f)) a->SetActorScale(scl);
-    snap();
-
-    // ---- UMeshComponent ----
-    if (UMeshComponent* mc = a->mesh)
+    // ---- Actor (root) transform ----
+    if (detailComp_ == 0)
+    {
+        ImGui::SeparatorText("Transform (Actor)");
+        glm::vec3 loc = a->GetActorLocation();
+        if (ImGui::DragFloat3("Position", &loc.x, 0.05f))               a->SetActorLocation(loc);
+        snap();
+        glm::vec3 rot = a->GetActorRotation();
+        if (ImGui::DragFloat3("Rotation", &rot.x, 1.0f))                a->SetActorRotation(rot);
+        snap();
+        glm::vec3 scl = a->GetActorScale();
+        if (ImGui::DragFloat3("Scale",    &scl.x, 0.05f, 0.01f, 100.0f)) a->SetActorScale(scl);
+        snap();
+    }
+    // ---- Mesh component ----
+    else if (detailComp_ == 1 && mc)
     {
         ImGui::SeparatorText("Mesh Component");
-
-        // Mesh identity + a drop slot: drag a mesh from the Content Browser here
-        // (or click to pick a file) to assign/replace this component's mesh.
         const std::string ref = mc->meshRef.empty()
             ? (mc->mesh ? "(in-memory mesh)" : "(none)") : mc->meshRef;
         ImGui::Text("Mesh: %s", ref.c_str());
         if (mc->mesh) ImGui::Text("Triangles: %d", mc->mesh->triangleCount());
 
-        // The mesh component is itself a USceneComponent: its relative transform
-        // is the offset from the actor root. Expose it (component-space edit).
         glm::vec3 mloc = mc->relLocation;
-        if (ImGui::DragFloat3("Comp Position", &mloc.x, 0.05f)) { mc->relLocation = mloc; mc->MarkDirty(); }
+        if (ImGui::DragFloat3("Position", &mloc.x, 0.05f)) { mc->relLocation = mloc; mc->MarkDirty(); }
         snap();
         glm::vec3 mrot = mc->relRotation;
-        if (ImGui::DragFloat3("Comp Rotation", &mrot.x, 1.0f))  { mc->relRotation = mrot; mc->MarkDirty(); }
+        if (ImGui::DragFloat3("Rotation", &mrot.x, 1.0f))  { mc->relRotation = mrot; mc->MarkDirty(); }
         snap();
         glm::vec3 mscl = mc->relScale;
-        if (ImGui::DragFloat3("Comp Scale",    &mscl.x, 0.05f, 0.01f, 100.0f)) { mc->relScale = mscl; mc->MarkDirty(); }
+        if (ImGui::DragFloat3("Scale",    &mscl.x, 0.05f, 0.01f, 100.0f)) { mc->relScale = mscl; mc->MarkDirty(); }
         snap();
 
         ImGui::Button(mc->mesh ? "Replace Mesh  (drop asset / click)"
@@ -1059,20 +1074,19 @@ void EditorEngine::DrawDetails()
         {
             if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_MESH"))
             {
-                std::string p((const char*)pl->Data);     // payload is null-terminated
+                std::string p((const char*)pl->Data);
                 if (UMesh* nm = LoadMeshFile(p))
                 { PushUndo(); mc->mesh = nm; mc->meshRef = p; rtUploaded_ = false; hybridUploaded_ = false; }
             }
             ImGui::EndDragDropTarget();
         }
-        if (ImGui::IsItemClicked())                       // click the slot -> file picker
+        if (ImGui::IsItemClicked())
         {
             std::string p = FFileDialog::OpenAsset();
             if (!p.empty())
                 if (UMesh* nm = LoadMeshFile(p))
                 { PushUndo(); mc->mesh = nm; mc->meshRef = p; rtUploaded_ = false; hybridUploaded_ = false; }
         }
-
         if (mc->mesh)
         {
             Material& m = mc->hasMaterialOverride ? mc->materialOverride : mc->mesh->material;
@@ -1081,47 +1095,47 @@ void EditorEngine::DrawDetails()
             ImGui::DragFloat ("Shininess", &m.shininess, 1.0f, 0.0f, 256.0f); snap();
         }
     }
-
-    // ---- UPrimitiveComponent (collision shape + rigid body) ----
-    if (UPrimitiveComponent* p = a->physics)
+    // ---- Collision component: its own transform (offset + size) + rigid body ----
+    else if (detailComp_ == 2 && phys)
     {
-        const char* shape = p->GetShape() == EShape::Sphere ? "Sphere Collision"
-                          : p->GetShape() == EShape::Box    ? "Box Collision"
-                                                            : "Capsule Collision";
-        ImGui::SeparatorText(shape);
-        ImGui::TextDisabled("UPrimitiveComponent");
-        ImGui::DragFloat("Mass",        &p->mass,        0.1f,  0.0f, 100.0f); snap();
-        ImGui::DragFloat("Restitution", &p->restitution, 0.01f, 0.0f, 1.0f);  snap();
-        ImGui::DragFloat("Friction",    &p->friction,    0.01f, 0.0f, 1.0f);  snap();
-        if (ImGui::Checkbox ("Affected by Gravity", &p->bAffectedByGravity))  PushUndo();
-        if (p->GetShape() == EShape::Sphere)
-        { ImGui::DragFloat ("Radius",       &static_cast<USphereComponent*>(p)->radius, 0.05f, 0.01f, 100.0f); snap(); }
-        else if (p->GetShape() == EShape::Box)
-        { ImGui::DragFloat3("Half Extents", &static_cast<UBoxComponent*>(p)->halfExtents.x, 0.05f, 0.01f, 100.0f); snap(); }
+        ImGui::SeparatorText("Collision Transform");
+        glm::vec3 off = phys->localOffset;
+        if (ImGui::DragFloat3("Position", &off.x, 0.05f)) phys->localOffset = off;
+        snap();
+        if (phys->GetShape() == EShape::Sphere)
+        { ImGui::DragFloat ("Radius (size)", &static_cast<USphereComponent*>(phys)->radius, 0.05f, 0.01f, 1000.0f); snap(); }
+        else if (phys->GetShape() == EShape::Box)
+        { ImGui::DragFloat3("Half Extents (size)", &static_cast<UBoxComponent*>(phys)->halfExtents.x, 0.05f, 0.01f, 1000.0f); snap(); }
+
+        ImGui::SeparatorText("Rigid Body");
+        if (ImGui::Checkbox("Simulate Physics", &phys->bSimulate)) PushUndo();
+        ImGui::SameLine(); ImGui::TextDisabled(phys->IsStatic() ? "(static)" : "(dynamic)");
+        ImGui::BeginDisabled(!phys->bSimulate);
+        ImGui::DragFloat("Mass",        &phys->mass,        0.1f,  0.0f, 100.0f); snap();
+        ImGui::DragFloat("Restitution", &phys->restitution, 0.01f, 0.0f, 1.0f);  snap();
+        ImGui::DragFloat("Friction",    &phys->friction,    0.01f, 0.0f, 1.0f);  snap();
+        if (ImGui::Checkbox("Affected by Gravity", &phys->bAffectedByGravity)) PushUndo();
+        ImGui::EndDisabled();
+    }
+    // ---- Light component ----
+    else if (detailComp_ == 3 && light && light->lightComp)
+    {
+        LightComponent* lc = light->lightComp;
+        ImGui::SeparatorText("Light Component");
+        ImGui::ColorEdit3("Light Color", &lc->LightColor.x);                       snap();
+        ImGui::DragFloat3("Intensity",   &lc->LightIntensity.x, 0.05f, 0.0f, 50.0f); snap();
+        ImGui::TextDisabled("Position = actor transform (Root)");
     }
 
-    // ---- LightComponent (ALight) ----
-    if (ALight* light = dynamic_cast<ALight*>(a))
-    {
-        if (LightComponent* lc = light->lightComp)
-        {
-            ImGui::SeparatorText("Light Component");
-            ImGui::ColorEdit3("Light Color",  &lc->LightColor.x);              snap();
-            ImGui::DragFloat3("Intensity",    &lc->LightIntensity.x, 0.05f, 0.0f, 50.0f); snap();
-            // Light position is the actor transform (edited in the Transform section).
-        }
-    }
-
-    // ---- Add Component ----
+    // ---- Add Component (available from any view) ----
     ImGui::Spacing();
-    if (ImGui::Button("+ Add Component"))
-        ImGui::OpenPopup("AddComponent");
+    if (ImGui::Button("+ Add Component")) ImGui::OpenPopup("AddComponent");
     if (ImGui::BeginPopup("AddComponent"))
     {
         if (!a->physics && ImGui::MenuItem("Sphere Collision"))
-        { PushUndo(); auto* s = new USphereComponent(a); s->radius = 1.0f; a->SetPhysics(s); }
+        { PushUndo(); auto* s = new USphereComponent(a); s->radius = 1.0f; a->SetPhysics(s); detailComp_ = 2; }
         if (!a->physics && ImGui::MenuItem("Box Collision"))
-        { PushUndo(); auto* b = new UBoxComponent(a); b->halfExtents = glm::vec3(1.0f); a->SetPhysics(b); }
+        { PushUndo(); auto* b = new UBoxComponent(a); b->halfExtents = glm::vec3(1.0f); a->SetPhysics(b); detailComp_ = 2; }
         if (a->physics) ImGui::TextDisabled("(already has a collider)");
         ImGui::EndPopup();
     }
@@ -1242,6 +1256,9 @@ void EditorEngine::DrawViewport()
             gizmoBusy = ImGuizmo::IsOver() || ImGuizmo::IsUsing();
         }
 
+        // Green collision wireframes over the viewport (box edges + sphere rings).
+        { const ImVec2 rm = ImGui::GetItemRectMin(); DrawColliders(cam, rm.x, rm.y, w, h); }
+
         // Latch fly-mode while RMB is held (so hover flicker during a drag does
         // not interrupt simultaneous rotate + WASD movement).
         if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
@@ -1312,6 +1329,71 @@ void EditorEngine::PickActor(int w, int h)
         if (mc->intersect(ray, t, tri, u, v) && t < best) { best = t; bestIdx = i; }
     }
     if (bestIdx >= 0) selected_ = bestIdx;
+}
+
+void EditorEngine::DrawColliders(const ACamera& cam, float imgX, float imgY, int w, int h)
+{
+    // Only the SELECTED actor's collider, and only while its Collision component
+    // is the one selected in Details (Unreal-style: collision shown on select).
+    auto& actors = ActiveWorld().GetScene().Actors;
+    if (detailComp_ != 2 || selected_ < 0 || selected_ >= (int)actors.size()) return;
+    UPrimitiveComponent* sel = actors[selected_]->physics;
+    if (!sel) return;
+
+    const glm::mat4 view = glm::lookAt(cam.eye, cam.eye - cam.w, cam.v);
+    const glm::mat4 proj = glm::frustum(cam.l, cam.r, cam.b, cam.t, cam.d, 3000.0f);
+    const glm::mat4 vp   = proj * view;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImU32 col = IM_COL32(60, 230, 90, 255);            // Unreal-ish collision green
+
+    auto project = [&](const glm::vec3& p, ImVec2& out) -> bool
+    {
+        glm::vec4 c = vp * glm::vec4(p, 1.0f);
+        if (c.w <= 1e-4f) return false;                      // behind camera
+        glm::vec3 ndc = glm::vec3(c) / c.w;
+        out = ImVec2(imgX + (ndc.x * 0.5f + 0.5f) * w,
+                     imgY + (1.0f - (ndc.y * 0.5f + 0.5f)) * h);
+        return true;
+    };
+    auto line = [&](const glm::vec3& a3, const glm::vec3& b3)
+    {
+        ImVec2 pa, pb;
+        if (project(a3, pa) && project(b3, pb)) dl->AddLine(pa, pb, col, 1.5f);
+    };
+
+    {
+        UPrimitiveComponent* p = sel;
+        const glm::vec3 c = p->WorldCenter();                // collider center (actor loc + offset)
+
+        if (p->GetShape() == EShape::Box)
+        {
+            const glm::vec3 he = static_cast<UBoxComponent*>(p)->halfExtents;
+            glm::vec3 v[8];
+            for (int i = 0; i < 8; ++i)
+                v[i] = c + glm::vec3((i & 1) ? he.x : -he.x,
+                                     (i & 2) ? he.y : -he.y,
+                                     (i & 4) ? he.z : -he.z);
+            const int edges[12][2] = {{0,1},{1,3},{3,2},{2,0}, {4,5},{5,7},{7,6},{6,4},
+                                      {0,4},{1,5},{2,6},{3,7}};
+            for (auto& e : edges) line(v[e[0]], v[e[1]]);
+        }
+        else if (p->GetShape() == EShape::Sphere)
+        {
+            const float r = static_cast<USphereComponent*>(p)->radius;
+            const int N = 28;
+            for (int ring = 0; ring < 3; ++ring)
+                for (int i = 0; i < N; ++i)
+                {
+                    const float t0 = (float)i / N * 6.2831853f;
+                    const float t1 = (float)(i + 1) / N * 6.2831853f;
+                    glm::vec3 p0, p1;
+                    if (ring == 0) { p0 = {std::cos(t0), std::sin(t0), 0}; p1 = {std::cos(t1), std::sin(t1), 0}; }
+                    else if (ring == 1) { p0 = {std::cos(t0), 0, std::sin(t0)}; p1 = {std::cos(t1), 0, std::sin(t1)}; }
+                    else { p0 = {0, std::cos(t0), std::sin(t0)}; p1 = {0, std::cos(t1), std::sin(t1)}; }
+                    line(c + p0 * r, c + p1 * r);
+                }
+        }
+    }
 }
 
 void EditorEngine::FocusActor(int idx)

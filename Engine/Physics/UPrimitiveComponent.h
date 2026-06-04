@@ -27,17 +27,31 @@ public:
 
     bool  bAffectedByGravity = true;
 
+    // Simulate Physics (Unreal-style). false => STATIC: the body still collides
+    // but never moves (immovable / infinite mass, no gravity). Use it for ground
+    // planes and walls so dynamic bodies rest on them instead of pushing them.
+    bool  bSimulate = true;
+
     glm::vec3 velocity   = glm::vec3(0.0f);
     glm::vec3 force      = glm::vec3(0.0f); // accumulated per frame
     bool      isGrounded = false;           // set by UPhysicsWorld on contact
 
     AActor* owner = nullptr;
 
+    // Collider's local position offset from the owning actor (its own transform;
+    // shape "size" is halfExtents / radius). World center = actor loc + localOffset.
+    glm::vec3 localOffset = glm::vec3(0.0f);
+
     UPrimitiveComponent() = default;
     explicit UPrimitiveComponent(AActor* owner) : owner(owner) {}
     virtual ~UPrimitiveComponent() = default;
 
-    bool IsStatic() const { return mass == 0.0f; }
+    // Static when physics simulation is off or mass is zero: collides but never moves.
+    bool IsStatic() const { return !bSimulate || mass <= 0.0f; }
+
+    // World-space collider center (actor location + localOffset). In the .cpp
+    // where AActor is complete.
+    glm::vec3 WorldCenter() const;
 
     void AddForce(const glm::vec3& f);
     void Integrate(float dt);

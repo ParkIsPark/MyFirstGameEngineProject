@@ -147,7 +147,7 @@ void UPhysicsWorld::applyImpulse(AActor* a, AActor* b,
 void UPhysicsWorld::resolveAABBvsAABB(AActor* a, const glm::vec3& halfA,
                                        AActor* b, const glm::vec3& halfB)
 {
-    glm::vec3 d    = a->GetActorLocation() - b->GetActorLocation();
+    glm::vec3 d    = a->physics->WorldCenter() - b->physics->WorldCenter();
     glm::vec3 over = (halfA + halfB) - glm::abs(d);
 
     if (over.x <= 0.0f || over.y <= 0.0f || over.z <= 0.0f) return;
@@ -202,7 +202,7 @@ void UPhysicsWorld::resolveSphereAABB(AActor* sphere, float radius,
                                        AActor* cube,   const glm::vec3& half)
 {
     // Closest point on AABB to sphere center (in world space)
-    glm::vec3 local   = sphere->GetActorLocation() - cube->GetActorLocation();
+    glm::vec3 local   = sphere->physics->WorldCenter() - cube->physics->WorldCenter();
     glm::vec3 closest = glm::clamp(local, -half, half);
     glm::vec3 diff    = local - closest;
     float     distSq  = glm::dot(diff, diff);
@@ -292,7 +292,7 @@ void UPhysicsWorld::resolveCubeFloor(AActor* cube, const glm::vec3& half, float 
 // ---------------------------------------------------------------------------
 void UPhysicsWorld::resolveSphereSphere(AActor* a, float ra, AActor* b, float rb)
 {
-    glm::vec3 diff = a->GetActorLocation() - b->GetActorLocation();
+    glm::vec3 diff = a->physics->WorldCenter() - b->physics->WorldCenter();
     float dist     = glm::length(diff);
     float minDist  = ra + rb;
 
