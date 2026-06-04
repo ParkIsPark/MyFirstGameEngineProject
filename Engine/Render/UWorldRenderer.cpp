@@ -13,6 +13,7 @@
 #include "UMeshComponent.h"
 #include "ALight.h"
 #include "PointLightComponent.h"
+#include "EnvironmentLightComponent.h"
 #include "FTransform.h"
 #include "FRenderShowFlag.h"
 
@@ -86,6 +87,18 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
     }
 
     const unsigned int skyTex = sky_.GetOrLoad(scene.skyHDRI);
+
+    // Environment light -> hemisphere GI + sky gradient (both GPU passes).
+    int giN = 0;
+    glm::vec3 envTint(1.0f), horizon(0.10f, 0.12f, 0.16f), zenith(0.40f, 0.55f, 0.80f);
+    float skyExp = 1.0f;
+    for (AActor* a : scene.Actors)
+        if (ALight* L = dynamic_cast<ALight*>(a))
+            if (auto* el = dynamic_cast<EnvironmentLightComponent*>(L->lightComp))
+            { giN = 8; envTint = el->LightColor * el->LightIntensity; horizon = el->horizonColor;
+              zenith = el->zenithColor; skyExp = el->skyExp; break; }
+    worldRT_.SetGI(giN, envTint, horizon, zenith, skyExp);
+    hybrid_.SetGI(giN, envTint, horizon, zenith, skyExp);
 
     glViewport(0, 0, w, h);
     glClearColor(0.10f, 0.11f, 0.13f, 1.0f);

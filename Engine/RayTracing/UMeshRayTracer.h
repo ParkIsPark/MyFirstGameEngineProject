@@ -42,6 +42,10 @@ public:
     { lightPos_ = pos; lightColor_ = color; }
     // Equirectangular HDRI sky texture (0 = none -> procedural gradient).
     void SetSky(unsigned int tex) { skyTex_ = tex; }
+    // Environment light: GI sample count (0=off), tint, and sky gradient colors.
+    void SetGI(int samples, const glm::vec3& tint, const glm::vec3& horizon,
+               const glm::vec3& zenith, float skyExp)
+    { giSamples_ = samples; envTint_ = tint; skyHorizon_ = horizon; skyZenith_ = zenith; skyExp_ = skyExp; }
     void Cleanup();
     bool ready() const { return prog_ != 0; }
 
@@ -64,4 +68,9 @@ private:
     unsigned int           skyTex_     = 0;     // equirect HDRI (0 = gradient)
     unsigned int           texArr_     = 0;     // GL_TEXTURE_2D_ARRAY of diffuse textures
     int                    texLayers_  = 0;     // layer count (0 = untextured world)
+    int                    giSamples_  = 0;     // hemisphere GI samples (0 = flat ambient)
+    glm::vec3              envTint_     = glm::vec3(1.0f);
+    glm::vec3              skyHorizon_  = glm::vec3(0.10f, 0.12f, 0.16f);
+    glm::vec3              skyZenith_   = glm::vec3(0.40f, 0.55f, 0.80f);
+    float                  skyExp_      = 1.0f;
 };

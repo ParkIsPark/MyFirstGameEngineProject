@@ -572,6 +572,18 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
 
     const unsigned int skyTex = sky_.GetOrLoad(scene.skyHDRI);
 
+    // Environment light -> hemisphere GI + sky gradient (drives both GPU passes).
+    int giN = 0;
+    glm::vec3 envTint(1.0f), horizon(0.10f, 0.12f, 0.16f), zenith(0.40f, 0.55f, 0.80f);
+    float skyExp = 1.0f;
+    for (AActor* a : scene.Actors)
+        if (ALight* L = dynamic_cast<ALight*>(a))
+            if (auto* el = dynamic_cast<EnvironmentLightComponent*>(L->lightComp))
+            { giN = 8; envTint = el->LightColor * el->LightIntensity; horizon = el->horizonColor;
+              zenith = el->zenithColor; skyExp = el->skyExp; break; }
+    worldRT_.SetGI(giN, envTint, horizon, zenith, skyExp);
+    hybrid_.SetGI(giN, envTint, horizon, zenith, skyExp);
+
     EnsureFBO(w, h);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
     glViewport(0, 0, w, h);
@@ -1207,10 +1219,20 @@ void EditorEngine::DrawDetails()
     else if (detailComp_ == 3 && light && light->lightComp)
     {
         LightComponent* lc = light->lightComp;
-        ImGui::SeparatorText("Light Component");
+        if (dynamic_cast<EnvironmentLightComponent*>(lc)) ImGui::SeparatorText("Environment Light (GI)");
+        else                                              ImGui::SeparatorText("Point Light");
         ImGui::ColorEdit3("Light Color", &lc->LightColor.x);                       snap();
         ImGui::DragFloat3("Intensity",   &lc->LightIntensity.x, 0.05f, 0.0f, 50.0f); snap();
-        ImGui::TextDisabled("Position = actor transform (Root)");
+
+        if (auto* el = dynamic_cast<EnvironmentLightComponent*>(lc))
+        {
+            ImGui::ColorEdit3("Sky Horizon", &el->horizonColor.x);  snap();
+            ImGui::ColorEdit3("Sky Zenith",  &el->zenithColor.x);   snap();
+            ImGui::DragFloat ("Sky Exponent", &el->skyExp, 0.02f, 0.05f, 8.0f); snap();
+            ImGui::TextDisabled("Drives hemisphere GI + sky (GPU RT / Hybrid)");
+        }
+        else
+            ImGui::TextDisabled("Position = actor transform (Root)");
     }
 
     // ---- Add Component (available from any view) ----

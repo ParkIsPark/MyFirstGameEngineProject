@@ -31,6 +31,13 @@ static const char* RT_SHADING_GLSL = R"GLSL(
 
 uniform sampler2D uSky;     // equirectangular HDRI (sampled when uHasSky != 0)
 uniform int       uHasSky;
+// Environment-light driven sky gradient (when no HDRI) + GI controls.
+uniform vec3  uSkyHorizon;  // horizon color
+uniform vec3  uSkyZenith;   // zenith color
+uniform float uSkyExp;      // gradient curve exponent
+uniform int   uGISamples;   // hemisphere GI samples (0 = flat ambient)
+uniform vec3  uEnvTint;     // environment light color * intensity (scales GI)
+
 vec3 skyColor(vec3 rd) {
     if (uHasSky != 0) {
         vec3 d = normalize(rd);
@@ -38,8 +45,20 @@ vec3 skyColor(vec3 rd) {
         float v = asin(clamp(d.y, -1.0, 1.0)) * 0.31830989 + 0.5; // 1/pi
         return texture(uSky, vec2(u, v)).rgb;
     }
-    float k = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
-    return mix(vec3(0.10, 0.12, 0.16), vec3(0.40, 0.55, 0.80), k);
+    float k = pow(clamp(rd.y * 0.5 + 0.5, 0.0, 1.0), max(uSkyExp, 0.01));
+    return mix(uSkyHorizon, uSkyZenith, k);
+}
+
+// --- hemisphere GI helpers (Unreal-Lumen-style environment lighting + AO) ---
+float _giHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+void  _giBasis(vec3 n, out vec3 t, out vec3 b) {
+    vec3 up = abs(n.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    t = normalize(cross(up, n)); b = cross(n, t);
+}
+vec3 _giCosHemi(vec3 n, float u1, float u2) {
+    float r = sqrt(u1); float phi = 6.2831853 * u2;
+    vec3 t, b; _giBasis(n, t, b);
+    return normalize(t * (r * cos(phi)) + b * (r * sin(phi)) + n * sqrt(max(0.0, 1.0 - u1)));
 }
 
 // Moller-Trumbore, occlusion variant (only the hit distance matters).
@@ -103,8 +122,26 @@ vec3 tonemap(vec3 c) {
 // of its Blinn-Phong direct term, each gated by its OWN BVH-traced hard shadow
 // ray. Used unchanged by both render modes.
 vec3 shadeSurface(vec3 P, vec3 N, vec3 albedo) {
-    vec3 Vv      = normalize(uEye - P);
-    vec3 ambient = albedo * skyColor(N) * 0.5;
+    vec3 Vv = normalize(uEye - P);
+
+    // Ambient / GI. With an EnvironmentLight (uGISamples>0) gather the environment
+    // over the cosine-weighted hemisphere with BVH occlusion (Unreal-Lumen-style:
+    // sky environment lighting + ambient occlusion), tinted by the env light.
+    // Otherwise a cheap flat sky term (HW6-style).
+    vec3 ambient;
+    if (uGISamples > 0) {
+        vec3 gi = vec3(0.0);
+        for (int i = 0; i < uGISamples; ++i) {
+            float u1 = _giHash(gl_FragCoord.xy + vec2(float(i) * 1.7, float(i) * 3.1));
+            float u2 = _giHash(gl_FragCoord.yx + vec2(float(i) * 2.3, float(i) * 0.7));
+            vec3  d  = _giCosHemi(N, u1, u2);
+            if (!occluded(P + N * 1e-3, d, 1.0e9))   // unoccluded -> gather sky
+                gi += skyColor(d);
+        }
+        ambient = albedo * (gi / float(uGISamples)) * uEnvTint;
+    } else {
+        ambient = albedo * skyColor(N) * 0.5;
+    }
 
     vec3 lit = vec3(0.0);
     for (int i = 0; i < uNumLights; ++i) {
