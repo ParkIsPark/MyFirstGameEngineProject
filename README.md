@@ -90,7 +90,7 @@ Pick the mode from the toolbar; it is saved into the world and used by the stand
 
 ### Content browser
 
-The Content Browser lists assets under `Content/`. Double-click a `.world` to open it, a mesh to add it to the scene, or drag a mesh onto the viewport to place it.
+The Content Browser lists assets under `Content/`, grouped by tab (World / Mesh / Material / Texture). Double-click a `.world` to open it, a mesh to add it to the scene (or drag it onto the viewport to place it), or a material to open the material editor. Right-click for New World / New Material / Import.
 
 ### Importing models
 
@@ -98,14 +98,21 @@ Import via the Content Browser, the **Details mesh slot**, or by **dragging a fi
 
 ### Materials
 
-Each mesh has a **Blinn-Phong** material: diffuse (`kd`), specular (`ks`), shininess, **mirror** (`km`, shows in GPU RT), and an optional **diffuse texture** (drop an image on the Details texture slot; sampled in all three modes).
+Each material is **Blinn-Phong**: diffuse (`kd`), specular (`ks`), shininess, **mirror** (`km`, shows in GPU RT), and an optional **diffuse texture** — all sampled in every render mode.
+
+Materials can be **shared assets** (`.material`): right-click → New Material, then **double-click to open the material editor**. Editing a material updates **every object that uses it** (it's shared by path). Assign one by dragging it onto an object in the viewport, or via the Details **Material slot** (drop / pick / Edit / Clear). An imported OBJ's `.mtl` shows up as a material too. Saving writes a `.material` (a `.mtl` source is written as `<stem>.material`, never overwritten).
+
+**Texture tiling (UV repeat)** lives on the *mesh component*, not the material — so the same material can repeat differently per object. Set it in Details → **Texture Tiling**.
 
 ### Lights
 
 Add from the Outliner:
 
 - **Point Light** — position follows the actor; color × intensity.
-- **Environment Light** — drives **hemisphere GI** (Unreal-Lumen-style) + a sky gradient (horizon / zenith / exponent). For an image-based sky, set an **HDRI** (`.hdr`) from the **World** menu.
+- **Environment Light** — drives **hemisphere GI** (Unreal-Lumen-style) + the sky. Details gives you:
+  - **Time of Day** — one slider (0–24 h, + Sunrise/Noon/Sunset/Night presets) moves the sun across the day, setting the sky gradient + light color/intensity.
+  - **Sky Image (HDRI)** — drop or pick an image; it's **copied into `Content/`** and **saved with the world**, so it's restored on reload. The HDRI replaces the gradient in every mode.
+  - Manual **Sky Horizon / Zenith / Exponent** for fine-tuning.
 
 ### Physics
 
@@ -137,7 +144,9 @@ Use the engine from a separate project instead of editing in-repo:
 1. Double-click **`GenerateProject.bat`** — pick a folder and a name. It scaffolds `<name>\` with a `.sln`, `main.cpp`, `EngineRoot.props`, runtime DLLs, and **Editor / Game** build configurations.
 2. By default the project is **linked** to this engine repo (engine edits propagate). Run **`Package.bat`** inside the generated folder to **freeze** the engine into the project for submission (self-contained; the repo can be moved/deleted afterward).
 
-A minimal entry point just boots the engine and runs a project descriptor; the editor opens, and a packaged game build runs the world directly.
+A minimal entry point just boots the engine and runs a project descriptor; the **Editor** build opens the editor, and the **Game** build runs the world directly (same exe, two configurations).
+
+Set which world the project boots into via **File → Project Settings… → Default World** (saved to `Setting/DefaultEngine.ini`); the editor opens it on startup and a packaged game runs it.
 
 ---
 
