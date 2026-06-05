@@ -13,6 +13,13 @@ AActor::AActor()
 
 AActor::~AActor()
 {
+    // Owns its heap components (allocated via new in SetMesh/SetPhysics, the
+    // factory loader, and CloneActor's deep copy). Without this, every world
+    // switch / undo eviction / NewWorld leaked the mesh + physics components
+    // (incl. a textured material's CPU pixel bytes). rootComponent is a value
+    // member; UMeshComponent never deletes the shared UMesh, so no double free.
+    delete mesh;     mesh    = nullptr;
+    delete physics;  physics = nullptr;
 }
 
 void AActor::SetMesh(UMeshComponent* m)
