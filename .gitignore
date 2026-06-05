@@ -35,3 +35,14 @@ Config/EditorSettings.ini
 
 # Standalone test executables compiled ad-hoc with g++
 *_test.exe
+
+# -------------------------------------------------------
+# Runtime / build-area content (not engine source)
+# -------------------------------------------------------
+bin/Content/
+bin/Config/
+bin/*.fbx
+bin/*.obj
+bin/*.world
+Content/__pie.world
+Config/GameSettings.ini
