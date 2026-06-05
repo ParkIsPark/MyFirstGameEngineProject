@@ -37,11 +37,14 @@ msbuild <generated>.sln /p:Configuration=Debug /p:Platform=Win32   # an external
 ```
 Output goes to the solution's `bin\` (co-located with the runtime DLLs). `Test.exe` entry points (`Test\main.cpp`):
 - **(no args)** → the ImGui `EditorEngine` (default).
+- **`--game <world.path>`** → the headless-of-ImGui `GameEngine`: loads a `.world` and runs it (BeginPlay + physics/actor tick) in the world's saved render mode. This is the standalone game runtime; the editor's **Play (Window)** spawns `argv0 --game` as a separate process via `FProcess`.
 - **`--demo`** → mesh demo window, keys `1`=CPU raster silhouette, `2`=GPU mesh ray trace, `3`=depth view, `4`=hybrid (raster G-buffer + GPU shadow), `5`=imported OBJ cube, `6`=imported FBX.
 - **`--fbxtest`** → headless FBX-import self-test (no GL window), prints PASS/FAIL gates, exits non-zero on failure.
 
+Building from an agent: `msbuild` is usually not on PATH; resolve it with `vswhere` (e.g. `…\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe`). C4819 codepage warnings are expected (Korean comments) and are not errors — filter with `/clp:ErrorsOnly`. After a build, confirm `bin\Test.exe`'s timestamp updated (a "0 errors" Engine compile does not by itself relink the exe). GLSL is compiled at runtime, so shader changes can only be verified by running `! ./bin/Test.exe`.
+
 ### Standalone CPU unit tests (`Test\*_test.cpp`)
-Each `Test\<area>_test.cpp` (rasterizer, bvh, physics, framework, threading, culling, hybrid, obj) is an **independent** GL-free self-test with its own `main()` and `[T#] … PASS|FAIL` gate lines. They are **not** part of `Test.vcxproj` (which only builds `main.cpp`); compile/run one at a time with g++ (msys2 ucrt64) — the exact command is in each file's header comment, e.g.:
+Each `Test\<area>_test.cpp` (rasterizer, bvh, physics, framework, threading, culling, hybrid, obj, scenegraph, serialize, mesh_material, shading, light, world_serialize, ini) is an **independent** GL-free self-test with its own `main()` and `[T#] … PASS|FAIL` gate lines. They are **not** part of `Test.vcxproj` (which only builds `main.cpp`); compile/run one at a time with g++ (msys2 ucrt64) — the exact command is in each file's header comment, e.g.:
 ```bash
 g++ -std=c++17 -I include -I Engine/Mesh -I Engine/Rasterizer -I Engine/World -I Engine/RayTracing \
     Test/rasterizer_test.cpp Engine/Mesh/UMesh.cpp Engine/Rasterizer/FTransform.cpp \
@@ -53,18 +56,19 @@ g++ -std=c++17 -I include -I Engine/Mesh -I Engine/Rasterizer -I Engine/World -I
 ```
 EngineDevelop/
 ├── Engine/                  # Tracked engine source — edit and commit freely
-│   ├── Framework/           # Engine (window+loop+lifecycle), FProjectDescriptor (.proj), USubsystem(Manager)
-│   ├── Core/                # UScene (actors/lights/outputImage), UPostProcessFilter
-│   ├── World/               # UWorld (scene+camera+physics+lifecycle), AActor, ACamera
-│   ├── Mesh/                # UMesh (geometry+generators+BVH+intersect), UMeshComponent, Vertex, Material
+│   ├── Framework/           # Engine (window+loop+lifecycle), GameEngine (--game runtime), FProjectDescriptor (.proj/.ini boot), BuildManager (background msbuild), USubsystem(Manager)
+│   ├── Core/                # UScene (actors/lights/outputImage/renderMode/shadingModel/skyHDRI), UPostProcessFilter
+│   ├── World/               # UWorld (scene+camera+physics+lifecycle), AActor (rootComponent), USceneComponent (scene-graph node), ACamera
+│   ├── Mesh/                # UMesh (geometry+generators+BVH+intersect+.mesh I/O+Resolve), UMeshComponent, Vertex, Material
 │   ├── Rasterizer/          # FTransform (FCG matrices), URasterizer, UFrameBuffer, UGBuffer
-│   ├── Render/              # URenderer (mode orchestrator), UHybridPass (GPU shadow/shade)
-│   ├── RayTracing/          # UMeshRayTracer (GPU mesh RT), RTShading.h, URay.h
+│   ├── Render/              # URenderer (CPU shaded raster orchestrator), UWorldRenderer (renders a UWorld in any mode), UHybridPass, USkyHDRI, FRenderShowFlag, FRenderQuality
+│   ├── RayTracing/          # UMeshRayTracer (GPU mesh RT, two-level BVH), RTShading.h, URay.h
 │   ├── Acceleration/        # BVH (median-split, stack traversal, GLSL-portable)
+│   ├── Serialization/       # FArchive (3-mode save/load), TFactory + REGISTER_ACTOR/COMPONENT, FWorldSerializer (.world), FIniFile (.ini)
 │   ├── Threading/           # ThreadPool (header-only worker pool, ParallelForChunks)
 │   ├── Import/              # UObjImporter (hand-written), UFbxImporter (Assimp)
-│   ├── Editor/              # EditorEngine (Dear ImGui editor) + External/imgui (vendored)
-│   ├── Light/               # ALight, PointLight, EnvironmentLight, LightComponent
+│   ├── Editor/              # EditorEngine (Dear ImGui editor) + External/imgui + External/ImGuizmo (vendored), FFileDialog (Win32 picker), FProcess (spawn game)
+│   ├── Light/               # ALight, PointLightComponent, EnvironmentLightComponent, LightComponent
 │   ├── Physics/             # UPrimitiveComponent, UShape/USphere/UBoxComponent, UPhysicsWorld
 │   └── Player/              # UPlayerCharacter (pawn), UPlayerController (input + camera follow)
 ├── Test/                    # Test.vcxproj (Console app: main.cpp runs editor/demo) + standalone *_test.cpp
@@ -106,29 +110,31 @@ EngineDevelop/
 
 ## VS Solution Explorer Filter Layout
 
-Each project's `.vcxproj.filters` groups `main.cpp` under **Source Files** and the engine `.cpp`/`.h` under an **Engine** tree mirroring the `Engine\` subfolders (Framework, Core, World, Mesh, Rasterizer, Render, RayTracing, Acceleration, Threading, Import, Editor, Light, Physics, Player). Keep new files filed under the matching module so Solution Explorer stays organized.
+Each project's `.vcxproj.filters` groups `main.cpp` under **Source Files** and the engine `.cpp`/`.h` under an **Engine** tree mirroring the `Engine\` subfolders (Framework, Core, World, Mesh, Rasterizer, Render, RayTracing, Acceleration, Serialization, Threading, Import, Editor, Light, Physics, Player). Keep new files filed under the matching module so Solution Explorer stays organized. **New engine files must be registered in `Engine.vcxproj` + `Test.vcxproj` + `Template/*.vcxproj` (and their `.filters`)** or they won't compile into the runnable exe.
 
 ## Engine Architecture
 
-> **Major refactor (mesh-first).** The engine was rewritten from an analytic-surface ray tracer to a **mesh-first** renderer. The legacy `USurface`/`SphereSurface`/`CubeSurface`/`PlaneSurface`, `UTilemap`, the `URayTracing` multi-pass GPU shader assembler, and `RenderConfig.h` were **deleted**. Geometry is now `UMesh` (triangles); shading happens in three fixed render paths. If you find docs or memories referencing those old types, they are stale.
+> **Two refactor waves.** (1) **Mesh-first**: the engine was rewritten from an analytic-surface ray tracer to a mesh renderer — `USurface`/`Sphere/Cube/PlaneSurface`, `UTilemap`, the `URayTracing` multi-pass shader assembler, and `RenderConfig.h` were **deleted**; geometry is now `UMesh` (triangles) shaded in three fixed render paths. (2) **Engine/editor polish** added the scene-graph (`USceneComponent`), serialization (`FArchive`/factories/`.world`/`.ini`), the `EditorEngine`↔`GameEngine` split with data-driven boot, and the GPU-RT two-level BVH. Docs/memories naming the old removed types are stale.
 
 All engine source lives under `Engine/` and is compiled directly into each project (the `Engine.lib` StaticLibrary exists only for compile-error checking; `Test.exe` and generated projects compile the `.cpp` directly). `OpenglViewer.props` adds every `Engine\` subdirectory to the include path, so bare `#include "UMesh.h"` works everywhere. **GL baseline is 3.3** — all GPU passes use `#version 330` fragment shaders over fullscreen quads and `samplerBuffer` TBOs; no compute shaders / SSBO / GL 4.3 is assumed (the grading machine may not have it).
 
 ### Framework lifecycle (`Engine/Framework`)
 
-`Engine` is the base runtime: it owns the GLFW window + GL context + main loop + resize handling, with virtual hooks an app overrides — `OnStartup()` (once, after GL is ready), `WorldSetting()` (build a `UWorld` + spawn actors), `Tick(dt)`, `Render()` (every frame), `OnResize()`. `Init(w,h,title)` then `Run(projPath)`. `Run()` flow: `OnStartup → WorldSetting → subsystems.InitAll → world.BeginPlay → loop{TickAll → world.Tick → Render} → world.EndPlay → subsystems.ShutdownAll`. No global state — the GLFW resize callback trampolines through the window user-pointer to a member. `MeshDemo` and `EditorEngine` both subclass `Engine`.
+`Engine` is the base runtime: it owns the GLFW window + GL context + main loop + resize handling, with virtual hooks an app overrides — `OnStartup()` (once, after GL is ready), `WorldSetting()` (build a `UWorld` + spawn actors), `Tick(dt)`, `Render()` (every frame), `OnResize()`. `Init(w,h,title)` then `Run(projPath)`. `Run()` flow: `OnStartup → WorldSetting → subsystems.InitAll → world.BeginPlay → loop{TickAll → world.Tick → Render} → world.EndPlay → subsystems.ShutdownAll`. No global state — the GLFW resize callback trampolines through the window user-pointer to a member. **Three `Engine` subclasses**: `MeshDemo` (`--demo`), `EditorEngine` (default, ImGui editor), and `GameEngine` (`--game`, no editor — loads a `.world` and runs it via `UWorldRenderer`).
 
-`FProjectDescriptor` parses a flat `Key = Value` `.proj` file (WindowTitle/Width/Height/RenderMode/StartupWorld); a missing/garbage file must never crash (keep defaults). `USubsystemManager` owns a list of `USubsystem`s and drives Init (registration order) / Tick / Shutdown (reverse order); `Get<T>()` finds one by type.
+`FProjectDescriptor` is the **data-driven boot**: a flat legacy `Key = Value` `.proj` plus the two-stage `LoadProject(.proj manifest)` + `LoadSettings(Setting/DefaultEngine.ini)` ([Display]/[Render]/[Startup]). A missing/garbage file must never crash (keep defaults). When `WorldSetting()` returns null and a `StartupWorld` is set, `Run()` loads `Content/<StartupWorld>.world`. `BuildManager` runs `msbuild` on a worker thread (path from `Config/Engine.ini`, gitignored) streaming output to the editor's Build Log. `USubsystemManager` owns a list of `USubsystem`s and drives Init (registration order) / Tick / Shutdown (reverse order); `Get<T>()` finds one by type.
 
 ### World & actors (`Engine/World`, `Engine/Core`)
 
-`UWorld` is the runtime scene container (Unreal `UWorld` analogue): owns a `UScene` (`vector<AActor*>` + `vector<ALight*>` + `outputImage` float buffer + `UPostProcessFilter`), an `ACamera`, and a `UPhysicsWorld`, and drives the actor lifecycle (`BeginPlay` once → `Tick`: physics step then per-actor tick → `EndPlay`). `AActor` holds a transform and components; meshes attach via `UMeshComponent`. `ACamera` uses the **FCG/Shirley convention** (see FTransform below) with `l,r,b,t,d` frustum fields.
+`UWorld` is the runtime scene container (Unreal `UWorld` analogue): owns a `UScene` (`vector<AActor*>` + `vector<ALight*>` + `outputImage` float buffer + `renderMode`/`shadingModel`/`skyHDRI` + `UPostProcessFilter`), an `ACamera`, and a `UPhysicsWorld`, and drives the actor lifecycle (`BeginPlay` once → `Tick`: physics step then per-actor tick → `EndPlay`). `ACamera` uses the **FCG/Shirley convention** (see FTransform below) with `l,r,b,t,d` frustum fields.
+
+**Scene graph (`USceneComponent`)**: every `AActor` owns a `rootComponent` (a `USceneComponent`) that holds the transform — `AActor` has **no** position field; `GetActorLocation()` reads the root's world matrix, `SetActorLocation()` writes its `relLocation`. A `USceneComponent` has a relative transform (loc/rot/scale, **rotation in DEGREES** — this GLM build is not `GLM_FORCE_RADIANS`), an `attachParent`, `children`, and a **dirty-flag-cached** world matrix (`world = parent.world * relative`; a move marks self + all descendants dirty, recomputed lazily). `UMeshComponent` and `LightComponent` attach **under** the root; **actor↔actor parenting** (editor outliner) attaches one actor's `rootComponent` under another's, so moving a parent moves its children and serialization/clone must preserve the link. Physics mutates positions through the setters so the dirty cache stays valid.
 
 ### Mesh & material (`Engine/Mesh`)
 
-`UMesh` is the triangle-mesh asset (Unreal `StaticMesh` analogue): `vertices` (`Vertex` = position/normal/uv) + `indices` (3 per triangle) + a default `Material`. Static generators **replace the old analytic surfaces**: `GenerateSphere(radius,segW,segH)`, `GenerateCube(halfExtents)`, `GeneratePlane(size)`. `GenerateSphere` reproduces the course `sphere_scene.cpp` vertex/index order **exactly** (default 32×16 → 450 verts / 868 tris) so rasterizer output matches the reference image pixel-for-pixel — do not "tidy" its ordering. `BuildBVH()` builds an optional `BVH`; `intersect(ray, worldMat, …)` is a CPU geometric query for **editor picking only** (not a render path — there is no CPU ray tracer). Meshes are shared across actors via `UMeshComponent`.
+`UMesh` is the triangle-mesh asset (Unreal `StaticMesh` analogue): `vertices` (`Vertex` = position/normal/uv) + `indices` (3 per triangle) + a default `Material` (plus optional per-triangle material slots). Static generators **replace the old analytic surfaces**: `GenerateSphere(radius,segW,segH)`, `GenerateCube(halfExtents)`, `GeneratePlane(size)`. `GenerateSphere` reproduces the course `sphere_scene.cpp` vertex/index order **exactly** (default 32×16 → 450 verts / 868 tris) so rasterizer output matches the reference image pixel-for-pixel — do not "tidy" its ordering. `BuildBVH()` builds an optional `BVH`; `intersect(ray, worldMat, …)` is a CPU geometric query for **editor picking only** (not a render path — there is no CPU ray tracer). `SaveBinary`/`LoadBinary` are the `.mesh` format. **`UMesh::Resolve(ref)`** is the shared, cached asset resolver used by `.world` load and the editor: `ref` is either a procedural descriptor (`"Sphere r sw sh"` / `"Cube ..."` / `"Plane ..."`) or a content path it dispatches by extension (`.obj`→`UObjImporter`, `.fbx`→`UFbxImporter`, `.mesh`→`LoadBinary`). Meshes are shared across actors via `UMeshComponent` (whose `meshRef` string round-trips the descriptor/path).
 
-`Material` (Phong/Blinn-Phong, moved out of the deleted `USurface`): `ka` ambient, `kd` diffuse, `ks` specular, `shininess` exponent, `km` mirror reflectance, `emissive`, GL `texture` id + CPU-side `texData/texWidth/texHeight/texChannels` for sampling.
+`Material` (Phong/Blinn-Phong, moved out of the deleted `USurface`): `ka` ambient, `kd` diffuse, `ks` specular, `shininess` exponent, `km` mirror reflectance, `emissive`, GL `texture` id + CPU-side `texData/texWidth/texHeight/texChannels` (+ `diffuseTexPath`/`wrapMode`/`uvTiling`); `SampleDiffuse(uv)` is the CPU bilinear sampler (sRGB→linear) used by the raster path.
 
 ### Rasterizer (`Engine/Rasterizer`)
 
@@ -142,19 +148,23 @@ All engine source lives under `Engine/` and is compiled directly into each proje
 
 | Path | How it works |
 |------|--------------|
-| **Rasterizer** (Q1) | CPU `URasterizer` → `UFrameBuffer` → `glDrawPixels`. Flat albedo or depth-debug view. |
-| **GPU mesh ray trace** (`UMeshRayTracer`) | Fullscreen-quad `#version 330` fragment shader casts one camera ray/pixel, Möller-Trumbore against a **world-space triangle TBO** (`samplerBuffer`, 7 texels/tri), **BVH-accelerated** (node + leaf-index TBOs), shaded with one point light + sky gradient. `UploadMesh` (demo) / `UploadWorld` (editor, parallel mesh/model/albedo arrays). `SetLight` animates the light without re-uploading geometry. |
-| **Hybrid** (`UHybridPass`) | CPU rasterizes primary visibility → `UGBuffer`, uploaded as float textures; a `#version 330` pass casts one **shadow ray/pixel** (Möller-Trumbore, BVH-accelerated) toward the light and shades Blinn-Phong. Upload scene triangles once per geometry change; G-buffer re-uploaded per frame. |
+| **Rasterizer** (Q1, also the editor's default viewport + the lit `RasterShaded`) | CPU `URasterizer` → `UFrameBuffer` → `glDrawPixels` / viewport texture. Flat/Gouraud/Phong Blinn-Phong + gamma, or depth-debug. `RasterShaded` is **multithreaded**: scene triangles are partitioned across workers into per-thread framebuffers (setup once per triangle), then merged by nearest depth. |
+| **GPU mesh ray trace** (`UMeshRayTracer`) | Fullscreen-quad `#version 330` fragment shader casts one camera ray/pixel, Möller-Trumbore, **two-level BVH (instancing)**: per-mesh BLAS built once in **mesh-local** space (cached by mesh identity), concatenated into shared TBOs; a per-instance record (inverse model, BLAS offsets, world AABB, albedo/km/texLayer) + a **TLAS** (BVH over instance AABBs) let a moving object rewrite only the small instance/TLAS buffer instead of rebuilding the whole tree. Blinn-Phong direct + hemisphere GI + sky (HDRI or gradient) + one mirror bounce. `UploadWorld` (editor/game), `SetLights`/`SetSky`/`SetGI`/`SetShadow`/`SetQuality` are per-frame. |
+| **Hybrid** (`UHybridPass`) | CPU rasterizes primary visibility → `UGBuffer`, uploaded as float textures; a `#version 330` pass casts shadow/GI rays against a **single world-space BVH** (uploaded once per geometry change) and shades Blinn-Phong. G-buffer re-uploaded per frame. |
 
-`RTShading.h` holds shared GLSL shading snippets; `URay.h` is the CPU ray struct.
+`RTShading.h` is the **single source of truth** for lighting: `skyColor`/`gradientSky`, `directLight` (lights + slope-scaled-bias shadow rays), `shadeSurface` (ambient/GI + direct), `tonemap`, GI helpers. It is concatenated into BOTH GPU passes. Two functions are **declared as prototypes here but defined per pass** so the two BVH layouts can differ: `occluded(...)` (Hybrid = single world BVH, GPU RT = two-level) and `giSampleRadiance(...)` (GPU RT path-traces `uGIBounces`, Hybrid = AO only). `URay.h` is the CPU ray struct. `UWorldRenderer` wraps all three modes to render a `UWorld` into the bound framebuffer (used by `GameEngine`; the editor has its own copy of the dispatch).
 
 ### Acceleration & threading
 
-`BVH` (`Engine/Acceleration`) is built in **mesh-local** space (median split on the longest axis) with **stack-based** (non-recursive) slab traversal so it ports 1:1 to GLSL. 32-byte `BVHNode` packs leaf/inner via the sign of `rightOrTriCount`. Consumed by `UMesh::intersect` (picking) and both GPU passes. `ThreadPool` (`Engine/Threading`, header-only) is a fixed worker pool; `ParallelForChunks(count, fn)` splits a range into ~`size()*4` contiguous chunks (small ranges run inline). Worker threads **never touch GL**.
+`BVH` (`Engine/Acceleration`) is built in **mesh-local** space (median split on the longest axis) with **stack-based** (non-recursive) slab traversal so it ports 1:1 to GLSL. 32-byte `BVHNode` packs leaf/inner via the sign of `rightOrTriCount` (the GPU-RT TLAS reuses the same node layout for its instance BVH). Consumed by `UMesh::intersect` (picking) and both GPU passes. `ThreadPool` (`Engine/Threading`, header-only) is a fixed worker pool; `ParallelForChunks(count, fn)` splits a range into ~`size()*4` contiguous chunks (small ranges run inline). Worker threads **never touch GL**.
+
+### Serialization & assets (`Engine/Serialization`)
+
+`FArchive` is a **bidirectional** archive — one `Serialize(ar)` method per type handles both save (`FSaveArchive`, accumulates `key = value`) and load (`FLoadArchive`, robust: missing/garbage → defaults, never crashes), so the two directions can't drift. `TFactory<Base>` + `REGISTER_ACTOR`/`REGISTER_COMPONENT` macros (Meyers-singleton tables) create types by `TypeName()` string. `FWorldSerializer` reads/writes `.world` (`[World]`/`[Camera]`/`[Actor]`(+`Parent`)/`[Component]`/`[Collision]`); on load it factory-creates actors/components, `Serialize`s them, attaches under the root, wires typed pointers (`mesh`, `ALight.lightComp`), and resolves the scene-graph hierarchy by parent name. `FIniFile` is a robust section parser (typed getters, comments) used for `Setting/*.ini`, `Config/Engine.ini`, and the render-settings profiles. **Serialized `TypeName()` strings are stable identifiers** — e.g. the light components serialize as `"PointLight"`/`"EnvLight"` even though the C++ classes were renamed `*Component`; don't change the strings or old `.world` files break.
 
 ### Geometry-upload caching
 
-The editor caches BVH + triangle TBO uploads keyed by a geometry **signature** (mesh identity + world transform + albedo — camera-independent), rebuilding only when that signature changes rather than every frame. The hybrid G-buffer raster + upload is camera-dependent and still runs each frame; only its shadow-ray BVH is cached. Mirror this pattern (`*UploadSig_` / `*Uploaded_`) when adding GPU geometry uploads.
+GPU geometry uploads are cached by a **signature** so static scenes don't rebuild every frame; during a drag only the cheap part re-uploads. **GPU RT (two-level)**: per-mesh BLAS is cached by mesh identity (built once); the concatenated BLAS TBOs + diffuse texture array are rebuilt only when `blasSig_` (mesh set + textures) changes; the small per-instance buffer + TLAS are rebuilt every `UploadWorld` call (cheap). The editor still gates the whole `UploadWorld` call by a `geomSig` (mesh + transform + albedo) so it only fires on change. **Hybrid**: the shadow-ray world-space triangle BVH is cached by geometry signature; the G-buffer raster + upload is camera-dependent and runs each frame. Mirror these patterns when adding GPU geometry uploads.
 
 ### Import (`Engine/Import`)
 
@@ -162,11 +172,16 @@ The editor caches BVH + triangle TBO uploads keyed by a geometry **signature** (
 
 ### Editor (`Engine/Editor`)
 
-`EditorEngine : Engine` overlays a Dear ImGui editor (Toolbar / World Outliner / Details / Viewport / Content Browser) on a live `UWorld`. ImGui is **vendored** under `Engine/Editor/External/imgui` (+ GLFW/OpenGL3 backends) and compiled into the build. Render modes 0=Rasterizer (CPU `outputImage` → texture), 1=GPU RT, 2=Hybrid (the latter two render into an FBO → `ImGui::Image`). **PIE**: Play deep-copies `editorWorld_` into `pieWorld_` (sharing `UMesh` assets) and runs `BeginPlay`; Stop reverts. Left-click ray-picks an actor; RMB-fly + WASD drives the editor camera.
+`EditorEngine : Engine` overlays a Dear ImGui editor (Toolbar / World Outliner / Details / Viewport / Content Browser / Render Settings) on a live `UWorld`. ImGui + **ImGuizmo** are vendored under `Engine/Editor/External/` and compiled in. Render modes 0=Rasterizer (lit `RasterShaded` → texture), 1=GPU RT, 2=Hybrid (the latter two render into an FBO → `ImGui::Image`). Key behaviors that span files:
+- **Undo/PIE clones**: Undo snapshots and Play both use an in-memory lossless `CopyWorld`/`CloneActor` (NOT serialization) that shares `UMesh` assets and **preserves the scene-graph hierarchy** (src→dst remap) and concrete light types. View settings (camera, render mode, shading) are kept out of undo. PIE (`Play (Window)`) saves to `Content/__pie.world` and spawns `argv0 --game` as a separate process.
+- **Outliner hierarchy**: drag an actor onto another to parent it (keeps world position; cycle-checked); tree collapse/expand; the gizmo converts edits into the parent-local transform.
+- **Content/ on import**: importing a mesh/texture (browser / inspector slot / OS drag-drop / drag onto the viewport) copies the source into `Content/` (`CopyToContent`, incl. OBJ `.mtl` + its textures) and stores an in-`Content` `meshRef`/`diffuseTexPath` so a reopened project resolves it.
+- **Render Settings** (`FRenderQuality`): two independent profiles, `editorRS_` (live viewport) and `gameRS_` (PIE/standalone), with `activeRS()` choosing by play state. Persisted to `Config/EditorSettings.ini` (`[Editor]`/`[Game]`) plus a standalone `Config/GameSettings.ini` that `UWorldRenderer` reads at game startup. Knobs: SSAA, ambient, GI samples/bounces/strength, reflection, shininess, shadow samples/softness.
+- Left-click ray-picks an actor; RMB-fly + WASD + wheel-zoom drives the editor camera; double-click in the outliner focuses.
 
 ### Lights & physics (`Engine/Light`, `Engine/Physics`)
 
-Lights (`PointLight`, `EnvironmentLight`, `LightComponent`) are preserved from the old engine; GPU shading should remain **Blinn-Phong for direct light and Unreal-style hemisphere sampling for environment/GI**, reusing the existing light info getters. Physics is now **component-based**: `UPrimitiveComponent` → `UShapeComponent` → `USphereComponent` / `UBoxComponent`, stepped by `UPhysicsWorld` (velocity/gravity/collision).
+Lights are `LightComponent`-derived scene components attached under an `ALight`'s root: `PointLightComponent` (position = world transform) and `EnvironmentLightComponent` (drives hemisphere **GI** + sky gradient: horizon/zenith/exp). GPU shading is **Blinn-Phong for direct light + Unreal-Lumen-style cosine-hemisphere GI for environment light** (with `uGIBounces` color-bleed in GPU RT). Note these classes serialize as `"PointLight"`/`"EnvLight"` (see Serialization). Physics is **component-based**: `UPrimitiveComponent` → `UShapeComponent` → `USphereComponent` / `UBoxComponent`, stepped by `UPhysicsWorld` (velocity/gravity/collision); a body can be **Static** (`bSimulate=false`: collides but immovable) and colliders have a scalable size + local offset (drawn as a green wireframe when the collision component is selected).
 
 ### Player (`Engine/Player`)
 
@@ -190,6 +205,9 @@ The shared property sheet (imported by all `.vcxproj` files):
 - **FCG matrix convention**: `FTransform`/`ACamera` use signed-negative `n`/`f` and a `[0 0 1 0]` projection bottom row, so `clip.w = z_eye` is **negative** for visible points and the perspective divide flips a vertex with `w ≥ 0`. This is why `nearClip` clips in clip space first. Do not swap in `glm::perspective`/`lookAt` — it breaks the course reference image.
 - **`GenerateSphere` ordering is load-bearing**: it matches `sphere_scene.cpp` vertex/index order exactly for pixel-for-pixel reference comparison. Don't reorder it.
 - **GPU passes are GL 3.3**: keep new GPU work as `#version 330` fragment shaders + `samplerBuffer` TBOs (not SSBO/compute) so it runs on the grading machine.
+- **`textureLod`, never `texture()`, in ray-traced/looped shader code**: inside divergent control flow (GI loops, reflection, any ray bounce) implicit-LOD `texture()` needs screen-space derivatives that are **undefined there and crash some drivers** (this was a real GPU-RT EnvLight+HDRI crash). Use `textureLod(s, uv, 0.0)`. Top-level per-pixel sampling is fine.
+- **Two GPU BVH layouts**: GPU RT is **two-level** (mesh-local BLAS + instance TLAS), Hybrid is **single world-space**. The shared `RTShading.h` therefore only *declares* `occluded()`/`giSampleRadiance()`; each pass *defines* them. Don't move a pass-specific definition back into the shared header.
+- **Rotation is in DEGREES**: `USceneComponent`/`composeTRS` and `glm::rotate` here take degrees (no `GLM_FORCE_RADIANS`); for the gizmo projection use `glm::frustum(cam.l,cam.r,cam.b,cam.t,cam.d,far)`, not `glm::perspective(radians(fov))` (treated as degrees → ~1° fov).
 - **C++17**: required engine-wide. The `/std:c++17` flag is set via `OpenglViewer.props` — do not remove it.
 - **`stb_image.h`**: single-header image loader at `include/stb_image.h`, tracked. Do not delete it.
 - **Standalone `*_test.cpp` are not in the VS build**: `Test.vcxproj` builds only `main.cpp`. Compile each `Test\*_test.cpp` individually with g++ (command in its header). Each has its own `main()`, so they cannot share a project.
