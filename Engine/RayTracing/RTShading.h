@@ -99,34 +99,15 @@ bool _slab(vec3 ro, vec3 invD, vec3 mn, vec3 mx, float tMax) {
     return enter <= exit;
 }
 
-// Any-hit occlusion up to maxT via stack-based BVH traversal. tMin ignores hits
-// closer than that along the ray -- essential for GI/AO rays, whose origin sits
-// on the surface: without it, grazing samples hit the originating mesh itself and
-// produce black self-occlusion speckles (acne).
-bool occluded(vec3 ro, vec3 rd, float maxT, float tMin) {
-    vec3 invD = 1.0 / rd;
-    int stack[64]; int sp = 0; stack[sp++] = 0;
-    while (sp > 0) {
-        int ni = stack[--sp];
-        vec4 a = texelFetch(uNodes, ni * 2 + 0);
-        vec4 b = texelFetch(uNodes, ni * 2 + 1);
-        if (!_slab(ro, invD, a.xyz, b.xyz, maxT)) continue;
-        int rc = int(b.w);
-        if (rc > 0) {                                   // leaf
-            int start = int(a.w);
-            for (int i = 0; i < rc; ++i) {
-                int ti = int(texelFetch(uTriIdx, start + i).x);
-                float t;
-                if (_rayTriT(ro, rd, triPos(ti,0), triPos(ti,1), triPos(ti,2), t)
-                    && t > tMin && t < maxT - 1e-3) return true;   // any-hit early out
-            }
-        } else if (sp + 2 <= 64) {                      // inner
-            stack[sp++] = int(a.w);
-            stack[sp++] = -rc;
-        }
-    }
-    return false;
-}
+// Any-hit occlusion up to maxT. tMin ignores hits closer than that along the ray
+// -- essential for GI/AO rays, whose origin sits on the surface: without it,
+// grazing samples hit the originating mesh itself and produce black self-
+// occlusion speckles (acne). The traversal DEFINITION is provided per render pass
+// (declared here so shadeSurface/directLight below can call it): the hybrid pass
+// traverses one world-space BVH; the GPU-RT pass traverses a two-level BVH
+// (instance loop -> per-mesh BLAS in local space) so moving an object never
+// rebuilds the whole tree. Only this prototype is shared.
+bool occluded(vec3 ro, vec3 rd, float maxT, float tMin);
 // Convenience: shadow rays use the default tiny bias.
 bool occluded(vec3 ro, vec3 rd, float maxT) { return occluded(ro, rd, maxT, 1e-4); }
 

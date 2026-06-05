@@ -195,13 +195,80 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag, const U
     fb_.Init(nx, ny);
     fb_.Clear(glm::vec3(0.0f));
 
+    // Gather drawable meshes once + a running triangle offset so threads can split
+    // the scene's triangles evenly (one big mesh must not land on a single thread).
+    struct Draw { const UMesh* mesh; FTransform xf; const Material* ov; int triBase; };
+    std::vector<Draw> draws;
+    int totalTris = 0;
     for (AActor* actor : scene.Actors)
     {
         UMeshComponent* comp = actor ? actor->mesh : nullptr;
         if (!comp || !comp->mesh) continue;
-        const Material* ov = comp->hasMaterialOverride ? &comp->materialOverride : nullptr;
-        const FTransform xf = ActorTransform(comp->GetWorldMatrix(), cam, nx, ny);
-        raster_.DrawMeshShaded(*comp->mesh, xf, ov, sp, flag.shading, fb_);
+        Draw d;
+        d.mesh    = comp->mesh;
+        d.ov      = comp->hasMaterialOverride ? &comp->materialOverride : nullptr;
+        d.xf      = ActorTransform(comp->GetWorldMatrix(), cam, nx, ny);
+        d.triBase = totalTris;
+        draws.push_back(d);
+        totalTris += comp->mesh->triangleCount();
+    }
+
+    // Thread count: bounded by the pool, a small cap, and a memory budget (each
+    // worker needs its own full framebuffer). Small scenes stay single-threaded.
+    const size_t fbBytes = (size_t)nx * ny * (sizeof(glm::vec3) + sizeof(float));
+    const int byMem   = fbBytes ? (int)((256ull << 20) / fbBytes) : 1;
+    const int nThreads = std::max(1, std::min({ multithread ? pool_.size() : 1, 8, byMem }));
+
+    if (nThreads > 1 && totalTris > 20000)
+    {
+        // Each worker rasterizes a contiguous slice of the scene's triangles into
+        // its OWN framebuffer (triangle setup happens exactly once -- no per-tile
+        // redundancy), then we merge by nearest depth. Buffers persist across frames.
+        if ((int)rasterParts_.size() != nThreads) rasterParts_.assign(nThreads, UFrameBuffer());
+        for (UFrameBuffer& f : rasterParts_)
+        { if (f.nx != nx || f.ny != ny) f.Init(nx, ny); else f.Clear(glm::vec3(0.0f)); }
+
+        const int per = (totalTris + nThreads - 1) / nThreads;
+        for (int t = 0; t < nThreads; ++t)
+        {
+            const int gBegin = t * per, gEnd = std::min(gBegin + per, totalTris);
+            if (gBegin >= gEnd) continue;
+            pool_.Submit([&, t, gBegin, gEnd]
+            {
+                UFrameBuffer& tf = rasterParts_[t];
+                for (const Draw& d : draws)
+                {
+                    const int dEnd = d.triBase + d.mesh->triangleCount();
+                    if (dEnd <= gBegin || d.triBase >= gEnd) continue;     // slice misses this mesh
+                    raster_.DrawMeshShaded(*d.mesh, d.xf, d.ov, sp, flag.shading, tf,
+                                           std::max(gBegin, d.triBase) - d.triBase,
+                                           std::min(gEnd, dEnd)        - d.triBase);
+                }
+            });
+        }
+        pool_.WaitAll();
+
+        // Merge the per-thread buffers into fb_ (nearest depth wins). Row-parallel.
+        pool_.ParallelForChunks(ny, [&](int y0, int y1)
+        {
+            for (int y = y0; y < y1; ++y)
+            for (int x = 0; x < nx; ++x)
+            {
+                const int idx = y * nx + x;
+                float best = fb_.depth[idx]; glm::vec3 col = fb_.color[idx];
+                for (int t = 0; t < nThreads; ++t)
+                {
+                    const UFrameBuffer& tf = rasterParts_[t];
+                    if (tf.depth[idx] < best) { best = tf.depth[idx]; col = tf.color[idx]; }
+                }
+                fb_.depth[idx] = best; fb_.color[idx] = col;
+            }
+        });
+    }
+    else
+    {
+        for (const Draw& d : draws)
+            raster_.DrawMeshShaded(*d.mesh, d.xf, d.ov, sp, flag.shading, fb_);
     }
 
     if (flag.depthView) { fb_.ToDepthImage(scene.outputImage); return; }

@@ -96,6 +96,10 @@ public:
     // Rasterize a mesh shaded with the given model + Blinn-Phong, writing the
     // gamma-corrected (gamma 2.2) lit color into fb (depth-tested). Uses the
     // mesh's per-triangle material slot when `mat` is null.
+    // triBegin..triEnd restrict the triangle range drawn (for multithreaded fill:
+    // partition the mesh's triangles across threads, each writing its OWN frame
+    // buffer -> merge by depth). Defaults draw the whole mesh.
     void DrawMeshShaded(const UMesh& mesh, const FTransform& xf, const Material* mat,
-                        const FShadeParams& sp, EShadingModel model, UFrameBuffer& fb) const;
+                        const FShadeParams& sp, EShadingModel model, UFrameBuffer& fb,
+                        int triBegin = 0, int triEnd = 0x7fffffff) const;
 };

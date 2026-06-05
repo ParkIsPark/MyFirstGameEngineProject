@@ -42,6 +42,7 @@
 #include <fstream>
 #include <filesystem>
 #include <algorithm>
+#include <functional>
 #include "stb_image.h"          // declaration only; impl lives in USkyHDRI.cpp
 
 namespace {
@@ -350,7 +351,10 @@ void EditorEngine::ImportAsset(const std::string& path)
 
     if (ext == ".world") { LoadWorld(path); return; }
 
-    UMesh* mesh = LoadMeshFile(path);
+    // Copy the source into Content/ so the project still resolves it next launch,
+    // then load from (and reference) the in-Content copy.
+    const std::string local = CopyToContent(path);
+    UMesh* mesh = LoadMeshFile(local);
     if (!mesh) { std::printf("[Editor] Import failed: %s\n", path.c_str()); return; }
 
     PushUndo();                              // capture pre-import state
@@ -359,7 +363,7 @@ void EditorEngine::ImportAsset(const std::string& path)
     a->name = stem;
     UMeshComponent* mc = new UMeshComponent();
     mc->mesh = mesh;
-    mc->meshRef = path;                       // file path (best-effort round-trip)
+    mc->meshRef = local;                      // in-Content path (round-trips on reload)
     a->SetMesh(mc);
 
     // Auto-frame: imported meshes keep their raw coordinates, which may be far
@@ -384,8 +388,9 @@ void EditorEngine::ImportAsset(const std::string& path)
     editorWorld_->Spawn(a);
     actorNames_.push_back(stem);
     selected_ = (int)editorWorld_->GetScene().Actors.size() - 1;
-    std::printf("[Editor] Imported %s (%d tris, fit scale %.3g)\n",
-                path.c_str(), mesh->triangleCount(), scale);
+    content_.clear(); ScanContent();          // show the newly copied asset
+    std::printf("[Editor] Imported %s -> %s (%d tris, fit scale %.3g)\n",
+                path.c_str(), local.c_str(), mesh->triangleCount(), scale);
 }
 
 // Load a mesh asset by path/descriptor. Imported meshes (.obj/.fbx/.mesh) are
@@ -449,9 +454,13 @@ AActor* EditorEngine::CloneActor(AActor* sa, bool resetPhysics)
     }
 
     da->name = sa->name;
-    da->SetActorLocation(sa->GetActorLocation());
-    da->SetActorRotation(sa->GetActorRotation());
-    da->SetActorScale   (sa->GetActorScale());
+    // Copy the RELATIVE transform directly (not GetActorLocation, which is world):
+    // parented actors must keep their local transform so re-attaching reproduces
+    // the same world position. CopyWorld re-establishes the parent links below.
+    da->rootComponent.relLocation = sa->rootComponent.relLocation;
+    da->rootComponent.relRotation = sa->rootComponent.relRotation;
+    da->rootComponent.relScale    = sa->rootComponent.relScale;
+    da->rootComponent.MarkDirty();
 
     if (sa->mesh)
     {
@@ -486,8 +495,24 @@ UWorld* EditorEngine::CopyWorld(UWorld& src, bool resetPhysics)
     dst->GetCamera() = src.GetCamera();                 // value copy of all camera fields
     dst->GetPhysics() = src.GetPhysics();               // floor/gravity settings
 
-    for (AActor* sa : src.GetScene().Actors)
-        dst->Spawn(CloneActor(sa, resetPhysics));
+    // Clone actors, remembering src->dst so the scene-graph hierarchy survives.
+    std::vector<AActor*> srcActors = src.GetScene().Actors;
+    std::vector<AActor*> dstActors;
+    dstActors.reserve(srcActors.size());
+    for (AActor* sa : srcActors)
+    {
+        AActor* da = CloneActor(sa, resetPhysics);
+        dst->Spawn(da);
+        dstActors.push_back(da);
+    }
+    for (size_t i = 0; i < srcActors.size(); ++i)       // re-link parents by position
+    {
+        USceneComponent* sp = srcActors[i]->rootComponent.attachParent;
+        if (!sp || !sp->owner) continue;
+        for (size_t j = 0; j < srcActors.size(); ++j)
+            if (srcActors[j] == sp->owner)
+            { dstActors[i]->rootComponent.AttachTo(&dstActors[j]->rootComponent); break; }
+    }
     return dst;
 }
 
@@ -737,6 +762,91 @@ void EditorEngine::ScanContent()
         }
         break;                                   // first existing dir wins
     }
+}
+
+// Copy an imported file into Content/ (best-effort, never throws). OBJ sidecars
+// (.mtl + the textures it references) are copied too so the mesh keeps its
+// material on reload. Returns the in-Content path; falls back to the original.
+std::string EditorEngine::CopyToContent(const std::string& src)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (src.empty()) return src;
+    fs::path sp(src);
+    if (!fs::exists(sp, ec) || !fs::is_regular_file(sp, ec)) return src;   // descriptor/missing
+
+    fs::create_directories(contentDir_, ec);
+    const fs::path destDir = fs::path(contentDir_);
+    // Already inside Content/? keep the path as-is (avoid copying onto itself).
+    const fs::path spParent = fs::weakly_canonical(sp.parent_path(), ec);
+    const fs::path cdAbs    = fs::weakly_canonical(destDir, ec);
+    if (!ec && spParent == cdAbs) return src;
+
+    auto copyOne = [&](const fs::path& from) -> bool {
+        if (from.empty()) return false;
+        std::error_code e;
+        if (!fs::exists(from, e)) return false;
+        fs::copy_file(from, destDir / from.filename(), fs::copy_options::overwrite_existing, e);
+        return !e;
+    };
+
+    copyOne(sp);                                   // the asset itself
+
+    std::string ext = sp.extension().string();
+    for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+    if (ext == ".obj")
+    {
+        const fs::path srcDir = sp.parent_path();
+        std::ifstream of(sp);
+        std::string line;
+        while (std::getline(of, line))             // find mtllib references
+        {
+            std::istringstream ls(line); std::string tok; ls >> tok;
+            if (tok != "mtllib") continue;
+            std::string mtlName;
+            while (ls >> mtlName)                   // a line may list several
+            {
+                const fs::path mtl = srcDir / mtlName;
+                if (!copyOne(mtl)) continue;
+                std::ifstream mf(mtl);              // copy textures the .mtl maps
+                std::string mline;
+                while (std::getline(mf, mline))
+                {
+                    std::istringstream ms(mline); std::string mt; ms >> mt;
+                    if (mt.rfind("map_", 0) != 0 && mt != "bump" && mt != "disp") continue;
+                    std::string texName; std::getline(ms, texName);
+                    // last whitespace token = the file (skip option flags like -bm)
+                    size_t sp2 = texName.find_last_of(" \t");
+                    if (sp2 != std::string::npos) texName = texName.substr(sp2 + 1);
+                    size_t a = texName.find_first_not_of(" \t\r\n");
+                    if (a != std::string::npos) copyOne(srcDir / texName.substr(a));
+                }
+            }
+        }
+    }
+    return (destDir / sp.filename()).string();
+}
+
+void EditorEngine::SetActorParent(AActor* child, AActor* parent)
+{
+    if (!child || child == parent) return;
+    USceneComponent* newParent = parent ? &parent->rootComponent : nullptr;
+    if (child->rootComponent.attachParent == newParent) return;   // no-op
+    // Reject cycles: the new parent must not be the child or one of its descendants.
+    for (USceneComponent* p = newParent; p; p = p->attachParent)
+        if (p == &child->rootComponent) return;
+
+    PushUndo();
+    USceneComponent& rc = child->rootComponent;
+    const glm::vec3 worldPos = rc.GetWorldLocation();      // keep world position
+    rc.AttachTo(parent ? &parent->rootComponent : nullptr);
+    if (parent)
+        rc.relLocation = glm::vec3(glm::inverse(parent->rootComponent.GetWorldMatrix())
+                                   * glm::vec4(worldPos, 1.0f));
+    else
+        rc.relLocation = worldPos;
+    rc.MarkDirty();
+    rtUploaded_ = false; hybridUploaded_ = false;
 }
 
 void EditorEngine::Render()
@@ -1187,16 +1297,53 @@ void EditorEngine::DrawOutliner()
     ImGui::SameLine(); ImGui::TextDisabled("%d actors", (int)actors.size());
     ImGui::Separator();
 
+    // Index of an actor in the parallel actors/actorNames_ arrays.
+    auto indexOf = [&](AActor* a) -> int {
+        for (int i = 0; i < (int)actors.size(); ++i) if (actors[i] == a) return i;
+        return -1;
+    };
+
     int toDelete = -1;
-    for (int i = 0; i < (int)actors.size(); ++i)
+    AActor* reparentChild = nullptr; AActor* reparentParent = nullptr; bool doReparent = false;
+
+    // Recursive node draw: an actor's children are the actors whose root component
+    // is attached under this actor's root (the scene graph drives the tree). Tree
+    // nodes give free collapse/expand; moving a parent moves children via the
+    // attach chain.
+    std::function<void(AActor*)> drawNode = [&](AActor* a)
     {
-        const char* icon = actors[i]->mesh ? "[M]"
-                         : (dynamic_cast<ALight*>(actors[i]) ? "[L]" : "[*]");
+        const int i = indexOf(a);
+        if (i < 0) return;
+        std::vector<AActor*> kids;
+        for (AActor* o : actors)
+            if (o != a && o->rootComponent.attachParent == &a->rootComponent) kids.push_back(o);
+
+        const char* icon = a->mesh ? "[M]" : (dynamic_cast<ALight*>(a) ? "[L]" : "[*]");
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth
+                                 | ImGuiTreeNodeFlags_DefaultOpen;
+        if (selected_ == i) flags |= ImGuiTreeNodeFlags_Selected;
+        if (kids.empty())   flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+
         char label[160];
         std::snprintf(label, sizeof(label), "%s %s##act%d", icon, actorNames_[i].c_str(), i);
-        if (ImGui::Selectable(label, selected_ == i)) selected_ = i;
+        const bool open = ImGui::TreeNodeEx(label, flags);
+        if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) selected_ = i;
         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             FocusActor(i);                       // double-click -> fly camera to it
+
+        // Drag an actor onto another to parent it; the payload carries the pointer.
+        if (!playing_ && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+        {
+            ImGui::SetDragDropPayload("OUTLINER_ACTOR", &a, sizeof(AActor*));
+            ImGui::Text("%s", actorNames_[i].c_str());
+            ImGui::EndDragDropSource();
+        }
+        if (!playing_ && ImGui::BeginDragDropTarget())
+        {
+            if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("OUTLINER_ACTOR"))
+            { reparentChild = *(AActor**)pl->Data; reparentParent = a; doReparent = true; }
+            ImGui::EndDragDropTarget();
+        }
 
         if (!playing_ && ImGui::BeginPopupContextItem())
         {
@@ -1206,10 +1353,33 @@ void EditorEngine::DrawOutliner()
             if (ImGui::InputText("Name", cbBuf_, sizeof(cbBuf_), ImGuiInputTextFlags_EnterReturnsTrue))
             { PushUndo(); actorNames_[i] = cbBuf_; actors[i]->name = cbBuf_; ImGui::CloseCurrentPopup(); }
             ImGui::Separator();
+            if (a->rootComponent.attachParent && ImGui::MenuItem("Unparent"))
+            { reparentChild = a; reparentParent = nullptr; doReparent = true; }
             if (ImGui::MenuItem("Delete")) toDelete = i;
             ImGui::EndPopup();
         }
+
+        if (open && !kids.empty())
+        {
+            for (AActor* k : kids) drawNode(k);
+            ImGui::TreePop();
+        }
+    };
+
+    for (AActor* a : actors)
+        if (a && a->rootComponent.attachParent == nullptr) drawNode(a);
+
+    // Empty area below the tree = drop target to unparent (detach to world root).
+    ImGui::Dummy(ImVec2(-1.0f, std::max(20.0f, ImGui::GetContentRegionAvail().y)));
+    if (!playing_ && ImGui::BeginDragDropTarget())
+    {
+        if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("OUTLINER_ACTOR"))
+        { reparentChild = *(AActor**)pl->Data; reparentParent = nullptr; doReparent = true; }
+        ImGui::EndDragDropTarget();
     }
+
+    if (doReparent && reparentChild)               // deferred: applied after the tree
+        SetActorParent(reparentChild, reparentParent);
 
     if (toDelete >= 0)                              // deferred: never mutate mid-iteration
     {
@@ -1260,8 +1430,8 @@ void EditorEngine::DrawDetails()
     // ---- Actor (root) transform ----
     if (detailComp_ == 0)
     {
-        ImGui::SeparatorText("Transform (Actor)");
-        glm::vec3 loc = a->GetActorLocation();
+        ImGui::SeparatorText(a->rootComponent.attachParent ? "Transform (Actor, local)" : "Transform (Actor)");
+        glm::vec3 loc = a->rootComponent.relLocation;   // relative to parent (== world if unparented)
         if (ImGui::DragFloat3("Position", &loc.x, 0.05f))               a->SetActorLocation(loc);
         snap();
         glm::vec3 rot = a->GetActorRotation();
@@ -1322,9 +1492,9 @@ void EditorEngine::DrawDetails()
         {
             if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_MESH"))
             {
-                std::string p((const char*)pl->Data);
+                std::string p = CopyToContent(std::string((const char*)pl->Data));
                 if (UMesh* nm = LoadMeshFile(p))
-                { PushUndo(); mc->mesh = nm; mc->meshRef = p; rtUploaded_ = false; hybridUploaded_ = false; }
+                { PushUndo(); mc->mesh = nm; mc->meshRef = p; content_.clear(); ScanContent(); rtUploaded_ = false; hybridUploaded_ = false; }
             }
             ImGui::EndDragDropTarget();
         }
@@ -1332,8 +1502,11 @@ void EditorEngine::DrawDetails()
         {
             std::string p = FFileDialog::OpenAsset();
             if (!p.empty())
+            {
+                p = CopyToContent(p);
                 if (UMesh* nm = LoadMeshFile(p))
-                { PushUndo(); mc->mesh = nm; mc->meshRef = p; rtUploaded_ = false; hybridUploaded_ = false; }
+                { PushUndo(); mc->mesh = nm; mc->meshRef = p; content_.clear(); ScanContent(); rtUploaded_ = false; hybridUploaded_ = false; }
+            }
         }
         if (mc->mesh)
         {
@@ -1354,13 +1527,13 @@ void EditorEngine::DrawDetails()
             if (ImGui::BeginDragDropTarget())
             {
                 if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_TEX"))
-                { PushUndo(); LoadMaterialTexture(m, std::string((const char*)pl->Data)); }
+                { PushUndo(); LoadMaterialTexture(m, CopyToContent(std::string((const char*)pl->Data))); content_.clear(); ScanContent(); }
                 ImGui::EndDragDropTarget();
             }
             if (ImGui::IsItemClicked())
             {
                 std::string p = FFileDialog::OpenAsset();
-                if (!p.empty()) { PushUndo(); LoadMaterialTexture(m, p); }
+                if (!p.empty()) { PushUndo(); LoadMaterialTexture(m, CopyToContent(p)); content_.clear(); ScanContent(); }
             }
             if (!m.diffuseTexPath.empty() && ImGui::SmallButton("Clear Texture"))
             { PushUndo(); m.texData.clear(); m.texWidth = m.texHeight = 0; m.diffuseTexPath.clear(); }
@@ -1492,6 +1665,15 @@ void EditorEngine::DrawViewport()
         shown = true;
     }
 
+    // Drop a mesh from the Content Browser onto the viewport -> place it in the
+    // world (imports/copies into Content/ and spawns in front of the camera).
+    if (!playing_ && ImGui::BeginDragDropTarget())
+    {
+        if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_MESH"))
+            ImportAsset(std::string((const char*)pl->Data));
+        ImGui::EndDragDropTarget();
+    }
+
     if (shown)
     {
         // ---- transform gizmo (ImGuizmo) over the selected actor, editor only ----
@@ -1533,8 +1715,13 @@ void EditorEngine::DrawViewport()
 
             if (changed)
             {
+                // The gizmo edits the WORLD matrix; convert back to the parent's
+                // local space so a parented actor's relative TRS stays correct.
+                glm::mat4 local = model;
+                if (a->rootComponent.attachParent)
+                    local = glm::inverse(a->rootComponent.attachParent->GetWorldMatrix()) * model;
                 glm::vec3 t, r, s;
-                ImGuizmo::DecomposeMatrixToComponents(glm::value_ptr(model), &t.x, &r.x, &s.x);
+                ImGuizmo::DecomposeMatrixToComponents(glm::value_ptr(local), &t.x, &r.x, &s.x);
                 a->SetActorLocation(t);
                 a->SetActorRotation(r);
                 a->SetActorScale(s);

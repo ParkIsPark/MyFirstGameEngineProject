@@ -1,9 +1,12 @@
 #include "UMesh.h"
 #include "URay.h"
 #include "BVH.h"
+#include "UObjImporter.h"
+#include "UFbxImporter.h"
 
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <cctype>
 #include <cmath>
 #include <limits>
 #include <fstream>
@@ -270,7 +273,26 @@ UMesh* UMesh::Resolve(const std::string& ref)
     }
     else
     {
-        m = LoadBinary(ref.c_str());   // treat the ref as a content path
+        // Treat the ref as a content file path; dispatch by extension so imported
+        // .obj/.fbx assets round-trip when a saved world is reopened.
+        std::string ext;
+        size_t dot = ref.find_last_of('.');
+        if (dot != std::string::npos) ext = ref.substr(dot);
+        for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+
+        if (ext == ".obj")
+            m = UObjImporter::Load(ref.c_str());
+        else if (ext == ".fbx")
+        {
+            std::vector<UMesh*> parts = UFbxImporter::Load(ref.c_str());
+            if (!parts.empty())
+            {
+                m = parts[0];
+                for (size_t i = 1; i < parts.size(); ++i) delete parts[i];
+            }
+        }
+        else
+            m = LoadBinary(ref.c_str());   // .mesh binary
     }
     cache[ref] = m;                    // cache even nullptr (avoid re-resolving bad refs)
     return m;

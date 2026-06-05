@@ -295,10 +295,13 @@ namespace
 }
 
 void URasterizer::DrawMeshShaded(const UMesh& mesh, const FTransform& xf, const Material* matOverride,
-                                 const FShadeParams& sp, EShadingModel model, UFrameBuffer& fb) const
+                                 const FShadeParams& sp, EShadingModel model, UFrameBuffer& fb,
+                                 int triBegin, int triEnd) const
 {
     const glm::mat3 nrmM = glm::inverseTranspose(glm::mat3(xf.model));
-    const int nTri = mesh.triangleCount();
+    const int nTri  = mesh.triangleCount();
+    const int tLo   = std::max(0, triBegin);
+    const int tHi   = std::min(nTri, triEnd);
     const glm::vec3 invG(1.0f / 2.2f);
     const Material* curMat = nullptr;
 
@@ -359,7 +362,7 @@ void URasterizer::DrawMeshShaded(const UMesh& mesh, const FTransform& xf, const 
         }
     };
 
-    for (int tri = 0; tri < nTri; ++tri)
+    for (int tri = tLo; tri < tHi; ++tri)
     {
         const Material& M = matOverride ? *matOverride : mesh.materialForTri(tri);
         curMat = &M;

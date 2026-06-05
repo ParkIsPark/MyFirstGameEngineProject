@@ -16,10 +16,17 @@
 // Triangles are passed to the shader through a *texture buffer object* (TBO,
 // core since GL 3.1 / GLSL 1.40), NOT an SSBO. SSBOs need GL 4.3, which we must
 // not assume on the target (grading) machine -- the rest of the engine's GPU
-// shaders already target #version 330, so 3.3 is our baseline. Each triangle is
-// 7 RGBA32F texels: v0,v1,v2,n0,n1,n2,albedo (w unused). RGBA32F is a mandatory
-// texture-buffer format in 3.1+, unlike RGB32F.
-static const int TEXELS_PER_TRI = 8;   // v0..v2(.w=u), n0..n2(.w=v), (albedo,km), (texLayer)
+// shaders already target #version 330, so 3.3 is our baseline.
+//
+// TWO-LEVEL BVH (instancing). Triangles + per-mesh BVHs (BLAS) are stored ONCE in
+// MESH-LOCAL space, concatenated across the unique meshes (each mesh records a
+// node/tri/triIdx offset). A per-instance record holds the inverse model matrix
+// (to transform a ray into the mesh's local space), shading params, the mesh's
+// BLAS offsets, and a world-space AABB. Moving an object only rewrites the small
+// instance buffer -- the expensive BLAS build/upload is cached -- so dragging a
+// high-poly object no longer rebuilds the whole scene's tree every frame.
+static const int TEXELS_PER_TRI  = 6;   // v0..v2(.w=u), n0..n2(.w=v)  [LOCAL space]
+static const int TEXELS_PER_INST = 7;   // invM r0,r1,r2 | (albedo,km) | (layer,nodeOff,triOff,idxOff) | wbbMin | wbbMax
 
 static const char* VERT_SRC = R"GLSL(
 #version 330 core
@@ -39,6 +46,7 @@ out vec4 FragColor;
 uniform vec3  uEye, uU, uV, uW;
 uniform float uL, uR, uB, uT, uD;
 uniform int   uWidth, uHeight, uNumTris, uNumNodes;
+uniform int   uNumInstances;          // two-level BVH: instance count
 #define MAX_LIGHTS 8
 uniform int   uNumLights;
 uniform vec3  uLightPosArr[MAX_LIGHTS];
@@ -46,31 +54,56 @@ uniform vec3  uLightColorArr[MAX_LIGHTS];
 uniform vec3  uKs;                    // specular coefficient (per-tri albedo = diffuse)
 uniform float uShininess;             // Phong exponent
 uniform float uReflMul;               // global mirror-reflection multiplier
-uniform samplerBuffer uTris;          // 8 texels per triangle (see C++ side)
-uniform samplerBuffer uNodes;         // BVH: 2 texels per node (bbMin|left, bbMax|count)
-uniform samplerBuffer uTriIdx;        // BVH leaf -> triangle index (R32F)
-uniform sampler2DArray uTexArr;       // per-instance diffuse textures (layer in texel 7.x)
+uniform samplerBuffer uTris;          // 6 texels per triangle, MESH-LOCAL (concat BLAS)
+uniform samplerBuffer uNodes;         // concat BLAS nodes: 2 texels/node (bbMin|left, bbMax|count)
+uniform samplerBuffer uTriIdx;        // concat BLAS leaf -> mesh-local triangle index (R32F)
+uniform samplerBuffer uInstances;     // 7 texels per instance (see C++ side)
+uniform sampler2DArray uTexArr;       // per-instance diffuse textures (layer in instance.4.x)
 uniform int            uHasTex;
 
-vec3 triTexel(int tri, int slot) { return texelFetch(uTris, tri * 8 + slot).xyz; }
-vec3 triPos  (int tri, int slot) { return triTexel(tri, slot); }   // shadow accessor
+vec3 triTexel(int tri, int slot) { return texelFetch(uTris, tri * 6 + slot).xyz; }
+vec3 triPos  (int tri, int slot) { return triTexel(tri, slot); }
 
-// Diffuse albedo at a barycentric hit: textured (UV packed in pos.w/normal.w +
-// layer in texel 7.x) or the flat per-triangle albedo.
-vec3 hitAlbedo(int tri, float hu, float hv) {
-    vec3 base = triTexel(tri, 6);
-    int  li   = int(texelFetch(uTris, tri * 8 + 7).x);
-    if (uHasTex == 0 || li < 0) return base;
+// Instance record accessors (7 texels). r0..r2 = rows of the inverse model
+// matrix (world -> mesh-local point/vector transforms).
+vec4 instR0(int i)   { return texelFetch(uInstances, i * 7 + 0); }
+vec4 instR1(int i)   { return texelFetch(uInstances, i * 7 + 1); }
+vec4 instR2(int i)   { return texelFetch(uInstances, i * 7 + 2); }
+vec4 instMat(int i)  { return texelFetch(uInstances, i * 7 + 3); }  // (albedo.rgb, km)
+vec4 instOff(int i)  { return texelFetch(uInstances, i * 7 + 4); }  // (layer, nodeOff, triOff, idxOff)
+vec3 instMin(int i)  { return texelFetch(uInstances, i * 7 + 5).xyz; }
+vec3 instMax(int i)  { return texelFetch(uInstances, i * 7 + 6).xyz; }
+
+vec3 xfPoint(vec4 r0, vec4 r1, vec4 r2, vec3 p) {
+    return vec3(dot(r0.xyz, p) + r0.w, dot(r1.xyz, p) + r1.w, dot(r2.xyz, p) + r2.w);
+}
+vec3 xfDir(vec4 r0, vec4 r1, vec4 r2, vec3 d) {
+    return vec3(dot(r0.xyz, d), dot(r1.xyz, d), dot(r2.xyz, d));
+}
+// Local normal -> world normal = transpose(mat3(invModel)) * n.
+vec3 normalToWorld(vec4 r0, vec4 r1, vec4 r2, vec3 n) {
+    return vec3(r0.x*n.x + r1.x*n.y + r2.x*n.z,
+                r0.y*n.x + r1.y*n.y + r2.y*n.z,
+                r0.z*n.x + r1.z*n.y + r2.z*n.z);
+}
+
+// Diffuse albedo at a barycentric hit on instance `inst`, triangle `tri` (global
+// into the concatenated local triangle buffer). Textured (UV packed in the .w of
+// the position/normal texels + layer from the instance) or the flat albedo.
+vec3 hitAlbedo(int inst, int tri, float hu, float hv) {
+    vec4 m = instMat(inst);
+    int  li = int(instOff(inst).x);
+    if (uHasTex == 0 || li < 0) return m.xyz;
     float a = 1.0 - hu - hv;
-    float u = a * texelFetch(uTris, tri*8+0).w + hu * texelFetch(uTris, tri*8+1).w + hv * texelFetch(uTris, tri*8+2).w;
-    float v = a * texelFetch(uTris, tri*8+3).w + hu * texelFetch(uTris, tri*8+4).w + hv * texelFetch(uTris, tri*8+5).w;
+    float u = a * texelFetch(uTris, tri*6+0).w + hu * texelFetch(uTris, tri*6+1).w + hv * texelFetch(uTris, tri*6+2).w;
+    float v = a * texelFetch(uTris, tri*6+3).w + hu * texelFetch(uTris, tri*6+4).w + hv * texelFetch(uTris, tri*6+5).w;
     return texture(uTexArr, vec3(u, v, float(li))).rgb;
 }
 )GLSL";
 
 static const char* FRAG_BODY = R"GLSL(
 // Closest-hit needs barycentrics (for normal interpolation), so it keeps its own
-// triangle test; the AABB slab + any-hit shadow come from the shared block.
+// triangle test; the AABB slab + ray-tri occlusion helpers come from the shared block.
 bool rayTri(vec3 ro, vec3 rd, vec3 v0, vec3 v1, vec3 v2,
             out float t, out float u, out float v) {
     vec3 e1 = v1 - v0;
@@ -86,32 +119,107 @@ bool rayTri(vec3 ro, vec3 rd, vec3 v0, vec3 v1, vec3 v2,
     t = dot(e2, q) * inv;           return t > 1e-4;
 }
 
-// Stack-based BVH closest-hit traversal (1:1 port of the CPU BVH).
-bool traceClosest(vec3 ro, vec3 rd, out float t, out int tri, out float u, out float v) {
-    vec3 invD = 1.0 / rd;
+// ---- BLAS traversal (one mesh, in its LOCAL space). nodeOff/triOff/idxOff are
+// the mesh's bases into the concatenated node / triangle / triIndex buffers. The
+// closest distance `t` is carried IN/OUT so it stays the global nearest across
+// instances (the local ray is the world ray pushed through invModel, so the same
+// parameter t is comparable in either space). ----
+bool blasClosest(vec3 lo, vec3 ld, int nodeOff, int triOff, int idxOff,
+                 inout float t, out int triHit, out float u, out float v) {
+    vec3 invD = 1.0 / ld;
     int stack[64]; int sp = 0; stack[sp++] = 0;
-    t = 1e30; tri = -1;
+    bool hit = false; triHit = -1;
     while (sp > 0) {
-        int ni = stack[--sp];
+        int ni = nodeOff + stack[--sp];
         vec4 a = texelFetch(uNodes, ni * 2 + 0);
         vec4 b = texelFetch(uNodes, ni * 2 + 1);
-        if (!_slab(ro, invD, a.xyz, b.xyz, t)) continue;
+        if (!_slab(lo, invD, a.xyz, b.xyz, t)) continue;
         int rc = int(b.w);
         if (rc > 0) {                                   // leaf
             int start = int(a.w);
             for (int i = 0; i < rc; ++i) {
-                int ti = int(texelFetch(uTriIdx, start + i).x);
+                int g = triOff + int(texelFetch(uTriIdx, idxOff + start + i).x);
                 float tt, uu, vv;
-                if (rayTri(ro, rd, triTexel(ti,0), triTexel(ti,1), triTexel(ti,2), tt, uu, vv) && tt < t) {
-                    t = tt; tri = ti; u = uu; v = vv;
+                if (rayTri(lo, ld, triTexel(g,0), triTexel(g,1), triTexel(g,2), tt, uu, vv) && tt < t) {
+                    t = tt; triHit = g; u = uu; v = vv; hit = true;
                 }
             }
         } else if (sp + 2 <= 64) {                      // inner
-            stack[sp++] = int(a.w);                      // left child
-            stack[sp++] = -rc;                           // right child
+            stack[sp++] = int(a.w);
+            stack[sp++] = -rc;
         }
     }
-    return tri >= 0;
+    return hit;
+}
+
+bool blasOccluded(vec3 lo, vec3 ld, int nodeOff, int triOff, int idxOff, float maxT, float tMin) {
+    vec3 invD = 1.0 / ld;
+    int stack[64]; int sp = 0; stack[sp++] = 0;
+    while (sp > 0) {
+        int ni = nodeOff + stack[--sp];
+        vec4 a = texelFetch(uNodes, ni * 2 + 0);
+        vec4 b = texelFetch(uNodes, ni * 2 + 1);
+        if (!_slab(lo, invD, a.xyz, b.xyz, maxT)) continue;
+        int rc = int(b.w);
+        if (rc > 0) {
+            int start = int(a.w);
+            for (int i = 0; i < rc; ++i) {
+                int g = triOff + int(texelFetch(uTriIdx, idxOff + start + i).x);
+                float tt;
+                if (_rayTriT(lo, ld, triTexel(g,0), triTexel(g,1), triTexel(g,2), tt)
+                    && tt > tMin && tt < maxT - 1e-3) return true;
+            }
+        } else if (sp + 2 <= 64) {
+            stack[sp++] = int(a.w);
+            stack[sp++] = -rc;
+        }
+    }
+    return false;
+}
+
+// ---- TLAS = a linear loop over instances (scenes have few objects). Each
+// instance is world-AABB rejected, then the ray is pushed into mesh-local space
+// and traced against the (cached) BLAS. Returns the global triangle + instance. ----
+bool traceClosest(vec3 ro, vec3 rd, out float t, out int tri, out float u, out float v, out int inst) {
+    vec3 invD = 1.0 / rd;
+    t = 1e30; tri = -1; inst = -1; bool found = false;
+    for (int i = 0; i < uNumInstances; ++i) {
+        if (!_slab(ro, invD, instMin(i), instMax(i), t)) continue;
+        vec4 r0 = instR0(i), r1 = instR1(i), r2 = instR2(i), off = instOff(i);
+        vec3 lo = xfPoint(r0, r1, r2, ro);
+        vec3 ld = xfDir  (r0, r1, r2, rd);
+        int th; float uu, vv;
+        if (blasClosest(lo, ld, int(off.y), int(off.z), int(off.w), t, th, uu, vv)) {
+            tri = th; u = uu; v = vv; inst = i; found = true;
+        }
+    }
+    return found;
+}
+
+// Two-level any-hit occlusion (shadow / GI rays). Definition for the prototype in
+// RTShading.h -- the shared shadeSurface/directLight call this.
+bool occluded(vec3 ro, vec3 rd, float maxT, float tMin) {
+    vec3 invD = 1.0 / rd;
+    for (int i = 0; i < uNumInstances; ++i) {
+        if (!_slab(ro, invD, instMin(i), instMax(i), maxT)) continue;
+        vec4 r0 = instR0(i), r1 = instR1(i), r2 = instR2(i), off = instOff(i);
+        vec3 lo = xfPoint(r0, r1, r2, ro);
+        vec3 ld = xfDir  (r0, r1, r2, rd);
+        if (blasOccluded(lo, ld, int(off.y), int(off.z), int(off.w), maxT, tMin)) return true;
+    }
+    return false;
+}
+
+// World-space shading attributes at a hit (transform local normals to world).
+vec3 hitNormal(int inst, int tri, float hu, float hv) {
+    vec4 r0 = instR0(inst), r1 = instR1(inst), r2 = instR2(inst);
+    vec3 ln = (1.0 - hu - hv) * triTexel(tri,3) + hu * triTexel(tri,4) + hv * triTexel(tri,5);
+    return normalize(normalToWorld(r0, r1, r2, ln));
+}
+vec3 hitFaceNormal(int inst, int tri) {
+    vec4 r0 = instR0(inst), r1 = instR1(inst), r2 = instR2(inst);
+    vec3 lng = cross(triTexel(tri,1) - triTexel(tri,0), triTexel(tri,2) - triTexel(tri,0));
+    return normalize(normalToWorld(r0, r1, r2, lng));
 }
 
 // GI sample radiance (GPU RT): uGIBounces<=0 -> ambient occlusion (sky or black);
@@ -124,13 +232,13 @@ vec3 giSampleRadiance(vec3 ro, vec3 dir) {
     vec3 thru = vec3(1.0), acc = vec3(0.0);
     vec3 o = ro, d = dir;
     for (int b = 0; b < uGIBounces; ++b) {
-        float t; int h; float u, v;
-        if (!traceClosest(o, d, t, h, u, v)) { acc += thru * skyColor(d); break; }
+        float t; int h; float u, v; int hi;
+        if (!traceClosest(o, d, t, h, u, v, hi)) { acc += thru * skyColor(d); break; }
         vec3 hp  = o + t * d;
-        vec3 hn  = normalize((1.0-u-v) * triTexel(h,3) + u * triTexel(h,4) + v * triTexel(h,5));
-        vec3 hng = normalize(cross(triTexel(h,1) - triTexel(h,0), triTexel(h,2) - triTexel(h,0)));
+        vec3 hn  = hitNormal(hi, h, u, v);
+        vec3 hng = hitFaceNormal(hi, h);
         if (dot(hng, hn) < 0.0) hng = -hng;
-        vec3 ha  = hitAlbedo(h, u, v);
+        vec3 ha  = hitAlbedo(hi, h, u, v);
         acc  += thru * directLight(hp, hn, ha);    // direct lighting at the bounce
         thru *= ha;                                // attenuate for the next bounce
         float r1 = _giHash(hp.xy + vec2(float(b) * 7.3, 1.7));
@@ -151,18 +259,15 @@ void main() {
 
     // Primary ray finds the visible surface; lighting + shadow is the SHARED
     // ray-traced pass (identical shadeSurface() as the hybrid renderer).
-    float closest; int hit; float hu, hv;
-    if (!traceClosest(ro, rd, closest, hit, hu, hv)) {
+    float closest; int hit; float hu, hv; int inst;
+    if (!traceClosest(ro, rd, closest, hit, hu, hv, inst)) {
         FragColor = vec4(tonemap(skyColor(rd)), 1.0); return;
     }
 
-    vec3 n0 = triTexel(hit, 3);
-    vec3 n1 = triTexel(hit, 4);
-    vec3 n2 = triTexel(hit, 5);
-    vec3 n  = normalize((1.0 - hu - hv) * n0 + hu * n1 + hv * n2);
-    vec3 ng = normalize(cross(triTexel(hit,1) - triTexel(hit,0), triTexel(hit,2) - triTexel(hit,0))); // face normal
-    vec3 albedo = hitAlbedo(hit, hu, hv);            // textured or flat diffuse
-    float km = texelFetch(uTris, hit * 8 + 6).w * uReflMul;   // mirror reflectance * global multiplier
+    vec3 n  = hitNormal(inst, hit, hu, hv);
+    vec3 ng = hitFaceNormal(inst, hit);              // world-space face normal
+    vec3 albedo = hitAlbedo(inst, hit, hu, hv);      // textured or flat diffuse
+    float km = instMat(inst).w * uReflMul;           // mirror reflectance * global multiplier
     vec3 hitPos = ro + closest * rd;
 
     vec3 col = shadeSurface(hitPos, n, albedo, ng);
@@ -172,12 +277,11 @@ void main() {
     if (km > 0.001) {
         vec3 rd2 = reflect(rd, n);
         vec3 ro2 = hitPos + n * (2e-3 + 1e-3 * length(hitPos - uEye));   // distance-scaled (no acne)
-        float c2; int hit2; float u2, v2;
+        float c2; int hit2; float u2, v2; int inst2;
         vec3 rcol;
-        if (traceClosest(ro2, rd2, c2, hit2, u2, v2)) {
-            vec3 rn = normalize((1.0 - u2 - v2) * triTexel(hit2,3) + u2 * triTexel(hit2,4) + v2 * triTexel(hit2,5));
-            vec3 rng = normalize(cross(triTexel(hit2,1) - triTexel(hit2,0), triTexel(hit2,2) - triTexel(hit2,0)));
-            rcol = shadeSurface(ro2 + c2 * rd2, rn, hitAlbedo(hit2, u2, v2), rng);
+        if (traceClosest(ro2, rd2, c2, hit2, u2, v2, inst2)) {
+            rcol = shadeSurface(ro2 + c2 * rd2, hitNormal(inst2, hit2, u2, v2),
+                                hitAlbedo(inst2, hit2, u2, v2), hitFaceNormal(inst2, hit2));
         } else {
             rcol = skyColor(rd2);
         }
@@ -233,52 +337,61 @@ void UMeshRayTracer::UploadMesh(const UMesh& mesh, const glm::mat4& model)
     mat_ = mesh.material;                      // restore ks/shininess for the demo path
 }
 
-void UMeshRayTracer::uploadTexels(const std::vector<glm::vec4>& texels)
+void UMeshRayTracer::uploadBufferTex(unsigned int& tbo, unsigned int& tex, unsigned int fmt,
+                                     const void* data, size_t bytes)
 {
-    if (!tbo_) glGenBuffers(1, &tbo_);
-    glBindBuffer(GL_TEXTURE_BUFFER, tbo_);
-    glBufferData(GL_TEXTURE_BUFFER,
-                 static_cast<GLsizeiptr>(texels.size() * sizeof(glm::vec4)),
-                 texels.data(), GL_STATIC_DRAW);
+    if (!tbo) glGenBuffers(1, &tbo);
+    glBindBuffer(GL_TEXTURE_BUFFER, tbo);
+    glBufferData(GL_TEXTURE_BUFFER, (GLsizeiptr)bytes, bytes ? data : nullptr, GL_STATIC_DRAW);
     glBindBuffer(GL_TEXTURE_BUFFER, 0);
-    if (!tex_) glGenTextures(1, &tex_);
-    glBindTexture(GL_TEXTURE_BUFFER, tex_);
-    glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, tbo_);
+    if (!tex) glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_BUFFER, tex);
+    glTexBuffer(GL_TEXTURE_BUFFER, fmt, tbo);
     glBindTexture(GL_TEXTURE_BUFFER, 0);
 }
 
-void UMeshRayTracer::uploadBVH(const BVH& bvh)
+// Build (once) and cache a mesh's BLAS: a mesh-LOCAL BVH plus the GPU texel arrays
+// (6 texels/triangle, 2/node, leaf->local-tri index) and the local AABB. Shared by
+// every instance of the mesh; never rebuilt while the mesh exists.
+const UMeshRayTracer::MeshBlas& UMeshRayTracer::ensureBlas(const UMesh& mesh)
 {
-    // nodes: 2 RGBA32F texels (bbMin | float(left), bbMax | float(count)).
-    std::vector<glm::vec4> nodeTexels;
-    nodeTexels.reserve(bvh.nodes.size() * 2);
+    auto it = blas_.find(&mesh);
+    if (it != blas_.end()) return it->second;
+
+    MeshBlas mb;
+    BVH bvh;
+    bvh.Build(mesh);
+    mb.numNodes = (int)bvh.nodes.size();
+    mb.numTris  = mesh.triangleCount();
+
+    mb.nodeTexels.reserve(bvh.nodes.size() * 2);
     for (const BVHNode& n : bvh.nodes)
     {
-        nodeTexels.emplace_back(n.bbMin, static_cast<float>(n.leftOrTriStart));
-        nodeTexels.emplace_back(n.bbMax, static_cast<float>(n.rightOrTriCount));
+        mb.nodeTexels.emplace_back(n.bbMin, (float)n.leftOrTriStart);
+        mb.nodeTexels.emplace_back(n.bbMax, (float)n.rightOrTriCount);
     }
-    numNodes_ = static_cast<int>(bvh.nodes.size());
-    if (!nodeTbo_) glGenBuffers(1, &nodeTbo_);
-    glBindBuffer(GL_TEXTURE_BUFFER, nodeTbo_);
-    glBufferData(GL_TEXTURE_BUFFER, static_cast<GLsizeiptr>(nodeTexels.size() * sizeof(glm::vec4)),
-                 nodeTexels.data(), GL_STATIC_DRAW);
-    glBindBuffer(GL_TEXTURE_BUFFER, 0);
-    if (!nodeTex_) glGenTextures(1, &nodeTex_);
-    glBindTexture(GL_TEXTURE_BUFFER, nodeTex_);
-    glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, nodeTbo_);
-    glBindTexture(GL_TEXTURE_BUFFER, 0);
+    mb.triIdx.assign(bvh.triIndices.begin(), bvh.triIndices.end());
 
-    // leaf -> triangle index (R32F).
-    std::vector<float> idx(bvh.triIndices.begin(), bvh.triIndices.end());
-    if (!idxTbo_) glGenBuffers(1, &idxTbo_);
-    glBindBuffer(GL_TEXTURE_BUFFER, idxTbo_);
-    glBufferData(GL_TEXTURE_BUFFER, static_cast<GLsizeiptr>(idx.size() * sizeof(float)),
-                 idx.data(), GL_STATIC_DRAW);
-    glBindBuffer(GL_TEXTURE_BUFFER, 0);
-    if (!idxTex_) glGenTextures(1, &idxTex_);
-    glBindTexture(GL_TEXTURE_BUFFER, idxTex_);
-    glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, idxTbo_);
-    glBindTexture(GL_TEXTURE_BUFFER, 0);
+    // 6 texels/triangle in MESH-LOCAL space (positions + normals, uv packed in .w).
+    mb.triTexels.reserve((size_t)mb.numTris * TEXELS_PER_TRI);
+    glm::vec3 mn(1e30f), mx(-1e30f);
+    for (int t = 0; t < mb.numTris; ++t)
+    {
+        const Vertex& a = mesh.vertices[mesh.indices[3 * t + 0]];
+        const Vertex& b = mesh.vertices[mesh.indices[3 * t + 1]];
+        const Vertex& c = mesh.vertices[mesh.indices[3 * t + 2]];
+        mb.triTexels.emplace_back(a.position, a.uv.x);
+        mb.triTexels.emplace_back(b.position, b.uv.x);
+        mb.triTexels.emplace_back(c.position, c.uv.x);
+        mb.triTexels.emplace_back(a.normal,   a.uv.y);
+        mb.triTexels.emplace_back(b.normal,   b.uv.y);
+        mb.triTexels.emplace_back(c.normal,   c.uv.y);
+    }
+    for (const Vertex& v : mesh.vertices) { mn = glm::min(mn, v.position); mx = glm::max(mx, v.position); }
+    if (mesh.vertices.empty()) { mn = glm::vec3(0.0f); mx = glm::vec3(0.0f); }
+    mb.bbMin = mn; mb.bbMax = mx;
+
+    return blas_.emplace(&mesh, std::move(mb)).first->second;
 }
 
 void UMeshRayTracer::UploadWorld(const std::vector<const UMesh*>& meshes,
@@ -291,89 +404,117 @@ void UMeshRayTracer::UploadWorld(const std::vector<const UMesh*>& meshes,
     SetLight(lightPos, lightColor);
     mat_.ks = glm::vec3(0.35f); mat_.shininess = 32.0f;
 
-    // Per-instance diffuse-texture layer (-1 = untextured). Distinct textured
-    // instances are resized into a common-size GL_TEXTURE_2D_ARRAY layer.
-    const int TS = 512;
-    std::vector<int>   instLayer(meshes.size(), -1);
-    std::vector<float> arrPixels;                       // TS*TS*3 floats per layer
-    int layers = 0;
+    // Signature of the cached (expensive) part: which meshes + which textures. When
+    // unchanged, only the cheap per-instance buffer is rebuilt below -- so moving an
+    // object never re-uploads the BLAS triangles/BVH (the source of drag stutter).
+    size_t sig = 1469598103934665603ull;
+    auto mix = [&](size_t v) { sig ^= v; sig *= 1099511628211ull; };
     for (size_t i = 0; i < meshes.size(); ++i)
     {
-        if (i >= mats.size() || !mats[i] || mats[i]->texData.empty()) continue;
-        const Material& mt = *mats[i];
-        const int tw = mt.texWidth, th = mt.texHeight, tc = mt.texChannels > 0 ? mt.texChannels : 3;
-        if (tw <= 0 || th <= 0) continue;
-        instLayer[i] = layers++;
-        for (int y = 0; y < TS; ++y)
-        for (int x = 0; x < TS; ++x)
-        {
-            const int sx = std::min(x * tw / TS, tw - 1);
-            const int sy = std::min(y * th / TS, th - 1);
-            const size_t si = ((size_t)sy * tw + sx) * tc;
-            float r = 0, g = 0, b = 0;
-            if (si + 2 < mt.texData.size()) { r = mt.texData[si] / 255.0f; g = mt.texData[si+1] / 255.0f; b = mt.texData[si+2] / 255.0f; }
-            else if (si < mt.texData.size()) { r = g = b = mt.texData[si] / 255.0f; }
-            // sRGB -> linear (matches CPU SampleDiffuse)
-            arrPixels.push_back(std::pow(r, 2.2f)); arrPixels.push_back(std::pow(g, 2.2f)); arrPixels.push_back(std::pow(b, 2.2f));
-        }
-    }
-    texLayers_ = layers;
-    if (layers > 0)
-    {
-        if (!texArr_) glGenTextures(1, &texArr_);
-        glBindTexture(GL_TEXTURE_2D_ARRAY, texArr_);
-        glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGB16F, TS, TS, layers, 0, GL_RGB, GL_FLOAT, arrPixels.data());
-        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+        mix((size_t)meshes[i]);
+        const Material* mt = (i < mats.size()) ? mats[i] : nullptr;
+        mix(mt ? mt->texData.size() : 0);
+        mix(mt ? (size_t)(mt->texWidth * 73856093 ^ mt->texHeight * 19349663) : 0);
     }
 
-    // Combine all instances into one world-space mesh (+ per-triangle albedo +
-    // mirror + texture layer), then build a BVH over it for GPU traversal.
-    UMesh combined;
-    std::vector<glm::vec3> triAlbedo;
-    std::vector<float>     triMirror;
-    std::vector<float>     triLayer;
+    if (!blasUploaded_ || sig != blasSig_)
+    {
+        // ---- Diffuse-texture array: one layer per textured instance. ----
+        const int TS = 512;
+        instLayer_.assign(meshes.size(), -1);
+        std::vector<float> arrPixels;
+        int layers = 0;
+        for (size_t i = 0; i < meshes.size(); ++i)
+        {
+            if (i >= mats.size() || !mats[i] || mats[i]->texData.empty()) continue;
+            const Material& mt = *mats[i];
+            const int tw = mt.texWidth, th = mt.texHeight, tc = mt.texChannels > 0 ? mt.texChannels : 3;
+            if (tw <= 0 || th <= 0) continue;
+            instLayer_[i] = layers++;
+            for (int y = 0; y < TS; ++y)
+            for (int x = 0; x < TS; ++x)
+            {
+                const int sx = std::min(x * tw / TS, tw - 1);
+                const int sy = std::min(y * th / TS, th - 1);
+                const size_t si = ((size_t)sy * tw + sx) * tc;
+                float r = 0, g = 0, b = 0;
+                if (si + 2 < mt.texData.size()) { r = mt.texData[si]/255.0f; g = mt.texData[si+1]/255.0f; b = mt.texData[si+2]/255.0f; }
+                else if (si < mt.texData.size()) { r = g = b = mt.texData[si]/255.0f; }
+                arrPixels.push_back(std::pow(r, 2.2f)); arrPixels.push_back(std::pow(g, 2.2f)); arrPixels.push_back(std::pow(b, 2.2f));
+            }
+        }
+        texLayers_ = layers;
+        if (layers > 0)
+        {
+            if (!texArr_) glGenTextures(1, &texArr_);
+            glBindTexture(GL_TEXTURE_2D_ARRAY, texArr_);
+            glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGB16F, TS, TS, layers, 0, GL_RGB, GL_FLOAT, arrPixels.data());
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
+            glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+        }
+
+        // ---- Concatenate every unique mesh's cached BLAS, recording offsets. ----
+        std::vector<glm::vec4> nodeAll, triAll;
+        std::vector<float>     idxAll;
+        meshOff_.clear();
+        for (size_t i = 0; i < meshes.size(); ++i)
+        {
+            if (!meshes[i] || meshOff_.count(meshes[i])) continue;     // unique meshes only
+            const MeshBlas& mb = ensureBlas(*meshes[i]);
+            MeshOff off;
+            off.nodeOff = (int)(nodeAll.size() / 2);
+            off.triOff  = (int)(triAll.size()  / TEXELS_PER_TRI);
+            off.idxOff  = (int)idxAll.size();
+            meshOff_[meshes[i]] = off;
+            nodeAll.insert(nodeAll.end(), mb.nodeTexels.begin(), mb.nodeTexels.end());
+            triAll.insert (triAll.end(),  mb.triTexels.begin(),  mb.triTexels.end());
+            idxAll.insert (idxAll.end(),  mb.triIdx.begin(),      mb.triIdx.end());
+        }
+        numTris_  = (int)(triAll.size()  / TEXELS_PER_TRI);
+        numNodes_ = (int)(nodeAll.size() / 2);
+        uploadBufferTex(tbo_,     tex_,     GL_RGBA32F, triAll.data(),  triAll.size()  * sizeof(glm::vec4));
+        uploadBufferTex(nodeTbo_, nodeTex_, GL_RGBA32F, nodeAll.data(), nodeAll.size() * sizeof(glm::vec4));
+        uploadBufferTex(idxTbo_,  idxTex_,  GL_R32F,    idxAll.data(),  idxAll.size()  * sizeof(float));
+
+        blasSig_ = sig; blasUploaded_ = true;
+    }
+
+    // ---- Per-instance records (rebuilt every call -- this is the cheap part). ----
+    std::vector<glm::vec4> inst;
+    inst.reserve(meshes.size() * TEXELS_PER_INST);
+    numInstances_ = 0;
     for (size_t i = 0; i < meshes.size(); ++i)
     {
         if (!meshes[i]) continue;
-        const UMesh& m = *meshes[i];
-        const glm::mat3 nrmM = glm::inverseTranspose(glm::mat3(models[i]));
-        const uint32_t base = static_cast<uint32_t>(combined.vertices.size());
-        for (const Vertex& v : m.vertices)
+        const MeshOff& off = meshOff_[meshes[i]];
+        const MeshBlas& mb = ensureBlas(*meshes[i]);
+        const glm::mat4 invM = glm::inverse(models[i]);
+        // rows of invM (point/vector world->local): localP = row . worldP (+ row.w)
+        inst.emplace_back(invM[0][0], invM[1][0], invM[2][0], invM[3][0]);
+        inst.emplace_back(invM[0][1], invM[1][1], invM[2][1], invM[3][1]);
+        inst.emplace_back(invM[0][2], invM[1][2], invM[2][2], invM[3][2]);
+        const glm::vec3 alb = (i < albedos.size()) ? albedos[i] : glm::vec3(0.8f);
+        const float km  = (i < mirrors.size()) ? mirrors[i] : 0.0f;
+        inst.emplace_back(alb, km);
+        inst.emplace_back((float)instLayer_[i], (float)off.nodeOff, (float)off.triOff, (float)off.idxOff);
+        // World-space AABB of the instance (transform the 8 local corners).
+        glm::vec3 wmn(1e30f), wmx(-1e30f);
+        for (int c = 0; c < 8; ++c)
         {
-            Vertex w;
-            w.position = glm::vec3(models[i] * glm::vec4(v.position, 1.0f));
-            w.normal   = glm::normalize(nrmM * v.normal);
-            w.uv       = v.uv;
-            combined.vertices.push_back(w);
+            const glm::vec3 corner((c & 1) ? mb.bbMax.x : mb.bbMin.x,
+                                   (c & 2) ? mb.bbMax.y : mb.bbMin.y,
+                                   (c & 4) ? mb.bbMax.z : mb.bbMin.z);
+            const glm::vec3 w = glm::vec3(models[i] * glm::vec4(corner, 1.0f));
+            wmn = glm::min(wmn, w); wmx = glm::max(wmx, w);
         }
-        for (uint32_t idx : m.indices) combined.indices.push_back(base + idx);
-        const float km = (i < mirrors.size()) ? mirrors[i] : 0.0f;
-        const float ly = (float)instLayer[i];
-        for (int t = 0; t < m.triangleCount(); ++t) { triAlbedo.push_back(albedos[i]); triMirror.push_back(km); triLayer.push_back(ly); }
+        inst.emplace_back(wmn, 0.0f);
+        inst.emplace_back(wmx, 0.0f);
+        ++numInstances_;
     }
-    numTris_ = combined.triangleCount();
-    combined.BuildBVH();
-
-    // Bake 8 texels per triangle (combined order; BVH leaves index into this).
-    // UVs are packed into the .w of the position (u) and normal (v) texels.
-    std::vector<glm::vec4> texels;
-    texels.reserve(static_cast<size_t>(numTris_) * TEXELS_PER_TRI);
-    for (int t = 0; t < numTris_; ++t)
-    {
-        const Vertex& a = combined.vertices[combined.indices[3 * t + 0]];
-        const Vertex& b = combined.vertices[combined.indices[3 * t + 1]];
-        const Vertex& c = combined.vertices[combined.indices[3 * t + 2]];
-        texels.emplace_back(a.position, a.uv.x); texels.emplace_back(b.position, b.uv.x); texels.emplace_back(c.position, c.uv.x);
-        texels.emplace_back(a.normal,   a.uv.y); texels.emplace_back(b.normal,   b.uv.y); texels.emplace_back(c.normal,   c.uv.y);
-        texels.emplace_back(triAlbedo[t], triMirror[t]);   // .w = mirror km
-        texels.emplace_back(triLayer[t], 0.0f, 0.0f, 0.0f); // .x = diffuse texture layer (-1=none)
-    }
-    uploadTexels(texels);
-    uploadBVH(*combined.bvh);
+    uploadBufferTex(instTbo_, instTex_, GL_RGBA32F, inst.data(), inst.size() * sizeof(glm::vec4));
 }
 
 void UMeshRayTracer::RenderFrame(const ACamera& cam, int width, int height) const
@@ -412,6 +553,9 @@ void UMeshRayTracer::RenderFrame(const ACamera& cam, int width, int height) cons
     glUniform1i(glGetUniformLocation(prog_, "uNodes"), 1);
     glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_BUFFER, idxTex_);
     glUniform1i(glGetUniformLocation(prog_, "uTriIdx"), 2);
+    glActiveTexture(GL_TEXTURE5); glBindTexture(GL_TEXTURE_BUFFER, instTex_);
+    glUniform1i(glGetUniformLocation(prog_, "uInstances"), 5);
+    glUniform1i(glGetUniformLocation(prog_, "uNumInstances"), numInstances_);
     glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D, skyTex_);
     glUniform1i(glGetUniformLocation(prog_, "uSky"), 7);
     glUniform1i(glGetUniformLocation(prog_, "uHasSky"), skyTex_ ? 1 : 0);
@@ -439,6 +583,8 @@ void UMeshRayTracer::Cleanup()
     if (nodeTbo_) { glDeleteBuffers(1, &nodeTbo_);  nodeTbo_ = 0; }
     if (idxTex_)  { glDeleteTextures(1, &idxTex_); idxTex_ = 0; }
     if (idxTbo_)  { glDeleteBuffers(1, &idxTbo_);  idxTbo_ = 0; }
+    if (instTex_) { glDeleteTextures(1, &instTex_); instTex_ = 0; }
+    if (instTbo_) { glDeleteBuffers(1, &instTbo_);  instTbo_ = 0; }
     if (texArr_)  { glDeleteTextures(1, &texArr_); texArr_ = 0; texLayers_ = 0; }
     if (vbo_)     { glDeleteBuffers(1, &vbo_);  vbo_  = 0; }
     if (vao_)     { glDeleteVertexArrays(1, &vao_); vao_ = 0; }

@@ -56,6 +56,7 @@ private:
     UFrameBuffer fb_;
     UGBuffer     gbuffer_;
     ThreadPool   pool_;                       // worker pool for the lit shading pass
+    std::vector<UFrameBuffer> rasterParts_;   // per-thread targets for parallel RasterShaded
     std::vector<ERenderStage> lastPlan_;
 
 public:

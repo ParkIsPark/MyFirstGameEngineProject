@@ -56,6 +56,34 @@ vec3 triPos(int tri, int slot) { return texelFetch(uTris, tri * 3 + slot).xyz; }
 )GLSL";
 
 static const char* FRAG_MAIN = R"GLSL(
+// Any-hit occlusion over the single world-space BVH (hybrid shadow rays). The
+// shared shadeSurface/directLight call occluded(); the GPU-RT pass defines a
+// two-level version instead.
+bool occluded(vec3 ro, vec3 rd, float maxT, float tMin) {
+    vec3 invD = 1.0 / rd;
+    int stack[64]; int sp = 0; stack[sp++] = 0;
+    while (sp > 0) {
+        int ni = stack[--sp];
+        vec4 a = texelFetch(uNodes, ni * 2 + 0);
+        vec4 b = texelFetch(uNodes, ni * 2 + 1);
+        if (!_slab(ro, invD, a.xyz, b.xyz, maxT)) continue;
+        int rc = int(b.w);
+        if (rc > 0) {                                   // leaf
+            int start = int(a.w);
+            for (int i = 0; i < rc; ++i) {
+                int ti = int(texelFetch(uTriIdx, start + i).x);
+                float t;
+                if (_rayTriT(ro, rd, triPos(ti,0), triPos(ti,1), triPos(ti,2), t)
+                    && t > tMin && t < maxT - 1e-3) return true;
+            }
+        } else if (sp + 2 <= 64) {                      // inner
+            stack[sp++] = int(a.w);
+            stack[sp++] = -rc;
+        }
+    }
+    return false;
+}
+
 // GI sample radiance (Hybrid): no traceClosest from the G-buffer, so this is
 // ambient occlusion only -- unoccluded directions gather the sky, occluded ones
 // contribute nothing (uGIBounces color-bleed is GPU-RT only).

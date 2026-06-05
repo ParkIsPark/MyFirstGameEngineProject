@@ -76,6 +76,13 @@ private:
     void SaveRenderSettings();            // members -> Config/EditorSettings.ini
     void DrawStatusBar(float x, float y, float w, float h);
     void ScanContent();
+    // Copy an imported asset (mesh/texture and its sidecars) into Content/ so the
+    // project still finds it on the next launch. Returns the in-Content path (or
+    // the original path if it is already inside Content/ or cannot be copied).
+    std::string CopyToContent(const std::string& src);
+    // Re-parent an actor in the scene graph (outliner drag-drop). Keeps the child's
+    // world position; parent==nullptr detaches to the world root. Rejects cycles.
+    void SetActorParent(AActor* child, AActor* parent);
     void EnsureViewportTex(int w, int h);
     void EnsureFBO(int w, int h);                 // FBO for the GPU render modes
     void RenderWorldGPU(int w, int h, int mode);  // mode 1=GPU RT, 2=Hybrid -> fbo_

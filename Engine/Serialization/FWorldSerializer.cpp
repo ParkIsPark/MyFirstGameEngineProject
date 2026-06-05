@@ -16,6 +16,8 @@
 
 #include <sstream>
 #include <fstream>
+#include <vector>
+#include <utility>
 
 namespace
 {
@@ -65,10 +67,17 @@ std::string FWorldSerializer::Save(UWorld& world)
         out += "[Actor]\n";
         {
             FSaveArchive a; std::string t = actor->TypeName();
-            a.Field("Type", t); actor->Serialize(a); out += a.str();
+            a.Field("Type", t); actor->Serialize(a);
+            // Parent actor name (scene-graph hierarchy); empty = world root.
+            std::string parentName;
+            if (actor->rootComponent.attachParent && actor->rootComponent.attachParent->owner)
+                parentName = actor->rootComponent.attachParent->owner->name;
+            a.Field("Parent", parentName);
+            out += a.str();
         }
         for (USceneComponent* c : actor->rootComponent.children)
         {
+            if (c->owner != actor) continue;     // skip child-actor roots (own [Actor] entries)
             out += "  [Component]\n";
             FSaveArchive a; std::string t = c->TypeName();
             a.Field("Type", t); c->Serialize(a); out += a.str();
@@ -109,6 +118,7 @@ UWorld* FWorldSerializer::Load(const std::string& text)
     UWorld* world = new UWorld();
     UScene& sc = world->GetScene();
     AActor* curActor = nullptr;
+    std::vector<std::pair<AActor*, std::string>> pendingParents;   // (child, parent name)
 
     auto flush = [&](const std::string& hdr, const std::string& body)
     {
@@ -140,6 +150,8 @@ UWorld* FWorldSerializer::Load(const std::string& text)
             AActor* act = FActorFactory::Create(type);
             if (!act) act = new AActor();
             act->Serialize(a);
+            std::string parentName; a.Field("Parent", parentName);
+            if (!parentName.empty()) pendingParents.push_back({ act, parentName });
             world->Spawn(act);
             curActor = act;
         }
@@ -202,6 +214,16 @@ UWorld* FWorldSerializer::Load(const std::string& text)
         }
     }
     flush(header, body);
+
+    // Wire scene-graph parents by name (relative transforms were saved as-is, so
+    // attaching reproduces the original world transforms).
+    for (auto& pp : pendingParents)
+    {
+        AActor* parent = nullptr;
+        for (AActor* a : sc.Actors) if (a && a->name == pp.second) { parent = a; break; }
+        if (parent && parent != pp.first)
+            pp.first->rootComponent.AttachTo(&parent->rootComponent);
+    }
 
     for (AActor* a : sc.Actors) if (a) a->rootComponent.MarkDirty();
     return world;

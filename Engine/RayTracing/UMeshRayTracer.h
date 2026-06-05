@@ -1,6 +1,7 @@
 #pragma once
 #include <glm/glm.hpp>
 #include <vector>
+#include <unordered_map>
 #include "Material.h"
 
 class UMesh;
@@ -54,18 +55,42 @@ public:
     bool ready() const { return prog_ != 0; }
 
 private:
-    void uploadTexels(const std::vector<glm::vec4>& texels);
-    void uploadBVH(const class BVH& bvh);
+    // Generic TBO (re)upload helpers (each owns a buffer + buffer-texture).
+    void uploadBufferTex(unsigned int& tbo, unsigned int& tex, unsigned int fmt,
+                         const void* data, size_t bytes);
+
+    // Per-mesh BLAS, built ONCE in mesh-local space and cached by mesh identity.
+    // Holds GPU-ready texel arrays so the concatenated upload is a plain append.
+    struct MeshBlas {
+        std::vector<glm::vec4> nodeTexels;   // 2 RGBA32F per BVH node
+        std::vector<float>     triIdx;       // leaf-order, MESH-LOCAL triangle indices
+        std::vector<glm::vec4> triTexels;    // 6 per triangle (local pos/normal, uv in .w)
+        int       numTris = 0, numNodes = 0;
+        glm::vec3 bbMin = glm::vec3(0.0f), bbMax = glm::vec3(0.0f);
+    };
+    struct MeshOff { int nodeOff = 0, triOff = 0, idxOff = 0; };  // bases into the concat buffers
+    const MeshBlas& ensureBlas(const UMesh& mesh);                // build/cache one mesh's BLAS
 
     unsigned int prog_  = 0;
     unsigned int vao_   = 0;
     unsigned int vbo_   = 0;
-    unsigned int tbo_   = 0;   // triangle texels (7/tri)
+    unsigned int tbo_   = 0;   // uTris: concatenated local triangle texels (6/tri)
     unsigned int tex_   = 0;
-    unsigned int nodeTbo_ = 0, nodeTex_ = 0;   // BVH nodes (2 texels/node)
-    unsigned int idxTbo_  = 0, idxTex_  = 0;   // BVH leaf -> triangle index (R32F)
+    unsigned int nodeTbo_ = 0, nodeTex_ = 0;   // uNodes: concatenated BLAS nodes (2 texels/node)
+    unsigned int idxTbo_  = 0, idxTex_  = 0;   // uTriIdx: concat leaf -> local triangle index (R32F)
+    unsigned int instTbo_ = 0, instTex_ = 0;   // uInstances: 7 texels/instance
     int          numTris_  = 0;
     int          numNodes_ = 0;
+    int          numInstances_ = 0;
+
+    // Two-level caches. blas_ is per-mesh (built once). The concatenated BLAS upload
+    // + texture array is rebuilt only when blasSig_ (the mesh set + textures) changes;
+    // the small instance buffer is rebuilt every call (cheap) so moving objects is fast.
+    std::unordered_map<const UMesh*, MeshBlas> blas_;
+    std::unordered_map<const UMesh*, MeshOff>  meshOff_;
+    size_t           blasSig_ = 0;
+    bool             blasUploaded_ = false;
+    std::vector<int> instLayer_;     // per-instance diffuse-texture layer (-1 = none)
     Material     mat_;         // material (ks/shininess) of the uploaded mesh
     std::vector<glm::vec3> lightPos_   = { glm::vec3(6.0f, 8.0f, 2.0f) };
     std::vector<glm::vec3> lightColor_ = { glm::vec3(1.0f) };
