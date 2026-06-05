@@ -41,6 +41,7 @@ Config/EditorSettings.ini
 # -------------------------------------------------------
 bin/Content/
 bin/Config/
+bin/Setting/
 bin/*.fbx
 bin/*.obj
 bin/*.world

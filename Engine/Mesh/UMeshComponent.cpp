@@ -25,6 +25,7 @@ void UMeshComponent::Serialize(FArchive& ar)
     USceneComponent::Serialize(ar);
     ar.Field("Mesh", meshRef);
     ar.Field("Material", materialRef);      // shared material asset (Content/x.material)
+    ar.Field("UVTiling", uvTiling);         // per-instance texture repeat
     ar.Field("HasMatOverride", hasMaterialOverride);
     if (hasMaterialOverride) materialOverride.Serialize(ar);
     if (ar.IsLoading())

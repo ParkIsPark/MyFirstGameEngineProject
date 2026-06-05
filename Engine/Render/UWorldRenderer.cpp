@@ -18,6 +18,16 @@
 #include "FRenderShowFlag.h"
 #include "FIniFile.h"
 
+// Env-Light actor-placed HDRI wins over the global UScene::skyHDRI.
+static std::string EffectiveSkyPath(UScene& scene)
+{
+    for (AActor* a : scene.Actors)
+        if (ALight* L = dynamic_cast<ALight*>(a))
+            if (auto* el = dynamic_cast<EnvironmentLightComponent*>(L->lightComp))
+                if (!el->skyTexPath.empty()) return el->skyTexPath;
+    return scene.skyHDRI;
+}
+
 void UWorldRenderer::Init()
 {
     worldRT_.Init();
@@ -38,7 +48,7 @@ void UWorldRenderer::renderRaster(UWorld& world, int w, int h)
 
     FRenderShowFlag flag;
     flag.shading = (EShadingModel)scene.shadingModel;
-    sky_.GetOrLoad(scene.skyHDRI);
+    sky_.GetOrLoad(EffectiveSkyPath(scene));
     raster_.RasterShaded(world, flag, &sky_);
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -56,6 +66,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
     std::vector<glm::vec3>    albedos;
     std::vector<float>        mirrors;
     std::vector<const Material*> mats;
+    std::vector<glm::vec2>    uvTilings;
     std::vector<glm::vec3>    lightPos, lightColor;
     for (AActor* a : scene.Actors)
     {
@@ -68,6 +79,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
                 albedos.push_back(mat.kd);
                 mirrors.push_back(glm::max(mat.km.x, glm::max(mat.km.y, mat.km.z)));
                 mats.push_back(&mat);
+                uvTilings.push_back(mc->uvTiling);
             }
         if (ALight* L = dynamic_cast<ALight*>(a))
             if (PointLightComponent* pl = dynamic_cast<PointLightComponent*>(L->lightComp))
@@ -88,7 +100,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
           size_t ts = mats[i] ? mats[i]->texData.size() : 0; mix(&ts, sizeof(ts)); }
     }
 
-    const unsigned int skyTex = sky_.GetOrLoad(scene.skyHDRI);
+    const unsigned int skyTex = sky_.GetOrLoad(EffectiveSkyPath(scene));
 
     // Game render profile (GI/shadow/reflection quality) -- loaded once from the
     // ini the editor wrote, so a packaged build honors the Game settings tab.
@@ -134,7 +146,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
     {
         if (!rtUp_ || geomSig != rtSig_)
         {
-            worldRT_.UploadWorld(meshes, models, albedos, lightPos[0], lightColor[0], mirrors, mats);
+            worldRT_.UploadWorld(meshes, models, albedos, lightPos[0], lightColor[0], mirrors, mats, uvTilings);
             rtSig_ = geomSig; rtUp_ = true;
         }
         worldRT_.SetLights(lightPos, lightColor);
@@ -182,7 +194,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
                 const int cy1 = std::min(cy0 + TILE - 1, h - 1);
                 for (size_t i = 0; i < meshes.size(); ++i)
                     rast_.DrawMeshGBuffer(*meshes[i], xfs[i], albedos[i], gbuf_,
-                                          cx0, cy0, cx1, cy1, /*countStats=*/false, mats[i]);
+                                          cx0, cy0, cx1, cy1, /*countStats=*/false, mats[i], uvTilings[i]);
             }
         });
 

@@ -30,6 +30,11 @@ public:
     std::string materialRef;
     Material*   sharedMaterial = nullptr;   // resolved from materialRef (not owned)
 
+    // Per-instance texture repeat (UV scale). This lives on the COMPONENT, not the
+    // (shared) material, so the same material can tile differently per object.
+    // 1 = stretch once; larger = repeat more. Applied on top of the mesh UVs.
+    glm::vec2 uvTiling = glm::vec2(1.0f);
+
     // The single material to render this mesh with, or nullptr to fall back to the
     // mesh's own per-triangle slots. Precedence: shared asset > override > slots.
     const Material* EffectiveOverride() const

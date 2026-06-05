@@ -90,7 +90,8 @@ public:
     void DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
                          const glm::vec3& albedo, UGBuffer& gb,
                          int cx0 = 0, int cy0 = 0, int cx1 = 0x7fffffff, int cy1 = 0x7fffffff,
-                         bool countStats = true, const Material* mat = nullptr) const;
+                         bool countStats = true, const Material* mat = nullptr,
+                         glm::vec2 uvScale = glm::vec2(1.0f)) const;
 
     // ---- CPU shaded raster (HW6 Q1-Q3) ----
     // Rasterize a mesh shaded with the given model + Blinn-Phong, writing the
@@ -101,5 +102,6 @@ public:
     // buffer -> merge by depth). Defaults draw the whole mesh.
     void DrawMeshShaded(const UMesh& mesh, const FTransform& xf, const Material* mat,
                         const FShadeParams& sp, EShadingModel model, UFrameBuffer& fb,
-                        int triBegin = 0, int triEnd = 0x7fffffff) const;
+                        int triBegin = 0, int triEnd = 0x7fffffff,
+                        glm::vec2 uvScale = glm::vec2(1.0f)) const;
 };

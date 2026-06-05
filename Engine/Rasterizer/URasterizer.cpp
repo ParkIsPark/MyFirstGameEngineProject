@@ -138,7 +138,7 @@ namespace
 void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
                                   const glm::vec3& albedo, UGBuffer& gb,
                                   int cx0, int cy0, int cx1, int cy1, bool countStats,
-                                  const Material* mat) const
+                                  const Material* mat, glm::vec2 uvScale) const
 {
     const glm::mat3 nrmM = glm::inverseTranspose(glm::mat3(xf.model));
     const int nTri = mesh.triangleCount();
@@ -193,7 +193,7 @@ void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
             if (textured)
             {
                 const glm::vec2 uv = (al * A.uv * iw0 + be * B.uv * iw1 + ga * C.uv * iw2) / pw;
-                alb = mat->SampleDiffuse(uv);
+                alb = mat->SampleDiffuse(uv * uvScale);
             }
             gb.TestAndSet(x, y, z, wp, wn, alb);
         }
@@ -296,7 +296,7 @@ namespace
 
 void URasterizer::DrawMeshShaded(const UMesh& mesh, const FTransform& xf, const Material* matOverride,
                                  const FShadeParams& sp, EShadingModel model, UFrameBuffer& fb,
-                                 int triBegin, int triEnd) const
+                                 int triBegin, int triEnd, glm::vec2 uvScale) const
 {
     const glm::mat3 nrmM = glm::inverseTranspose(glm::mat3(xf.model));
     const int nTri  = mesh.triangleCount();
@@ -353,7 +353,7 @@ void URasterizer::DrawMeshShaded(const UMesh& mesh, const FTransform& xf, const 
                     if (!curMat->texData.empty())
                     {
                         const glm::vec2 uv = (al * A.uv * iw0 + be * B.uv * iw1 + ga * C.uv * iw2) / pw;
-                        kd = curMat->SampleDiffuse(uv);
+                        kd = curMat->SampleDiffuse(uv * uvScale);
                     }
                     lin = shadeLinear(wp, wn, *curMat, sp, kd);
                 }
@@ -381,7 +381,7 @@ void URasterizer::DrawMeshShaded(const UMesh& mesh, const FTransform& xf, const 
         if (model == EShadingModel::Gouraud)
             for (int i = 0; i < 3; ++i)
                 v[i].col = shadeLinear(v[i].wp, glm::normalize(v[i].wn), M, sp,
-                                       textured ? M.SampleDiffuse(v[i].uv) : M.kd);
+                                       textured ? M.SampleDiffuse(v[i].uv * uvScale) : M.kd);
 
         const bool flat = (model == EShadingModel::Flat);
         glm::vec3 flatCol(0.0f);
@@ -391,7 +391,7 @@ void URasterizer::DrawMeshShaded(const UMesh& mesh, const FTransform& xf, const 
             glm::vec3 fn = glm::normalize(glm::cross(v[1].wp - v[0].wp, v[2].wp - v[0].wp));
             if (glm::dot(fn, v[0].wn + v[1].wn + v[2].wn) < 0.0f) fn = -fn; // outward
             const glm::vec2 cuv = (v[0].uv + v[1].uv + v[2].uv) / 3.0f;
-            flatCol = shadeLinear(cen, fn, M, sp, textured ? M.SampleDiffuse(cuv) : M.kd);
+            flatCol = shadeLinear(cen, fn, M, sp, textured ? M.SampleDiffuse(cuv * uvScale) : M.kd);
         }
 
         if (frustumCull && frustumReject(v[0].clip, v[1].clip, v[2].clip)) continue;

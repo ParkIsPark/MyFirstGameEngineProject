@@ -137,7 +137,8 @@ vec3 hitAlbedo(int inst, int tri, float hu, float hv) {
     float a = 1.0 - hu - hv;
     float u = a * texelFetch(uTris, tri*6+0).w + hu * texelFetch(uTris, tri*6+1).w + hv * texelFetch(uTris, tri*6+2).w;
     float v = a * texelFetch(uTris, tri*6+3).w + hu * texelFetch(uTris, tri*6+4).w + hv * texelFetch(uTris, tri*6+5).w;
-    return textureLod(uTexArr, vec3(u, v, float(li)), 0.0).rgb;   // explicit LOD: called from divergent ray code
+    vec2 tile = vec2(texelFetch(uInstances, inst*7+5).w, texelFetch(uInstances, inst*7+6).w);   // per-instance repeat
+    return textureLod(uTexArr, vec3(u * tile.x, v * tile.y, float(li)), 0.0).rgb;   // explicit LOD: divergent ray code
 }
 )GLSL";
 
@@ -475,7 +476,8 @@ void UMeshRayTracer::UploadWorld(const std::vector<const UMesh*>& meshes,
                                  const std::vector<glm::vec3>& albedos,
                                  const glm::vec3& lightPos, const glm::vec3& lightColor,
                                  const std::vector<float>& mirrors,
-                                 const std::vector<const Material*>& mats)
+                                 const std::vector<const Material*>& mats,
+                                 const std::vector<glm::vec2>& uvTilings)
 {
     SetLight(lightPos, lightColor);
     mat_.ks = glm::vec3(0.35f); mat_.shininess = 32.0f;
@@ -588,8 +590,9 @@ void UMeshRayTracer::UploadWorld(const std::vector<const UMesh*>& meshes,
             const glm::vec3 w = glm::vec3(models[i] * glm::vec4(corner, 1.0f));
             wmn = glm::min(wmn, w); wmx = glm::max(wmx, w);
         }
-        inst.emplace_back(wmn, 0.0f);
-        inst.emplace_back(wmx, 0.0f);
+        const glm::vec2 tiling = (i < uvTilings.size()) ? uvTilings[i] : glm::vec2(1.0f);
+        inst.emplace_back(wmn, tiling.x);   // texel 5: (worldAABBmin, uvTiling.x)
+        inst.emplace_back(wmx, tiling.y);   // texel 6: (worldAABBmax, uvTiling.y)
         boxes.push_back({ wmn, wmx, (wmn + wmx) * 0.5f, numInstances_ });
         ++numInstances_;
     }

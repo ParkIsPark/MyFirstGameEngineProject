@@ -197,7 +197,7 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag, const U
 
     // Gather drawable meshes once + a running triangle offset so threads can split
     // the scene's triangles evenly (one big mesh must not land on a single thread).
-    struct Draw { const UMesh* mesh; FTransform xf; const Material* ov; int triBase; };
+    struct Draw { const UMesh* mesh; FTransform xf; const Material* ov; glm::vec2 uv; int triBase; };
     std::vector<Draw> draws;
     int totalTris = 0;
     for (AActor* actor : scene.Actors)
@@ -207,6 +207,7 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag, const U
         Draw d;
         d.mesh    = comp->mesh;
         d.ov      = comp->EffectiveOverride();   // shared material asset > override > mesh slots
+        d.uv      = comp->uvTiling;               // per-instance texture repeat
         d.xf      = ActorTransform(comp->GetWorldMatrix(), cam, nx, ny);
         d.triBase = totalTris;
         draws.push_back(d);
@@ -242,7 +243,7 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag, const U
                     if (dEnd <= gBegin || d.triBase >= gEnd) continue;     // slice misses this mesh
                     raster_.DrawMeshShaded(*d.mesh, d.xf, d.ov, sp, flag.shading, tf,
                                            std::max(gBegin, d.triBase) - d.triBase,
-                                           std::min(gEnd, dEnd)        - d.triBase);
+                                           std::min(gEnd, dEnd)        - d.triBase, d.uv);
                 }
             });
         }
@@ -268,7 +269,7 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag, const U
     else
     {
         for (const Draw& d : draws)
-            raster_.DrawMeshShaded(*d.mesh, d.xf, d.ov, sp, flag.shading, fb_);
+            raster_.DrawMeshShaded(*d.mesh, d.xf, d.ov, sp, flag.shading, fb_, 0, 0x7fffffff, d.uv);
     }
 
     if (flag.depthView) { fb_.ToDepthImage(scene.outputImage); return; }

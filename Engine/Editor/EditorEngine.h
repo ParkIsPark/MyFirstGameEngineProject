@@ -76,6 +76,7 @@ private:
     void DrawViewport();
     void DrawContentBrowser();
     void DrawBuildLog();                  // background-build output panel
+    void DrawProjectSettings();           // set the DefaultWorld (Setting/DefaultEngine.ini)
     void DrawMaterialEditor();            // double-click a .material -> edit the shared asset
     bool DrawMaterialFields(Material& m); // shared kd/ks/shininess/mirror/texture widgets (returns changed)
     void DrawRenderSettings();            // AA / GI quality popup (persisted to ini)
@@ -108,6 +109,7 @@ private:
     bool showRenderSettings_ = false;
     bool showMatEditor_ = false;          // material editor window open
     std::string matEditPath_;             // Content path of the material being edited
+    bool showProjectSettings_ = false;    // Project Settings window open
     // Render settings (ini-persisted): independent Editor + Game profiles. The
     // editor viewport uses editorRS_, the played game (PIE + standalone) uses
     // gameRS_, so the editing view and the game can render differently.

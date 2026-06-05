@@ -31,7 +31,8 @@ public:
                      const std::vector<glm::vec3>&    albedos,
                      const glm::vec3& lightPos, const glm::vec3& lightColor,
                      const std::vector<float>& mirrors = {},          // per-instance km (0=matte)
-                     const std::vector<const Material*>& mats = {});  // per-instance material (diffuse texture)
+                     const std::vector<const Material*>& mats = {},   // per-instance material (diffuse texture)
+                     const std::vector<glm::vec2>& uvTilings = {});   // per-instance texture repeat
     void RenderFrame(const ACamera& cam, int width, int height) const;
     // Update the light(s) without re-uploading geometry (lights are per-frame
     // uniforms, not baked into the triangle buffer) -- lets callers cache the

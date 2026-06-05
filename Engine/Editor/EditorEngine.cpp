@@ -83,6 +83,17 @@ EditorEngine::~EditorEngine()
     for (UMesh* m : meshAssets_) delete m;   // UScene dtor deletes the actors
 }
 
+// The sky HDRI actually used: an Environment Light's actor-placed image wins over
+// the global UScene::skyHDRI (empty -> procedural gradient).
+static std::string EffectiveSkyPath(UWorld& w)
+{
+    for (AActor* a : w.GetScene().Actors)
+        if (ALight* L = dynamic_cast<ALight*>(a))
+            if (auto* el = dynamic_cast<EnvironmentLightComponent*>(L->lightComp))
+                if (!el->skyTexPath.empty()) return el->skyTexPath;
+    return w.GetScene().skyHDRI;
+}
+
 // ---------------------------------------------------------------------------
 void EditorEngine::BuildEditorWorld()
 {
@@ -443,6 +454,7 @@ AActor* EditorEngine::CloneActor(AActor* sa, bool resetPhysics)
         {
             auto* e = new EnvironmentLightComponent(el->LightColor, el->LightIntensity);
             e->horizonColor = el->horizonColor; e->zenithColor = el->zenithColor; e->skyExp = el->skyExp;
+            e->skyTexPath = el->skyTexPath;
             lc = e;
         }
         else if (sl->lightComp)
@@ -562,8 +574,15 @@ void EditorEngine::OnStartup()
 
     LoadRenderSettings();
     editorWorld_ = new UWorld();
-    BuildEditorWorld();
     ScanContent();
+
+    // Boot into the configured DefaultWorld (Project Settings) if it exists,
+    // otherwise the built-in demo scene.
+    std::string def;
+    { FIniFile ini; if (ini.LoadFromFile("Setting/DefaultEngine.ini")) def = ini.GetString("Startup", "DefaultWorld", ""); }
+    const std::string defPath = def.empty() ? std::string() : contentDir_ + "/" + def + ".world";
+    if (!def.empty() && std::filesystem::exists(defPath)) LoadWorld(defPath);
+    else                                                  BuildEditorWorld();
 
     // OS drag-drop of .obj/.fbx/.world files -> import into the editor world.
     glfwSetDropCallback(window_, &EditorEngine::dropTrampoline);
@@ -607,6 +626,7 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
     std::vector<glm::vec3>    albedos;
     std::vector<float>        mirrors;
     std::vector<const Material*> mats;
+    std::vector<glm::vec2>    uvTilings;
     std::vector<glm::vec3>    lightPos, lightColor;
     for (AActor* a : scene.Actors)
     {
@@ -619,6 +639,7 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
                 albedos.push_back(mat.kd);
                 mirrors.push_back(glm::max(mat.km.x, glm::max(mat.km.y, mat.km.z)));
                 mats.push_back(&mat);
+                uvTilings.push_back(mc->uvTiling);
             }
         if (ALight* L = dynamic_cast<ALight*>(a))
             if (PointLightComponent* pl = dynamic_cast<PointLightComponent*>(L->lightComp))
@@ -640,7 +661,7 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
           size_t ts = mats[i] ? mats[i]->texData.size() : 0; mix(&ts, sizeof(ts)); }
     }
 
-    const unsigned int skyTex = sky_.GetOrLoad(scene.skyHDRI);
+    const unsigned int skyTex = sky_.GetOrLoad(EffectiveSkyPath(world));   // env-light HDRI or global sky
 
     // Environment light -> hemisphere GI + sky gradient (drives both GPU passes).
     const FRenderQuality& rs = activeRS();                 // Editor vs Game profile
@@ -670,7 +691,7 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
     {
         if (!rtUploaded_ || geomSig != rtUploadSig_)   // skip when geometry static
         {
-            worldRT_.UploadWorld(meshes, models, albedos, lightPos[0], lightColor[0], mirrors, mats);
+            worldRT_.UploadWorld(meshes, models, albedos, lightPos[0], lightColor[0], mirrors, mats, uvTilings);
             rtUploadSig_ = geomSig; rtUploaded_ = true;
         }
         worldRT_.SetLights(lightPos, lightColor);    // all lights may move without geometry
@@ -725,7 +746,7 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
                 const int cy1 = std::min(cy0 + TILE - 1, h - 1);
                 for (size_t i = 0; i < meshes.size(); ++i)
                     rast_.DrawMeshGBuffer(*meshes[i], xfs[i], albedos[i], gbuf_,
-                                          cx0, cy0, cx1, cy1, /*countStats=*/false, mats[i]);
+                                          cx0, cy0, cx1, cy1, /*countStats=*/false, mats[i], uvTilings[i]);
             }
         });
 
@@ -923,6 +944,7 @@ void EditorEngine::DrawUI()
     if (showBuildLog_) DrawBuildLog();
     if (showRenderSettings_) DrawRenderSettings();
     if (showMatEditor_) DrawMaterialEditor();
+    if (showProjectSettings_) DrawProjectSettings();
     if (showDemo_) ImGui::ShowDemoWindow(&showDemo_);
 }
 
@@ -1087,6 +1109,8 @@ void EditorEngine::DrawMenuBar()
             ImGui::EndMenu();
         }
         ImGui::Separator();
+        if (ImGui::MenuItem("Project Settings...")) showProjectSettings_ = true;
+        ImGui::Separator();
         if (ImGui::MenuItem("Quit")) glfwSetWindowShouldClose(window_, GL_TRUE);
         ImGui::EndMenu();
     }
@@ -1094,16 +1118,6 @@ void EditorEngine::DrawMenuBar()
     {
         if (ImGui::MenuItem("Undo", "Ctrl+Z", false, !undoStack_.empty())) Undo();
         if (ImGui::MenuItem("Redo", "Ctrl+Y", false, !redoStack_.empty())) Redo();
-        ImGui::EndMenu();
-    }
-    if (ImGui::BeginMenu("World"))
-    {
-        std::string& sky = ActiveWorld().GetScene().skyHDRI;
-        ImGui::TextDisabled("Sky HDRI: %s", sky.empty() ? "(gradient)" : sky.c_str());
-        if (ImGui::MenuItem("Set Sky HDRI..."))
-        { std::string p = FFileDialog::OpenAsset(); if (!p.empty()) sky = p; }
-        if (ImGui::MenuItem("Clear Sky HDRI", nullptr, false, !sky.empty())) sky.clear();
-        ImGui::TextDisabled("(visible in GPU RT / Hybrid modes)");
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Build"))
@@ -1147,8 +1161,10 @@ void EditorEngine::DrawContentBrowser()
         ImGui::BeginGroup();
         ImGui::Button((std::string(e.icon) + "##icon").c_str(), ImVec2(74, 52));
 
-        // Mesh / Material / Texture assets are drag sources -> drop onto a slot.
-        if ((cat == "Mesh" || cat == "Material" || cat == "Texture") && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+        // Mesh / Material / Texture / HDRI assets are drag sources -> drop onto a
+        // slot. HDRI (.hdr) and Texture both drag as ASSET_TEX so an .hdr can be
+        // dropped onto an Environment Light's Sky Image slot.
+        if ((cat == "Mesh" || cat == "Material" || cat == "Texture" || cat == "HDRI") && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
         {
             std::string full = contentDir_ + "/" + e.name;
             const char* pl = cat == "Mesh" ? "ASSET_MESH" : cat == "Material" ? "ASSET_MAT" : "ASSET_TEX";
@@ -1162,7 +1178,7 @@ void EditorEngine::DrawContentBrowser()
             if      (cat == "World")    LoadWorld(contentDir_ + "/" + e.name);
             else if (cat == "Mesh")     ImportAsset(contentDir_ + "/" + e.name);
             else if (cat == "Material") { matEditPath_ = contentDir_ + "/" + e.name; showMatEditor_ = true; }
-            else if (cat == "HDRI")     editorWorld_->GetScene().skyHDRI = contentDir_ + "/" + e.name;
+            // HDRI: assign via an Environment Light's Sky Image slot (drag the .hdr there).
         }
         if (ImGui::BeginPopupContextItem("ctx"))
         {
@@ -1170,7 +1186,7 @@ void EditorEngine::DrawContentBrowser()
             if (cat == "Mesh"     && ImGui::MenuItem("Add to Scene"))  ImportAsset(contentDir_ + "/" + e.name);
             if (cat == "Material" && ImGui::MenuItem("Edit Material")) { matEditPath_ = contentDir_ + "/" + e.name; showMatEditor_ = true; }
             if (cat == "Material" && ImGui::MenuItem("Apply to Selected")) ApplyMaterialToSelected(contentDir_ + "/" + e.name);
-            if (cat == "HDRI"     && ImGui::MenuItem("Set as Sky"))    editorWorld_->GetScene().skyHDRI = contentDir_ + "/" + e.name;
+            if (cat == "HDRI") ImGui::TextDisabled("Drag onto an Env Light's Sky Image");
             if (ImGui::MenuItem("Rename")) { cbRename_ = i; std::snprintf(cbBuf_, sizeof(cbBuf_), "%s", e.name.c_str()); }
             if (ImGui::MenuItem("Delete")) toDelete = e.name;
             ImGui::EndPopup();
@@ -1290,6 +1306,54 @@ bool EditorEngine::DrawMaterialFields(Material& m)
     if (!m.diffuseTexPath.empty() && ImGui::SmallButton("Clear Texture"))
     { m.texData.clear(); m.texWidth = m.texHeight = 0; m.diffuseTexPath.clear(); ch = true; }
     return ch;
+}
+
+// Project Settings: choose the DefaultWorld loaded on editor startup (and by a
+// packaged game). Persisted to Setting/DefaultEngine.ini [Startup] DefaultWorld,
+// preserving the [Display]/[Render] sections FProjectDescriptor reads.
+void EditorEngine::DrawProjectSettings()
+{
+    namespace fs = std::filesystem;
+    static char buf[128];
+    ImGui::SetNextWindowSize(ImVec2(440, 190), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Project Settings", &showProjectSettings_))
+    {
+        if (ImGui::IsWindowAppearing())
+        {
+            FIniFile ini; std::string def;
+            if (ini.LoadFromFile("Setting/DefaultEngine.ini")) def = ini.GetString("Startup", "DefaultWorld", "");
+            std::snprintf(buf, sizeof(buf), "%s", def.c_str());
+        }
+        ImGui::TextDisabled("DefaultWorld: loaded on editor startup (and by a packaged game).");
+        ImGui::SetNextItemWidth(-1.0f);
+        ImGui::InputText("##defworld", buf, sizeof(buf));
+        if (ImGui::BeginCombo("Pick from Content", buf[0] ? buf : "(choose)"))
+        {
+            for (const ContentEntry& e : content_)
+                if (std::string(e.cat) == "World")
+                { const std::string stem = fs::path(e.name).stem().string();
+                  if (ImGui::Selectable(stem.c_str())) std::snprintf(buf, sizeof(buf), "%s", stem.c_str()); }
+            ImGui::EndCombo();
+        }
+        if (ImGui::SmallButton("Use Current World")) std::snprintf(buf, sizeof(buf), "%s", worldName_.c_str());
+        ImGui::Separator();
+        if (ImGui::Button("Save"))
+        {
+            FIniFile ini; ini.LoadFromFile("Setting/DefaultEngine.ini");   // preserve existing keys
+            const std::string title = ini.GetString("Display", "Title", "MyEngine Editor");
+            const int dw = ini.GetInt("Display", "Width", 1280), dh = ini.GetInt("Display", "Height", 800);
+            const std::string mode = ini.GetString("Render", "Mode", "Rasterizer");
+            std::error_code ec; fs::create_directories("Setting", ec);
+            std::ofstream f("Setting/DefaultEngine.ini");
+            if (f) f << "# Engine boot settings (edited via Project Settings).\n"
+                     << "[Display]\nTitle = " << title << "\nWidth = " << dw << "\nHeight = " << dh << "\n\n"
+                     << "[Render]\nMode = " << mode << "\n\n"
+                     << "[Startup]\nDefaultWorld = " << buf << "\n";
+            std::printf("[Editor] DefaultWorld = %s\n", buf);
+        }
+        ImGui::SameLine(); ImGui::TextDisabled("-> Setting/DefaultEngine.ini");
+    }
+    ImGui::End();
 }
 
 // Material editor window: edits the SHARED material asset (UMaterial::Resolve),
@@ -1645,6 +1709,12 @@ void EditorEngine::DrawDetails()
                 ImGui::SameLine(); if (ImGui::SmallButton("Clear"))
                 { PushUndo(); mc->materialRef.clear(); mc->sharedMaterial = nullptr; rtUploaded_ = false; hybridUploaded_ = false; }
             }
+
+            // Per-instance texture repeat (this object only, not the shared material).
+            glm::vec2 tiling = mc->uvTiling;
+            if (ImGui::DragFloat2("Texture Tiling", &tiling.x, 0.05f, 0.01f, 256.0f))
+            { mc->uvTiling = tiling; rtUploaded_ = false; hybridUploaded_ = false; }   // refresh GPU instance/G-buffer
+            snap();
             ImGui::Separator();
 
             if (mc->sharedMaterial)   // editing the shared asset -> affects every user
@@ -1718,10 +1788,31 @@ void EditorEngine::DrawDetails()
 
         if (auto* el = dynamic_cast<EnvironmentLightComponent*>(lc))
         {
+            // Sky image (HDRI / image): an actor-placed sky texture. Dropping or
+            // picking copies it into Content/ so it serializes with the world and
+            // is restored on reload. When set, it overrides the gradient + the
+            // global sky in every render mode.
+            ImGui::SeparatorText("Sky Image (HDRI)");
+            ImGui::Text("Image: %s", el->skyTexPath.empty() ? "(none -- gradient)" : el->skyTexPath.c_str());
+            ImGui::Button("Set Sky Image  (drop image / click)", ImVec2(-1, 0));
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_TEX"))
+                { PushUndo(); el->skyTexPath = CopyToContent(std::string((const char*)pl->Data)); content_.clear(); ScanContent(); }
+                ImGui::EndDragDropTarget();
+            }
+            if (ImGui::IsItemClicked())
+            {
+                std::string p = FFileDialog::OpenAsset();
+                if (!p.empty()) { PushUndo(); el->skyTexPath = CopyToContent(p); content_.clear(); ScanContent(); }
+            }
+            if (!el->skyTexPath.empty() && ImGui::SmallButton("Clear Sky Image")) { PushUndo(); el->skyTexPath.clear(); }
+            ImGui::Separator();
+
             ImGui::ColorEdit3("Sky Horizon", &el->horizonColor.x);  snap();
             ImGui::ColorEdit3("Sky Zenith",  &el->zenithColor.x);   snap();
             ImGui::DragFloat ("Sky Exponent", &el->skyExp, 0.02f, 0.05f, 8.0f); snap();
-            ImGui::TextDisabled("Drives hemisphere GI + sky (GPU RT / Hybrid)");
+            ImGui::TextDisabled("Drives hemisphere GI + sky (all render modes)");
         }
         else
             ImGui::TextDisabled("Position = actor transform (Root)");
@@ -1781,7 +1872,21 @@ void EditorEngine::DrawViewport()
 
     // Super-sample AA: render at ssaa_x resolution; the LINEAR-filtered Image draws
     // it back at screen size (downscale = antialiasing). UI/picking use screen w/h.
-    const int rw = w * activeRS().ssaa, rh = h * activeRS().ssaa;
+    int rw = w * activeRS().ssaa, rh = h * activeRS().ssaa;
+
+    // CPU-raster editor preview: cap the internal resolution. The software raster
+    // costs O(viewport pixels) PER FRAME (shading + sky fill + readback + upload)
+    // regardless of mesh count, so a large viewport tanks the editor frame rate --
+    // and at low FPS ImGui's trickled input makes Content-Browser DOUBLE-CLICK
+    // (e.g. to switch worlds) miss its timing while single-click menus still work.
+    // The linear-filtered Image upscales the capped buffer back to the viewport.
+    // (PIE / standalone game keep full resolution; GPU modes are not pixel-bound.)
+    if (effMode == 0 && !playing_)
+    {
+        const int CAP = 960;
+        const int m = std::max(rw, rh);
+        if (m > CAP) { rw = std::max(1, rw * CAP / m); rh = std::max(1, rh * CAP / m); }
+    }
 
     bool shown = false;
     if (effMode == 0)                                  // CPU lit rasterizer -> texture
@@ -1792,7 +1897,7 @@ void EditorEngine::DrawViewport()
         flag.shading         = (EShadingModel)scene.shadingModel;   // Flat/Gouraud/Phong (HW6)
         flag.depthView       = depthView_;
         flag.ambientStrength = activeRS().ambientStrength;
-        sky_.GetOrLoad(scene.skyHDRI);                 // ensure CPU sky pixels are loaded
+        sky_.GetOrLoad(EffectiveSkyPath(world));        // env-light HDRI or global sky
         renderer_.RasterShaded(world, flag, &sky_);   // editor sky for the raster background
         if (!scene.outputImage.empty())
         {

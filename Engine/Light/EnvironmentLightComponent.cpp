@@ -21,6 +21,7 @@ void EnvironmentLightComponent::Serialize(FArchive& ar)
     ar.Color("Horizon", horizonColor);
     ar.Color("Zenith",  zenithColor);
     ar.Field("SkyExp",  skyExp);
+    ar.Field("SkyTex",  skyTexPath);   // actor-placed HDRI image (Content path)
 }
 
 // ---------------------------------------------------------------------------
