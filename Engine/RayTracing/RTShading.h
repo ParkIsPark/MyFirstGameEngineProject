@@ -39,6 +39,12 @@ uniform int   uGISamples;   // hemisphere GI samples (0 = flat ambient)
 uniform vec3  uEnvTint;     // environment light color * intensity (scales GI)
 uniform int   uShadowSamples; // soft-shadow rays per light (1 = hard shadow)
 uniform float uShadowSoftness;// penumbra radius (light angular size)
+uniform int   uGIBounces;     // GI path bounces (1 = sky only; >1 = color bleed)
+
+// Radiance gathered along a GI sample ray (per-render-mode: GPU RT path-traces
+// uGIBounces bounces; Hybrid has no traceClosest -> sky-or-nothing). Declared
+// here so the shared shadeSurface can call it; defined by each pass.
+vec3 giSampleRadiance(vec3 ro, vec3 dir);
 
 // Procedural gradient sky (env-light colors). Used for the matte ambient term so
 // a flat (non-GI) surface never shows the HDRI image directly.
@@ -138,39 +144,10 @@ vec3 tonemap(vec3 c) {
 // Ng = geometric (face) normal, used for GI hemisphere + ray offset so samples
 // never dip below the real surface (the cause of GI self-occlusion acne when the
 // smooth/interpolated N differs from the face). N is still used for shading.
-vec3 shadeSurface(vec3 P, vec3 N, vec3 albedo, vec3 Ng) {
+// Direct Blinn-Phong lighting (all lights + their shadow rays), no ambient/GI.
+// Reused by shadeSurface and by GI bounce surfaces (avoids GI recursion).
+vec3 directLight(vec3 P, vec3 N, vec3 albedo) {
     vec3 Vv = normalize(uEye - P);
-    if (dot(Ng, N) < 0.0) Ng = -Ng;       // orient to the shading hemisphere
-
-    // Ambient / GI. With an EnvironmentLight (uGISamples>0) gather the environment
-    // over the cosine-weighted hemisphere with BVH occlusion (Unreal-Lumen-style:
-    // sky environment lighting + ambient occlusion), tinted by the env light.
-    // Otherwise a cheap flat sky term (HW6-style).
-    vec3 ambient;
-    if (uGISamples > 0) {
-        // Distance-scaled origin offset avoids self-intersection acne (the black
-        // speckles): triangle precision degrades with distance from the camera.
-        // Offset along the FACE normal so samples (upper hemisphere of Ng) never
-        // start below the surface; with that, only a tiny self-bias is needed, so
-        // real nearby occluders are still found (no light leaks in shadowed areas).
-        float eps = 2e-3 + 1e-3 * length(P - uEye);
-        vec3  ro  = P + Ng * eps;
-        vec3 gi = vec3(0.0);
-        for (int i = 0; i < uGISamples; ++i) {
-            float u1 = _giHash(gl_FragCoord.xy + vec2(float(i) * 1.7, float(i) * 3.1));
-            float u2 = _giHash(gl_FragCoord.yx + vec2(float(i) * 2.3, float(i) * 0.7));
-            vec3  d  = _giCosHemi(Ng, u1, u2);        // hemisphere about the FACE normal
-            if (dot(d, Ng) <= 0.0) continue;          // never sample below the surface
-            if (!occluded(ro, d, 1.0e9))              // unoccluded -> gather sky (tiny bias)
-                gi += skyColor(d);
-        }
-        ambient = albedo * (gi / float(uGISamples)) * uEnvTint;
-    } else {
-        // Matte ambient: soft gradient only (never the HDRI image directly -- the
-        // HDRI lights matte surfaces only through GI / mirror, and shows in the bg).
-        ambient = albedo * gradientSky(N) * 0.5;
-    }
-
     vec3 lit = vec3(0.0);
     for (int i = 0; i < uNumLights; ++i) {
         vec3  toL  = uLightPosArr[i] - P;
@@ -180,11 +157,8 @@ vec3 shadeSurface(vec3 P, vec3 N, vec3 albedo, vec3 Ng) {
         float NdotL = max(dot(N, L), 0.0);
         if (NdotL <= 0.0) continue;
 
-        // Shadow: a hard ray (1 sample) or soft penumbra (N jittered rays toward
-        // a disk around the light direction; fraction unoccluded = shadow factor).
-        // Slope-scaled, distance-scaled origin offset removes self-intersection acne
-        // (black dots) -- the bias grows near the terminator (small N.L) where the
-        // shadow ray skims the surface, and with distance (precision falls off).
+        // Slope/distance-scaled origin bias removes self-intersection acne; soft
+        // penumbra when uShadowSamples > 1 (jittered rays toward a disk).
         float sEps = (3e-3 + 1.5e-3 * length(P - uEye)) / max(NdotL, 0.2);
         vec3 ro = P + N * sEps;
         float shadow;
@@ -210,6 +184,34 @@ vec3 shadeSurface(vec3 P, vec3 N, vec3 albedo, vec3 Ng) {
         vec3  spec    = uKs * pow(NdotH, max(uShininess, 1.0));
         lit += (diffuse + spec) * uLightColorArr[i] * shadow;
     }
-    return ambient + lit;
+    return lit;
+}
+
+// THE lighting model: ambient/GI (hemisphere environment + AO, optionally with
+// uGIBounces color-bleed bounces) + direct light. Ng = geometric (face) normal,
+// used for the GI hemisphere + ray offset so samples never dip below the surface
+// (the cause of GI self-occlusion acne). N is used for shading.
+vec3 shadeSurface(vec3 P, vec3 N, vec3 albedo, vec3 Ng) {
+    if (dot(Ng, N) < 0.0) Ng = -Ng;       // orient to the shading hemisphere
+
+    vec3 ambient;
+    if (uGISamples > 0) {
+        float eps = 2e-3 + 1e-3 * length(P - uEye);
+        vec3  ro  = P + Ng * eps;
+        vec3 gi = vec3(0.0);
+        for (int i = 0; i < uGISamples; ++i) {
+            float u1 = _giHash(gl_FragCoord.xy + vec2(float(i) * 1.7, float(i) * 3.1));
+            float u2 = _giHash(gl_FragCoord.yx + vec2(float(i) * 2.3, float(i) * 0.7));
+            vec3  d  = _giCosHemi(Ng, u1, u2);        // hemisphere about the FACE normal
+            if (dot(d, Ng) <= 0.0) continue;          // never sample below the surface
+            gi += giSampleRadiance(ro, d);            // sky, or bounced surface radiance
+        }
+        ambient = albedo * (gi / float(uGISamples)) * uEnvTint;
+    } else {
+        // Matte ambient: soft gradient only (HDRI lights matte surfaces only via
+        // GI / mirror, and shows in the background).
+        ambient = albedo * gradientSky(N) * 0.5;
+    }
+    return ambient + directLight(P, N, albedo);
 }
 )GLSL";

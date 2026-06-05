@@ -617,21 +617,22 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
     const unsigned int skyTex = sky_.GetOrLoad(scene.skyHDRI);
 
     // Environment light -> hemisphere GI + sky gradient (drives both GPU passes).
+    const FRenderQuality& rs = activeRS();                 // Editor vs Game profile
     int giN = 0;
     glm::vec3 envTint(1.0f), horizon(0.10f, 0.12f, 0.16f), zenith(0.40f, 0.55f, 0.80f);
     float skyExp = 1.0f;
     for (AActor* a : scene.Actors)
         if (ALight* L = dynamic_cast<ALight*>(a))
             if (auto* el = dynamic_cast<EnvironmentLightComponent*>(L->lightComp))
-            { giN = giSamples_; envTint = el->LightColor * el->LightIntensity; horizon = el->horizonColor;
+            { giN = rs.giSamples; envTint = el->LightColor * el->LightIntensity; horizon = el->horizonColor;
               zenith = el->zenithColor; skyExp = el->skyExp; break; }
-    envTint *= giStrength_;                                // GI brightness (render setting)
-    worldRT_.SetGI(giN, envTint, horizon, zenith, skyExp);
-    hybrid_.SetGI(giN, envTint, horizon, zenith, skyExp);
-    worldRT_.SetQuality(reflStrength_, rtShininess_);      // reflection multiplier + RT shininess
-    hybrid_.SetQuality(rtShininess_);
-    worldRT_.SetShadow(shadowSamples_, shadowSoftness_);   // soft-shadow quality
-    hybrid_.SetShadow(shadowSamples_, shadowSoftness_);
+    envTint *= rs.giStrength;                              // GI brightness (render setting)
+    worldRT_.SetGI(giN, envTint, horizon, zenith, skyExp, rs.giBounces);
+    hybrid_.SetGI(giN, envTint, horizon, zenith, skyExp, rs.giBounces);
+    worldRT_.SetQuality(rs.reflStrength, rs.shininess);    // reflection multiplier + RT shininess
+    hybrid_.SetQuality(rs.shininess);
+    worldRT_.SetShadow(rs.shadowSamples, rs.shadowSoftness);   // soft-shadow quality
+    hybrid_.SetShadow(rs.shadowSamples, rs.shadowSoftness);
 
     EnsureFBO(w, h);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
@@ -846,25 +847,37 @@ void EditorEngine::DrawRenderSettings()
     ImGui::SetNextWindowSize(ImVec2(400, 320), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Render Settings", &showRenderSettings_))
     {
-        if (playing_) ImGui::TextColored(ImVec4(0.88f, 0.66f, 0.35f, 1), "PIE running -- settings frozen");
-        ImGui::BeginDisabled(playing_);          // frozen while playing the game
+        // Two independent profiles: the Editor tab drives the live viewport; the
+        // Game tab is what a packaged/PIE build runs (persisted to GameSettings.ini).
+        ImGui::TextUnformatted("Profile:");
+        ImGui::SameLine(); if (ImGui::RadioButton("Editor", rsTab_ == 0)) rsTab_ = 0;
+        ImGui::SameLine(); if (ImGui::RadioButton("Game",   rsTab_ == 1)) rsTab_ = 1;
+        ImGui::Separator();
+
+        // The Editor profile edits live; the Game profile is frozen mid-play.
+        const bool disabled = (rsTab_ == 1) && playing_;
+        if (disabled) ImGui::TextColored(ImVec4(0.88f, 0.66f, 0.35f, 1), "PIE running -- Game settings frozen");
+        ImGui::BeginDisabled(disabled);
+
+        FRenderQuality& rs = (rsTab_ == 0) ? editorRS_ : gameRS_;
         bool changed = false;
 
         if (ImGui::CollapsingHeader("Rasterization", ImGuiTreeNodeFlags_DefaultOpen))
         {
-            int aaIdx = (ssaa_ >= 2) ? 1 : 0;
+            int aaIdx = (rs.ssaa >= 2) ? 1 : 0;
             const char* aaItems[] = { "Off (1x)", "SSAA 2x" };
-            if (ImGui::Combo("Anti-Aliasing", &aaIdx, aaItems, 2)) { ssaa_ = (aaIdx == 1) ? 2 : 1; changed = true; }
-            changed |= ImGui::SliderFloat("Ambient Strength", &ambientStrength_, 0.0f, 3.0f);
+            if (ImGui::Combo("Anti-Aliasing", &aaIdx, aaItems, 2)) { rs.ssaa = (aaIdx == 1) ? 2 : 1; changed = true; }
+            changed |= ImGui::SliderFloat("Ambient Strength", &rs.ambientStrength, 0.0f, 3.0f);
         }
         if (ImGui::CollapsingHeader("Ray Tracing", ImGuiTreeNodeFlags_DefaultOpen))
         {
-            changed |= ImGui::SliderInt  ("GI Samples",        &giSamples_,   0, 32);
-            changed |= ImGui::SliderFloat("GI Strength",       &giStrength_,  0.0f, 3.0f);
-            changed |= ImGui::SliderFloat("Reflection Strength", &reflStrength_, 0.0f, 2.0f);
-            changed |= ImGui::SliderFloat("Shininess",         &rtShininess_, 1.0f, 256.0f);
-            changed |= ImGui::SliderInt  ("Shadow Samples",    &shadowSamples_, 1, 16);
-            changed |= ImGui::SliderFloat("Shadow Softness",   &shadowSoftness_, 0.0f, 0.3f);
+            changed |= ImGui::SliderInt  ("GI Samples",        &rs.giSamples,   0, 32);
+            changed |= ImGui::SliderInt  ("GI Bounces",        &rs.giBounces,   0, 4);
+            changed |= ImGui::SliderFloat("GI Strength",       &rs.giStrength,  0.0f, 3.0f);
+            changed |= ImGui::SliderFloat("Reflection Strength", &rs.reflStrength, 0.0f, 2.0f);
+            changed |= ImGui::SliderFloat("Shininess",         &rs.shininess, 1.0f, 256.0f);
+            changed |= ImGui::SliderInt  ("Shadow Samples",    &rs.shadowSamples, 1, 16);
+            changed |= ImGui::SliderFloat("Shadow Softness",   &rs.shadowSoftness, 0.0f, 0.3f);
         }
 
         ImGui::EndDisabled();
@@ -873,38 +886,75 @@ void EditorEngine::DrawRenderSettings()
     ImGui::End();
 }
 
+// Read one [section] of an FIniFile into an FRenderQuality, defaulting to q.
+static FRenderQuality ReadRenderQuality(FIniFile& ini, const char* sec, const FRenderQuality& def)
+{
+    FRenderQuality q = def;
+    q.giSamples      = ini.GetInt  (sec, "GISamples", q.giSamples);
+    q.giBounces      = ini.GetInt  (sec, "GIBounces", q.giBounces);
+    q.ssaa           = ini.GetInt  (sec, "SSAA", q.ssaa);
+    q.ambientStrength= ini.GetFloat(sec, "AmbientStrength", q.ambientStrength);
+    q.giStrength     = ini.GetFloat(sec, "GIStrength", q.giStrength);
+    q.reflStrength   = ini.GetFloat(sec, "ReflectionStrength", q.reflStrength);
+    q.shininess      = ini.GetFloat(sec, "Shininess", q.shininess);
+    q.shadowSamples  = ini.GetInt  (sec, "ShadowSamples", q.shadowSamples);
+    q.shadowSoftness = ini.GetFloat(sec, "ShadowSoftness", q.shadowSoftness);
+    if (q.shadowSamples < 1) q.shadowSamples = 1;  if (q.shadowSamples > 16) q.shadowSamples = 16;
+    if (q.giSamples < 0) q.giSamples = 0;          if (q.giSamples > 32) q.giSamples = 32;
+    if (q.giBounces < 0) q.giBounces = 0;          if (q.giBounces > 4)  q.giBounces = 4;
+    if (q.ssaa < 1) q.ssaa = 1;                     if (q.ssaa > 2) q.ssaa = 2;
+    return q;
+}
+
+// Write one FRenderQuality as an ini [section] body.
+static void WriteRenderQuality(std::ostream& f, const char* sec, const FRenderQuality& q)
+{
+    f << "[" << sec << "]\n"
+      << "GISamples = "          << q.giSamples       << "\n"
+      << "GIBounces = "          << q.giBounces       << "\n"
+      << "SSAA = "               << q.ssaa            << "\n"
+      << "AmbientStrength = "    << q.ambientStrength << "\n"
+      << "GIStrength = "         << q.giStrength      << "\n"
+      << "ReflectionStrength = " << q.reflStrength    << "\n"
+      << "Shininess = "          << q.shininess       << "\n"
+      << "ShadowSamples = "      << q.shadowSamples   << "\n"
+      << "ShadowSoftness = "     << q.shadowSoftness  << "\n";
+}
+
 void EditorEngine::LoadRenderSettings()
 {
+    // EditorSettings.ini holds BOTH profiles ([Editor] drives the viewport,
+    // [Game] mirrors GameSettings.ini for editing here). Legacy single-[Render]
+    // files are still read as the Editor profile so old configs keep working.
     FIniFile ini;
     if (!ini.LoadFromFile("Config/EditorSettings.ini")) return;
-    giSamples_       = ini.GetInt  ("Render", "GISamples", giSamples_);
-    ssaa_            = ini.GetInt  ("Render", "SSAA", ssaa_);
-    ambientStrength_ = ini.GetFloat("Render", "AmbientStrength", ambientStrength_);
-    giStrength_      = ini.GetFloat("Render", "GIStrength", giStrength_);
-    reflStrength_    = ini.GetFloat("Render", "ReflectionStrength", reflStrength_);
-    rtShininess_     = ini.GetFloat("Render", "Shininess", rtShininess_);
-    shadowSamples_   = ini.GetInt  ("Render", "ShadowSamples", shadowSamples_);
-    shadowSoftness_  = ini.GetFloat("Render", "ShadowSoftness", shadowSoftness_);
-    if (shadowSamples_ < 1) shadowSamples_ = 1;  if (shadowSamples_ > 16) shadowSamples_ = 16;
-    if (giSamples_ < 0) giSamples_ = 0;  if (giSamples_ > 32) giSamples_ = 32;
-    if (ssaa_ < 1) ssaa_ = 1;            if (ssaa_ > 2) ssaa_ = 2;
+    editorRS_ = ReadRenderQuality(ini, "Editor", editorRS_);
+    editorRS_ = ReadRenderQuality(ini, "Render", editorRS_);   // legacy fallback
+    gameRS_   = ReadRenderQuality(ini, "Game",   gameRS_);
 }
 
 void EditorEngine::SaveRenderSettings()
 {
     namespace fs = std::filesystem;
     std::error_code ec; fs::create_directories("Config", ec);
-    std::ofstream f("Config/EditorSettings.ini");
-    if (!f) return;
-    f << "# Editor render preferences (auto-saved).\n[Render]\n"
-      << "GISamples = "          << giSamples_       << "\n"
-      << "SSAA = "               << ssaa_            << "\n"
-      << "AmbientStrength = "    << ambientStrength_ << "\n"
-      << "GIStrength = "         << giStrength_      << "\n"
-      << "ReflectionStrength = " << reflStrength_    << "\n"
-      << "Shininess = "          << rtShininess_     << "\n"
-      << "ShadowSamples = "      << shadowSamples_   << "\n"
-      << "ShadowSoftness = "     << shadowSoftness_  << "\n";
+    // Both profiles live in the editor's own ini...
+    {
+        std::ofstream f("Config/EditorSettings.ini");
+        if (f) {
+            f << "# Editor render preferences (auto-saved). Two profiles:\n"
+                 "# [Editor] = live viewport, [Game] = packaged/PIE build.\n";
+            WriteRenderQuality(f, "Editor", editorRS_);
+            WriteRenderQuality(f, "Game",   gameRS_);
+        }
+    }
+    // ...and the Game profile is also written standalone for the shipped game.
+    {
+        std::ofstream f("Config/GameSettings.ini");
+        if (f) {
+            f << "# Game render settings consumed by the standalone build.\n";
+            WriteRenderQuality(f, "Render", gameRS_);
+        }
+    }
 }
 
 void EditorEngine::DrawMenuBar()
@@ -1412,7 +1462,7 @@ void EditorEngine::DrawViewport()
 
     // Super-sample AA: render at ssaa_x resolution; the LINEAR-filtered Image draws
     // it back at screen size (downscale = antialiasing). UI/picking use screen w/h.
-    const int rw = w * ssaa_, rh = h * ssaa_;
+    const int rw = w * activeRS().ssaa, rh = h * activeRS().ssaa;
 
     bool shown = false;
     if (effMode == 0)                                  // CPU lit rasterizer -> texture
@@ -1422,7 +1472,7 @@ void EditorEngine::DrawViewport()
         FRenderShowFlag flag;
         flag.shading         = (EShadingModel)scene.shadingModel;   // Flat/Gouraud/Phong (HW6)
         flag.depthView       = depthView_;
-        flag.ambientStrength = ambientStrength_;
+        flag.ambientStrength = activeRS().ambientStrength;
         sky_.GetOrLoad(scene.skyHDRI);                 // ensure CPU sky pixels are loaded
         renderer_.RasterShaded(world, flag, &sky_);   // editor sky for the raster background
         if (!scene.outputImage.empty())

@@ -56,6 +56,13 @@ vec3 triPos(int tri, int slot) { return texelFetch(uTris, tri * 3 + slot).xyz; }
 )GLSL";
 
 static const char* FRAG_MAIN = R"GLSL(
+// GI sample radiance (Hybrid): no traceClosest from the G-buffer, so this is
+// ambient occlusion only -- unoccluded directions gather the sky, occluded ones
+// contribute nothing (uGIBounces color-bleed is GPU-RT only).
+vec3 giSampleRadiance(vec3 ro, vec3 dir) {
+    return occluded(ro, dir, 1.0e9) ? vec3(0.0) : skyColor(dir);
+}
+
 void main() {
     ivec2 px = ivec2(gl_FragCoord.xy);
     float depth = texelFetch(uDepth, px, 0).r;
@@ -244,6 +251,7 @@ void UHybridPass::Render(const ACamera& cam, const std::vector<glm::vec3>& light
     glUniform1f (glGetUniformLocation(prog_, "uShininess"), shininess_);
     glUniform1i (glGetUniformLocation(prog_, "uShadowSamples"), shadowSamples_);
     glUniform1f (glGetUniformLocation(prog_, "uShadowSoftness"), shadowSoftness_);
+    glUniform1i (glGetUniformLocation(prog_, "uGIBounces"), giBounces_);
 
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texWP_);
     glUniform1i(glGetUniformLocation(prog_, "uWorldPos"), 0);

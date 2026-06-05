@@ -114,6 +114,33 @@ bool traceClosest(vec3 ro, vec3 rd, out float t, out int tri, out float u, out f
     return tri >= 0;
 }
 
+// GI sample radiance (GPU RT): uGIBounces<=0 -> ambient occlusion (sky or black);
+// otherwise path-trace up to uGIBounces diffuse bounces, each gathering the bounce
+// surface's direct lighting (color bleed), the final miss adding the sky.
+vec3 giSampleRadiance(vec3 ro, vec3 dir) {
+    if (uGIBounces <= 0)
+        return occluded(ro, dir, 1.0e9) ? vec3(0.0) : skyColor(dir);
+
+    vec3 thru = vec3(1.0), acc = vec3(0.0);
+    vec3 o = ro, d = dir;
+    for (int b = 0; b < uGIBounces; ++b) {
+        float t; int h; float u, v;
+        if (!traceClosest(o, d, t, h, u, v)) { acc += thru * skyColor(d); break; }
+        vec3 hp  = o + t * d;
+        vec3 hn  = normalize((1.0-u-v) * triTexel(h,3) + u * triTexel(h,4) + v * triTexel(h,5));
+        vec3 hng = normalize(cross(triTexel(h,1) - triTexel(h,0), triTexel(h,2) - triTexel(h,0)));
+        if (dot(hng, hn) < 0.0) hng = -hng;
+        vec3 ha  = hitAlbedo(h, u, v);
+        acc  += thru * directLight(hp, hn, ha);    // direct lighting at the bounce
+        thru *= ha;                                // attenuate for the next bounce
+        float r1 = _giHash(hp.xy + vec2(float(b) * 7.3, 1.7));
+        float r2 = _giHash(hp.zx + vec2(float(b) * 3.1, 2.9));
+        d = _giCosHemi(hng, r1, r2);
+        o = hp + hng * (2e-3 + 1e-3 * length(hp - uEye));
+    }
+    return acc;
+}
+
 void main() {
     // uL/uR/uB/uT already include the aspect ratio (ACamera::SetFOV bakes it into
     // l/r), matching the rasterizer's MakeProjFCG -- do NOT multiply by aspect again.
@@ -377,6 +404,7 @@ void UMeshRayTracer::RenderFrame(const ACamera& cam, int width, int height) cons
     glUniform1f (glGetUniformLocation(prog_, "uReflMul"), reflMul_);
     glUniform1i (glGetUniformLocation(prog_, "uShadowSamples"), shadowSamples_);
     glUniform1f (glGetUniformLocation(prog_, "uShadowSoftness"), shadowSoftness_);
+    glUniform1i (glGetUniformLocation(prog_, "uGIBounces"), giBounces_);
 
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_BUFFER, tex_);
     glUniform1i(glGetUniformLocation(prog_, "uTris"), 0);

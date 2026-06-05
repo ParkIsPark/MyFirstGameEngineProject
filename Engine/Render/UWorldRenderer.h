@@ -6,6 +6,7 @@
 #include "UGBuffer.h"
 #include "ThreadPool.h"
 #include "USkyHDRI.h"
+#include "FRenderQuality.h"
 
 class UWorld;
 
@@ -41,4 +42,7 @@ private:
     size_t rtSig_ = 0, hySig_ = 0;
     bool   rtUp_ = false, hyUp_ = false;
     bool   ready_ = false;
+
+    FRenderQuality quality_;          // Game render profile (Config/GameSettings.ini)
+    bool   qualityLoaded_ = false;
 };

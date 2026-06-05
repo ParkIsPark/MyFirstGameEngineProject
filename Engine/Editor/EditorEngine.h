@@ -7,6 +7,7 @@
 #include "UGBuffer.h"
 #include "URasterizer.h"
 #include "USkyHDRI.h"
+#include "FRenderQuality.h"
 #include "ThreadPool.h"
 #include "BuildManager.h"
 
@@ -91,15 +92,13 @@ private:
     bool showDemo_     = false;
     bool showBuildLog_ = false;
     bool showRenderSettings_ = false;
-    // Render settings (ini-persisted; live in editor, frozen during PIE).
-    int   giSamples_      = 8;    // RT: hemisphere GI samples (env light)
-    int   ssaa_           = 1;    // Raster+RT: super-sample AA factor (1 or 2)
-    float ambientStrength_= 1.0f; // Raster: environment ambient scale
-    float giStrength_     = 1.0f; // RT: GI brightness multiplier
-    float reflStrength_   = 1.0f; // RT: global mirror-reflection multiplier
-    float rtShininess_    = 32.0f;// RT: specular highlight exponent
-    int   shadowSamples_  = 1;    // RT: soft-shadow rays per light (1 = hard)
-    float shadowSoftness_ = 0.05f;// RT: penumbra radius
+    // Render settings (ini-persisted): independent Editor + Game profiles. The
+    // editor viewport uses editorRS_, the played game (PIE + standalone) uses
+    // gameRS_, so the editing view and the game can render differently.
+    FRenderQuality editorRS_;
+    FRenderQuality gameRS_;
+    int            rsTab_ = 0;    // Render Settings window: 0 = Editor, 1 = Game
+    FRenderQuality& activeRS() { return playing_ ? gameRS_ : editorRS_; }
     BuildManager buildMgr_;
     int  renderMode_ = 0;        // 0=Rasterizer 1=GPU RT 2=Hybrid
     bool depthView_  = false;    // CPU raster preview: grayscale depth instead of shade

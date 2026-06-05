@@ -44,8 +44,8 @@ public:
     void SetSky(unsigned int tex) { skyTex_ = tex; }
     // Environment light: GI sample count (0=off), tint, and sky gradient colors.
     void SetGI(int samples, const glm::vec3& tint, const glm::vec3& horizon,
-               const glm::vec3& zenith, float skyExp)
-    { giSamples_ = samples; envTint_ = tint; skyHorizon_ = horizon; skyZenith_ = zenith; skyExp_ = skyExp; }
+               const glm::vec3& zenith, float skyExp, int bounces = 1)
+    { giSamples_ = samples; envTint_ = tint; skyHorizon_ = horizon; skyZenith_ = zenith; skyExp_ = skyExp; giBounces_ = bounces; }
     // Render-quality knobs: global reflection multiplier + RT Phong exponent.
     void SetQuality(float reflMul, float shininess) { reflMul_ = reflMul; shininess_ = shininess; }
     // Soft shadows: samples per light (1 = hard) + penumbra radius.
@@ -73,6 +73,7 @@ private:
     unsigned int           texArr_     = 0;     // GL_TEXTURE_2D_ARRAY of diffuse textures
     int                    texLayers_  = 0;     // layer count (0 = untextured world)
     int                    giSamples_  = 0;     // hemisphere GI samples (0 = flat ambient)
+    int                    giBounces_  = 1;     // GI path bounces
     glm::vec3              envTint_     = glm::vec3(1.0f);
     glm::vec3              skyHorizon_  = glm::vec3(0.10f, 0.12f, 0.16f);
     glm::vec3              skyZenith_   = glm::vec3(0.40f, 0.55f, 0.80f);

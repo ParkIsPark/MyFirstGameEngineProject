@@ -40,8 +40,8 @@ public:
     void SetSky(unsigned int tex) { skyTex_ = tex; }
     // Environment light: GI sample count (0=off), tint, and sky gradient colors.
     void SetGI(int samples, const glm::vec3& tint, const glm::vec3& horizon,
-               const glm::vec3& zenith, float skyExp)
-    { giSamples_ = samples; envTint_ = tint; skyHorizon_ = horizon; skyZenith_ = zenith; skyExp_ = skyExp; }
+               const glm::vec3& zenith, float skyExp, int bounces = 1)
+    { giSamples_ = samples; envTint_ = tint; skyHorizon_ = horizon; skyZenith_ = zenith; skyExp_ = skyExp; giBounces_ = bounces; }
     void SetQuality(float shininess) { shininess_ = shininess; }
     void SetShadow(int samples, float softness) { shadowSamples_ = samples; shadowSoftness_ = softness; }
 
@@ -56,6 +56,7 @@ private:
     unsigned int idxTbo_  = 0, idxTex_  = 0;   // BVH leaf -> triangle index
     unsigned int skyTex_  = 0;                 // equirect HDRI (0 = gradient)
     int       giSamples_  = 0;
+    int       giBounces_  = 1;
     glm::vec3 envTint_     = glm::vec3(1.0f);
     glm::vec3 skyHorizon_  = glm::vec3(0.10f, 0.12f, 0.16f);
     glm::vec3 skyZenith_   = glm::vec3(0.40f, 0.55f, 0.80f);

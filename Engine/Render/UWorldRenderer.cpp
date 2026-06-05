@@ -16,6 +16,7 @@
 #include "EnvironmentLightComponent.h"
 #include "FTransform.h"
 #include "FRenderShowFlag.h"
+#include "FIniFile.h"
 
 void UWorldRenderer::Init()
 {
@@ -89,6 +90,25 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
 
     const unsigned int skyTex = sky_.GetOrLoad(scene.skyHDRI);
 
+    // Game render profile (GI/shadow/reflection quality) -- loaded once from the
+    // ini the editor wrote, so a packaged build honors the Game settings tab.
+    if (!qualityLoaded_)
+    {
+        FIniFile ini;
+        if (ini.LoadFromFile("Config/GameSettings.ini"))
+        {
+            quality_.giSamples      = ini.GetInt  ("Render", "GISamples", quality_.giSamples);
+            quality_.giBounces      = ini.GetInt  ("Render", "GIBounces", quality_.giBounces);
+            quality_.giStrength     = ini.GetFloat("Render", "GIStrength", quality_.giStrength);
+            quality_.reflStrength   = ini.GetFloat("Render", "ReflectionStrength", quality_.reflStrength);
+            quality_.shininess      = ini.GetFloat("Render", "Shininess", quality_.shininess);
+            quality_.shadowSamples  = ini.GetInt  ("Render", "ShadowSamples", quality_.shadowSamples);
+            quality_.shadowSoftness = ini.GetFloat("Render", "ShadowSoftness", quality_.shadowSoftness);
+        }
+        qualityLoaded_ = true;
+    }
+    const FRenderQuality& q = quality_;
+
     // Environment light -> hemisphere GI + sky gradient (both GPU passes).
     int giN = 0;
     glm::vec3 envTint(1.0f), horizon(0.10f, 0.12f, 0.16f), zenith(0.40f, 0.55f, 0.80f);
@@ -96,10 +116,15 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
     for (AActor* a : scene.Actors)
         if (ALight* L = dynamic_cast<ALight*>(a))
             if (auto* el = dynamic_cast<EnvironmentLightComponent*>(L->lightComp))
-            { giN = 8; envTint = el->LightColor * el->LightIntensity; horizon = el->horizonColor;
+            { giN = q.giSamples; envTint = el->LightColor * el->LightIntensity; horizon = el->horizonColor;
               zenith = el->zenithColor; skyExp = el->skyExp; break; }
-    worldRT_.SetGI(giN, envTint, horizon, zenith, skyExp);
-    hybrid_.SetGI(giN, envTint, horizon, zenith, skyExp);
+    envTint *= q.giStrength;
+    worldRT_.SetGI(giN, envTint, horizon, zenith, skyExp, q.giBounces);
+    hybrid_.SetGI(giN, envTint, horizon, zenith, skyExp, q.giBounces);
+    worldRT_.SetQuality(q.reflStrength, q.shininess);
+    hybrid_.SetQuality(q.shininess);
+    worldRT_.SetShadow(q.shadowSamples, q.shadowSoftness);
+    hybrid_.SetShadow(q.shadowSamples, q.shadowSoftness);
 
     glViewport(0, 0, w, h);
     glClearColor(0.10f, 0.11f, 0.13f, 1.0f);
