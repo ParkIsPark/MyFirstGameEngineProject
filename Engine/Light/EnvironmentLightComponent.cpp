@@ -22,15 +22,17 @@ void EnvironmentLightComponent::Serialize(FArchive& ar)
     ar.Color("Zenith",  zenithColor);
     ar.Field("SkyExp",  skyExp);
     ar.Field("SkyTex",  skyTexPath);   // actor-placed HDRI image (Content path)
+    ar.Field("TimeOfDay", timeOfDay);  // sun position (hour 0..24); slider re-applies on edit
 }
 
 // ---------------------------------------------------------------------------
-//  applyTimeOfDay — sets sky gradient + light color/intensity from a
-//  time-of-day value in [-10, +10] (-10 midnight, 0 sunrise, +10 noon).
+//  applyTimeOfDay — sets sky gradient + light color/intensity from the sun's
+//  position over a full day. hour in [0,24]: 0/24 midnight, ~7 sunrise,
+//  12 noon, ~17 sunset, ~19 dusk. Keyframes are interpolated linearly.
 // ---------------------------------------------------------------------------
-void EnvironmentLightComponent::applyTimeOfDay(EnvironmentLightComponent& light, float tod)
+void EnvironmentLightComponent::applyTimeOfDay(EnvironmentLightComponent& light, float hour)
 {
-    tod = glm::clamp(tod, -10.0f, 10.0f);
+    hour = glm::clamp(hour, 0.0f, 24.0f);
 
     struct Key {
         float     t;
@@ -42,13 +44,17 @@ void EnvironmentLightComponent::applyTimeOfDay(EnvironmentLightComponent& light,
     };
 
     static const Key keys[] = {
-        { -10.0f, glm::vec3(0.02f,0.02f,0.08f), glm::vec3(0.00f,0.00f,0.05f), 1.5f, 0.00f, glm::vec3(0.50f,0.55f,0.80f) },
-        {  -5.0f, glm::vec3(0.30f,0.15f,0.25f), glm::vec3(0.05f,0.05f,0.20f), 1.2f, 0.05f, glm::vec3(0.70f,0.60f,0.80f) },
-        {   0.0f, glm::vec3(0.95f,0.55f,0.25f), glm::vec3(0.35f,0.55f,0.85f), 0.8f, 0.25f, glm::vec3(1.00f,0.80f,0.55f) },
-        {   5.0f, glm::vec3(0.97f,0.87f,0.70f), glm::vec3(0.28f,0.58f,0.95f), 0.7f, 0.65f, glm::vec3(1.00f,0.93f,0.75f) },
-        {  10.0f, glm::vec3(0.95f,0.92f,0.82f), glm::vec3(0.25f,0.55f,1.00f), 0.6f, 1.00f, glm::vec3(1.00f,0.97f,0.90f) },
+        {  0.0f, glm::vec3(0.02f,0.02f,0.08f), glm::vec3(0.00f,0.00f,0.05f), 1.5f, 0.00f, glm::vec3(0.50f,0.55f,0.80f) }, // midnight
+        {  5.0f, glm::vec3(0.30f,0.15f,0.25f), glm::vec3(0.05f,0.05f,0.20f), 1.2f, 0.06f, glm::vec3(0.70f,0.60f,0.80f) }, // pre-dawn
+        {  7.0f, glm::vec3(0.95f,0.55f,0.25f), glm::vec3(0.35f,0.55f,0.85f), 0.8f, 0.30f, glm::vec3(1.00f,0.80f,0.55f) }, // sunrise
+        { 12.0f, glm::vec3(0.95f,0.92f,0.82f), glm::vec3(0.25f,0.55f,1.00f), 0.6f, 1.00f, glm::vec3(1.00f,0.97f,0.90f) }, // noon
+        { 17.0f, glm::vec3(0.97f,0.55f,0.30f), glm::vec3(0.30f,0.45f,0.85f), 0.8f, 0.35f, glm::vec3(1.00f,0.75f,0.50f) }, // sunset
+        { 19.0f, glm::vec3(0.30f,0.15f,0.25f), glm::vec3(0.05f,0.05f,0.20f), 1.2f, 0.08f, glm::vec3(0.70f,0.60f,0.80f) }, // dusk
+        { 24.0f, glm::vec3(0.02f,0.02f,0.08f), glm::vec3(0.00f,0.00f,0.05f), 1.5f, 0.00f, glm::vec3(0.50f,0.55f,0.80f) }, // midnight
     };
-    constexpr int N = 5;
+    constexpr int N = 7;
+
+    const float tod = hour;
 
     int lo = 0;
     for (int i = 0; i < N - 1; ++i)

@@ -454,7 +454,7 @@ AActor* EditorEngine::CloneActor(AActor* sa, bool resetPhysics)
         {
             auto* e = new EnvironmentLightComponent(el->LightColor, el->LightIntensity);
             e->horizonColor = el->horizonColor; e->zenithColor = el->zenithColor; e->skyExp = el->skyExp;
-            e->skyTexPath = el->skyTexPath;
+            e->skyTexPath = el->skyTexPath; e->timeOfDay = el->timeOfDay;
             lc = e;
         }
         else if (sl->lightComp)
@@ -1807,6 +1807,26 @@ void EditorEngine::DrawDetails()
                 if (!p.empty()) { PushUndo(); el->skyTexPath = CopyToContent(p); content_.clear(); ScanContent(); }
             }
             if (!el->skyTexPath.empty() && ImGui::SmallButton("Clear Sky Image")) { PushUndo(); el->skyTexPath.clear(); }
+            ImGui::Separator();
+
+            // Time of day (sun position): one slider drives the whole day look
+            // (sky gradient + light color/intensity) via applyTimeOfDay.
+            ImGui::SeparatorText("Time of Day (sun position)");
+            float tod = el->timeOfDay;
+            if (ImGui::SliderFloat("Hour (0=night 12=noon 24=night)", &tod, 0.0f, 24.0f, "%.1f h"))
+            { el->timeOfDay = tod; EnvironmentLightComponent::applyTimeOfDay(*el, tod);
+              rtUploaded_ = false; hybridUploaded_ = false; }
+            snap();
+            auto preset = [&](const char* label, float h)
+            {
+                if (ImGui::SmallButton(label))
+                { PushUndo(); el->timeOfDay = h; EnvironmentLightComponent::applyTimeOfDay(*el, h);
+                  rtUploaded_ = false; hybridUploaded_ = false; }
+            };
+            preset("Sunrise", 7.0f);  ImGui::SameLine();
+            preset("Noon",   12.0f);  ImGui::SameLine();
+            preset("Sunset", 17.0f);  ImGui::SameLine();
+            preset("Night",   0.0f);
             ImGui::Separator();
 
             ImGui::ColorEdit3("Sky Horizon", &el->horizonColor.x);  snap();

@@ -67,14 +67,14 @@ int main()
         USceneComponent* e = FComponentFactory::Create("EnvLight");
         ck("T6", "Create(\"EnvLight\")", e && std::string(e->TypeName()) == "EnvLight"); delete e;
     }
-    // T7: noon preset (tod=+10)
+    // T7: noon (hour=12)
     {
-        EnvironmentLightComponent e; EnvironmentLightComponent::applyTimeOfDay(e, 10.0f);
+        EnvironmentLightComponent e; EnvironmentLightComponent::applyTimeOfDay(e, 12.0f);
         ck("T7", "applyTimeOfDay noon", veq(e.zenithColor, {0.25f,0.55f,1.0f}) && e.LightIntensity.x > 0.9f);
     }
-    // T8: midnight preset (tod=-10) -> ~no light
+    // T8: midnight (hour=0) -> ~no light
     {
-        EnvironmentLightComponent e; EnvironmentLightComponent::applyTimeOfDay(e, -10.0f);
+        EnvironmentLightComponent e; EnvironmentLightComponent::applyTimeOfDay(e, 0.0f);
         ck("T8", "applyTimeOfDay midnight intensity ~0", e.LightIntensity.x < 0.01f);
     }
     // T9: LightComponent IS-A USceneComponent (upcast + type tag)
