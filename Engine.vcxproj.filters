@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Engine">
@@ -77,6 +77,7 @@
     <ClCompile Include="Engine\World\UWorld.cpp"><Filter>Engine\World</Filter></ClCompile>
     <!-- Mesh -->
     <ClCompile Include="Engine\Mesh\UMesh.cpp"><Filter>Engine\Mesh</Filter></ClCompile>
+    <ClCompile Include="Engine\Mesh\UMaterial.cpp"><Filter>Engine\Mesh</Filter></ClCompile>
     <ClCompile Include="Engine\Mesh\UMeshComponent.cpp"><Filter>Engine\Mesh</Filter></ClCompile>
     <!-- Rasterizer -->
     <ClCompile Include="Engine\Rasterizer\FTransform.cpp"><Filter>Engine\Rasterizer</Filter></ClCompile>
@@ -142,6 +143,7 @@
     <ClInclude Include="Engine\Mesh\Vertex.h"><Filter>Engine\Mesh</Filter></ClInclude>
     <ClInclude Include="Engine\Mesh\Material.h"><Filter>Engine\Mesh</Filter></ClInclude>
     <ClInclude Include="Engine\Mesh\UMesh.h"><Filter>Engine\Mesh</Filter></ClInclude>
+    <ClInclude Include="Engine\Mesh\UMaterial.h"><Filter>Engine\Mesh</Filter></ClInclude>
     <ClInclude Include="Engine\Mesh\UMeshComponent.h"><Filter>Engine\Mesh</Filter></ClInclude>
     <!-- Rasterizer -->
     <ClInclude Include="Engine\Rasterizer\UFrameBuffer.h"><Filter>Engine\Rasterizer</Filter></ClInclude>

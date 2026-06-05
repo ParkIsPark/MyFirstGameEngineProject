@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -70,6 +70,7 @@
     <ClCompile Include="Engine\Core\UPostProcessFilter.cpp" />
     <!-- Engine: Mesh -->
     <ClCompile Include="Engine\Mesh\UMesh.cpp" />
+    <ClCompile Include="Engine\Mesh\UMaterial.cpp" />
     <ClCompile Include="Engine\Mesh\UMeshComponent.cpp" />
     <!-- Engine: Rasterizer -->
     <ClCompile Include="Engine\Rasterizer\FTransform.cpp" />
@@ -135,6 +136,7 @@
     <ClInclude Include="Engine\Mesh\Vertex.h" />
     <ClInclude Include="Engine\Mesh\Material.h" />
     <ClInclude Include="Engine\Mesh\UMesh.h" />
+    <ClInclude Include="Engine\Mesh\UMaterial.h" />
     <ClInclude Include="Engine\Mesh\UMeshComponent.h" />
     <!-- Engine: Rasterizer headers -->
     <ClInclude Include="Engine\Rasterizer\UFrameBuffer.h" />

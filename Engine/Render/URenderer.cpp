@@ -206,7 +206,7 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag, const U
         if (!comp || !comp->mesh) continue;
         Draw d;
         d.mesh    = comp->mesh;
-        d.ov      = comp->hasMaterialOverride ? &comp->materialOverride : nullptr;
+        d.ov      = comp->EffectiveOverride();   // shared material asset > override > mesh slots
         d.xf      = ActorTransform(comp->GetWorldMatrix(), cam, nx, ny);
         d.triBase = totalTris;
         draws.push_back(d);

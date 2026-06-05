@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Editor|Win32">
@@ -84,6 +84,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Core\UPostProcessFilter.cpp" />
     <!-- Engine: Mesh + Rasterizer + Render -->
     <ClCompile Include="$(EngineRootDir)Engine\Mesh\UMesh.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Mesh\UMaterial.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Mesh\UMeshComponent.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\FTransform.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.cpp" />
@@ -145,6 +146,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\Mesh\Vertex.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Mesh\Material.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Mesh\UMesh.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Mesh\UMaterial.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Mesh\UMeshComponent.h" />
     <!-- Engine: Rasterizer headers -->
     <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\UFrameBuffer.h" />

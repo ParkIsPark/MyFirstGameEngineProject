@@ -24,6 +24,19 @@ public:
     Material materialOverride;
     bool     hasMaterialOverride = false;
 
+    // Shared material ASSET (Content/x.material). When set, it wins over the
+    // override/mesh material; it is a SHARED pointer from UMaterial::Resolve, so
+    // editing it changes every component that references the same path.
+    std::string materialRef;
+    Material*   sharedMaterial = nullptr;   // resolved from materialRef (not owned)
+
+    // The single material to render this mesh with, or nullptr to fall back to the
+    // mesh's own per-triangle slots. Precedence: shared asset > override > slots.
+    const Material* EffectiveOverride() const
+    { return sharedMaterial ? sharedMaterial : (hasMaterialOverride ? &materialOverride : nullptr); }
+    // Convenience whole-mesh material (shared > override > mesh default).
+    const Material& GetMaterial() const;
+
     // World-space ray -> mesh-local (via GetWorldMatrix) -> UMesh::intersect.
     bool intersect(const URay& worldRay,
                    float& outT, int& outTri, float& outU, float& outV) const;

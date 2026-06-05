@@ -64,7 +64,7 @@ void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
             {
                 meshes.push_back(mc->mesh);
                 models.push_back(mc->GetWorldMatrix());
-                const Material& mat = mc->hasMaterialOverride ? mc->materialOverride : mc->mesh->material;
+                const Material& mat = mc->GetMaterial();   // shared asset > override > mesh default
                 albedos.push_back(mat.kd);
                 mirrors.push_back(glm::max(mat.km.x, glm::max(mat.km.y, mat.km.z)));
                 mats.push_back(&mat);

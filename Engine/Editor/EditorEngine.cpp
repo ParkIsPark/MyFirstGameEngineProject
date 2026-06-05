@@ -13,6 +13,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include "UMesh.h"
+#include "UMaterial.h"
 #include "FTransform.h"
 #include "UMeshComponent.h"
 #include "AActor.h"
@@ -614,7 +615,7 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
             {
                 meshes.push_back(mc->mesh);
                 models.push_back(mc->GetWorldMatrix());
-                const Material& mat = mc->hasMaterialOverride ? mc->materialOverride : mc->mesh->material;
+                const Material& mat = mc->GetMaterial();   // shared asset > override > mesh default
                 albedos.push_back(mat.kd);
                 mirrors.push_back(glm::max(mat.km.x, glm::max(mat.km.y, mat.km.z)));
                 mats.push_back(&mat);
@@ -754,10 +755,11 @@ void EditorEngine::ScanContent()
             for (char& c : ext) c = (char)std::tolower((unsigned char)c);
 
             const char* cat = "Other"; const char* icon = "[?]";
-            if      (ext == ".world")                         { cat = "World";   icon = "[W]"; }
-            else if (ext == ".obj" || ext == ".fbx")          { cat = "Mesh";    icon = "[M]"; }
-            else if (ext == ".png" || ext == ".jpg")          { cat = "Texture"; icon = "[T]"; }
-            else if (ext == ".hdr")                           { cat = "HDRI";    icon = "[H]"; }
+            if      (ext == ".world")                         { cat = "World";    icon = "[W]"; }
+            else if (ext == ".obj" || ext == ".fbx")          { cat = "Mesh";     icon = "[M]"; }
+            else if (ext == ".material" || ext == ".mtl")     { cat = "Material"; icon = "[Mat]"; }
+            else if (ext == ".png" || ext == ".jpg")          { cat = "Texture";  icon = "[T]"; }
+            else if (ext == ".hdr")                           { cat = "HDRI";     icon = "[H]"; }
             content_.push_back({ name, cat, icon });
         }
         break;                                   // first existing dir wins
@@ -920,6 +922,7 @@ void EditorEngine::DrawUI()
 
     if (showBuildLog_) DrawBuildLog();
     if (showRenderSettings_) DrawRenderSettings();
+    if (showMatEditor_) DrawMaterialEditor();
     if (showDemo_) ImGui::ShowDemoWindow(&showDemo_);
 }
 
@@ -1122,8 +1125,9 @@ void EditorEngine::DrawMenuBar()
 void EditorEngine::DrawContentBrowser()
 {
     namespace fs = std::filesystem;
-    const char* tabs[] = { "All", "World", "Mesh", "Texture" };
-    for (int i = 0; i < 4; ++i) { if (i) ImGui::SameLine(); if (ImGui::RadioButton(tabs[i], cbFilter_ == i)) cbFilter_ = i; }
+    const char* tabs[] = { "All", "World", "Mesh", "Material", "Texture" };
+    const int nTabs = (int)(sizeof(tabs) / sizeof(tabs[0]));
+    for (int i = 0; i < nTabs; ++i) { if (i) ImGui::SameLine(); if (ImGui::RadioButton(tabs[i], cbFilter_ == i)) cbFilter_ = i; }
     ImGui::SameLine(); if (ImGui::SmallButton("Refresh"))   { content_.clear(); ScanContent(); }
     ImGui::SameLine(); bool importClicked = ImGui::SmallButton("Import...");
     ImGui::SameLine(); ImGui::TextDisabled("  %s/", contentDir_.c_str());
@@ -1143,26 +1147,30 @@ void EditorEngine::DrawContentBrowser()
         ImGui::BeginGroup();
         ImGui::Button((std::string(e.icon) + "##icon").c_str(), ImVec2(74, 52));
 
-        // Mesh / Texture assets are drag sources -> drop onto a Details slot.
-        if ((cat == "Mesh" || cat == "Texture") && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+        // Mesh / Material / Texture assets are drag sources -> drop onto a slot.
+        if ((cat == "Mesh" || cat == "Material" || cat == "Texture") && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
         {
             std::string full = contentDir_ + "/" + e.name;
-            ImGui::SetDragDropPayload(cat == "Mesh" ? "ASSET_MESH" : "ASSET_TEX", full.c_str(), full.size() + 1);
+            const char* pl = cat == "Mesh" ? "ASSET_MESH" : cat == "Material" ? "ASSET_MAT" : "ASSET_TEX";
+            ImGui::SetDragDropPayload(pl, full.c_str(), full.size() + 1);
             ImGui::Text("%s %s", e.icon, e.name.c_str());
             ImGui::EndDragDropSource();
         }
 
         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
         {
-            if      (cat == "World") LoadWorld(contentDir_ + "/" + e.name);
-            else if (cat == "Mesh")  ImportAsset(contentDir_ + "/" + e.name);
-            else if (cat == "HDRI")  editorWorld_->GetScene().skyHDRI = contentDir_ + "/" + e.name;
+            if      (cat == "World")    LoadWorld(contentDir_ + "/" + e.name);
+            else if (cat == "Mesh")     ImportAsset(contentDir_ + "/" + e.name);
+            else if (cat == "Material") { matEditPath_ = contentDir_ + "/" + e.name; showMatEditor_ = true; }
+            else if (cat == "HDRI")     editorWorld_->GetScene().skyHDRI = contentDir_ + "/" + e.name;
         }
         if (ImGui::BeginPopupContextItem("ctx"))
         {
-            if (cat == "World" && ImGui::MenuItem("Open"))         LoadWorld(contentDir_ + "/" + e.name);
-            if (cat == "Mesh"  && ImGui::MenuItem("Add to Scene")) ImportAsset(contentDir_ + "/" + e.name);
-            if (cat == "HDRI"  && ImGui::MenuItem("Set as Sky"))   editorWorld_->GetScene().skyHDRI = contentDir_ + "/" + e.name;
+            if (cat == "World"    && ImGui::MenuItem("Open"))          LoadWorld(contentDir_ + "/" + e.name);
+            if (cat == "Mesh"     && ImGui::MenuItem("Add to Scene"))  ImportAsset(contentDir_ + "/" + e.name);
+            if (cat == "Material" && ImGui::MenuItem("Edit Material")) { matEditPath_ = contentDir_ + "/" + e.name; showMatEditor_ = true; }
+            if (cat == "Material" && ImGui::MenuItem("Apply to Selected")) ApplyMaterialToSelected(contentDir_ + "/" + e.name);
+            if (cat == "HDRI"     && ImGui::MenuItem("Set as Sky"))    editorWorld_->GetScene().skyHDRI = contentDir_ + "/" + e.name;
             if (ImGui::MenuItem("Rename")) { cbRename_ = i; std::snprintf(cbBuf_, sizeof(cbBuf_), "%s", e.name.c_str()); }
             if (ImGui::MenuItem("Delete")) toDelete = e.name;
             ImGui::EndPopup();
@@ -1191,6 +1199,7 @@ void EditorEngine::DrawContentBrowser()
             ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
     {
         if (ImGui::MenuItem("New World"))         NewWorld();
+        if (ImGui::MenuItem("New Material"))      NewMaterial();
         if (ImGui::MenuItem("Import OBJ/FBX...")) importClicked = true;
         if (ImGui::MenuItem("Refresh"))           { content_.clear(); ScanContent(); }
         ImGui::EndPopup();
@@ -1209,6 +1218,102 @@ void EditorEngine::DrawContentBrowser()
     { fs::remove(contentDir_ + "/" + toDelete, ec); content_.clear(); ScanContent(); }
     if (!renFrom.empty() && !renTo.empty() && renFrom != renTo)
     { fs::rename(contentDir_ + "/" + renFrom, contentDir_ + "/" + renTo, ec); content_.clear(); ScanContent(); }
+}
+
+void EditorEngine::NewMaterial()
+{
+    namespace fs = std::filesystem;
+    std::error_code ec; fs::create_directories(contentDir_, ec);
+    std::string path;
+    for (int i = 1; i < 1000; ++i)
+    {
+        path = contentDir_ + "/Material_" + std::to_string(i) + ".material";
+        if (!fs::exists(path, ec)) break;
+    }
+    Material m; m.kd = glm::vec3(0.7f); m.ks = glm::vec3(0.3f); m.shininess = 32.0f;
+    UMaterial::Save(path, m);
+    content_.clear(); ScanContent();
+    matEditPath_ = path; showMatEditor_ = true;   // open the editor on the new material
+}
+
+std::string EditorEngine::SaveMaterialAsset(const std::string& path, const Material& m)
+{
+    namespace fs = std::filesystem;
+    std::string target = path;
+    std::string ext = fs::path(path).extension().string();
+    for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+    if (ext != ".material")                          // never overwrite a .mtl source
+        target = fs::path(path).replace_extension(".material").string();
+    UMaterial::Save(target, m);
+    content_.clear(); ScanContent();
+    return target;
+}
+
+void EditorEngine::ApplyMaterialToSelected(const std::string& path)
+{
+    auto& actors = ActiveWorld().GetScene().Actors;
+    if (selected_ < 0 || selected_ >= (int)actors.size()) return;
+    UMeshComponent* mc = actors[selected_]->mesh;
+    if (!mc) return;
+    PushUndo();
+    mc->materialRef = path;
+    mc->sharedMaterial = UMaterial::Resolve(path);
+    rtUploaded_ = false; hybridUploaded_ = false;
+}
+
+// Shared kd/ks/shininess/mirror/texture widgets (Details + Material Editor).
+// Returns true if any field changed this frame.
+bool EditorEngine::DrawMaterialFields(Material& m)
+{
+    bool ch = false;
+    ch |= ImGui::ColorEdit3("Diffuse",   &m.kd.x);
+    ch |= ImGui::ColorEdit3("Specular",  &m.ks.x);
+    ch |= ImGui::DragFloat ("Shininess", &m.shininess, 1.0f, 0.0f, 256.0f);
+    float mir = glm::max(m.km.x, glm::max(m.km.y, m.km.z));
+    if (ImGui::SliderFloat("Mirror", &mir, 0.0f, 1.0f)) { m.km = glm::vec3(mir); ch = true; }
+    ImGui::TextDisabled("(Mirror reflection shows in GPU RT mode)");
+
+    const std::string tex = m.diffuseTexPath.empty() ? "(none)" : m.diffuseTexPath;
+    ImGui::Text("Texture: %s", tex.c_str());
+    ImGui::Button("Set Diffuse Texture  (drop image / click)", ImVec2(-1, 0));
+    if (ImGui::BeginDragDropTarget())
+    {
+        if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_TEX"))
+        { m.diffuseTexPath = CopyToContent(std::string((const char*)pl->Data)); UMaterial::LoadTexture(m); content_.clear(); ScanContent(); ch = true; }
+        ImGui::EndDragDropTarget();
+    }
+    if (ImGui::IsItemClicked())
+    {
+        std::string p = FFileDialog::OpenAsset();
+        if (!p.empty()) { m.diffuseTexPath = CopyToContent(p); UMaterial::LoadTexture(m); content_.clear(); ScanContent(); ch = true; }
+    }
+    if (!m.diffuseTexPath.empty() && ImGui::SmallButton("Clear Texture"))
+    { m.texData.clear(); m.texWidth = m.texHeight = 0; m.diffuseTexPath.clear(); ch = true; }
+    return ch;
+}
+
+// Material editor window: edits the SHARED material asset (UMaterial::Resolve),
+// so every object that references it updates live; Save writes the .material file.
+void EditorEngine::DrawMaterialEditor()
+{
+    if (!showMatEditor_) return;
+    ImGui::SetNextWindowSize(ImVec2(360, 320), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Material Editor", &showMatEditor_))
+    {
+        Material* m = matEditPath_.empty() ? nullptr : UMaterial::Resolve(matEditPath_);
+        if (!m) ImGui::TextDisabled("Double-click a material in the Content Browser.");
+        else
+        {
+            ImGui::TextDisabled("%s", matEditPath_.c_str());
+            ImGui::TextColored(ImVec4(0.7f, 0.8f, 0.9f, 1), "Edits affect every object using this material.");
+            ImGui::Separator();
+            const bool ch = DrawMaterialFields(*m);
+            ImGui::Separator();
+            if (ImGui::Button("Save to .material")) matEditPath_ = SaveMaterialAsset(matEditPath_, *m);
+            if (ch) { rtUploaded_ = false; hybridUploaded_ = false; }   // live preview
+        }
+    }
+    ImGui::End();
 }
 
 void EditorEngine::DrawStatusBar(float x, float y, float w, float h)
@@ -1510,33 +1615,74 @@ void EditorEngine::DrawDetails()
         }
         if (mc->mesh)
         {
-            Material& m = mc->hasMaterialOverride ? mc->materialOverride : mc->mesh->material;
-            ImGui::ColorEdit3("Diffuse",   &m.kd.x);       snap();
-            ImGui::ColorEdit3("Specular",  &m.ks.x);       snap();
-            ImGui::DragFloat ("Shininess", &m.shininess, 1.0f, 0.0f, 256.0f); snap();
-            float mir = glm::max(m.km.x, glm::max(m.km.y, m.km.z));
-            if (ImGui::SliderFloat("Mirror", &mir, 0.0f, 1.0f)) m.km = glm::vec3(mir);
-            snap();
-            ImGui::TextDisabled("(Mirror reflection shows in GPU RT mode)");
-
-            // Diffuse texture slot: drag an image from the Content Browser, or
-            // click to pick a file. Sampled by the CPU raster (Rasterizer mode).
-            const std::string tex = m.diffuseTexPath.empty() ? "(none)" : m.diffuseTexPath;
-            ImGui::Text("Texture: %s", tex.c_str());
-            ImGui::Button("Set Diffuse Texture  (drop image / click)", ImVec2(-1, 0));
+            // ---- Shared Material ASSET slot (Content/*.material) ----
+            ImGui::SeparatorText("Material");
+            ImGui::Text("Asset: %s", mc->materialRef.empty() ? "(none -- using override/mesh)" : mc->materialRef.c_str());
+            ImGui::Button(mc->materialRef.empty() ? "Assign Material  (drop / pick)"
+                                                  : "Change Material  (drop / pick)", ImVec2(-1, 0));
             if (ImGui::BeginDragDropTarget())
             {
-                if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_TEX"))
-                { PushUndo(); LoadMaterialTexture(m, CopyToContent(std::string((const char*)pl->Data))); content_.clear(); ScanContent(); }
+                if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_MAT"))
+                { PushUndo(); mc->materialRef = std::string((const char*)pl->Data);
+                  mc->sharedMaterial = UMaterial::Resolve(mc->materialRef); rtUploaded_ = false; hybridUploaded_ = false; }
                 ImGui::EndDragDropTarget();
             }
-            if (ImGui::IsItemClicked())
+            if (ImGui::IsItemClicked()) ImGui::OpenPopup("PickMat");
+            if (ImGui::BeginPopup("PickMat"))
             {
-                std::string p = FFileDialog::OpenAsset();
-                if (!p.empty()) { PushUndo(); LoadMaterialTexture(m, CopyToContent(p)); content_.clear(); ScanContent(); }
+                bool any = false;
+                for (const ContentEntry& e : content_)
+                    if (std::string(e.cat) == "Material")
+                    { any = true; if (ImGui::MenuItem(e.name.c_str()))
+                        { PushUndo(); mc->materialRef = contentDir_ + "/" + e.name;
+                          mc->sharedMaterial = UMaterial::Resolve(mc->materialRef); rtUploaded_ = false; hybridUploaded_ = false; } }
+                if (!any) ImGui::TextDisabled("(no .material in Content/)");
+                ImGui::EndPopup();
             }
-            if (!m.diffuseTexPath.empty() && ImGui::SmallButton("Clear Texture"))
-            { PushUndo(); m.texData.clear(); m.texWidth = m.texHeight = 0; m.diffuseTexPath.clear(); }
+            if (!mc->materialRef.empty())
+            {
+                ImGui::SameLine(); if (ImGui::SmallButton("Edit")) { matEditPath_ = mc->materialRef; showMatEditor_ = true; }
+                ImGui::SameLine(); if (ImGui::SmallButton("Clear"))
+                { PushUndo(); mc->materialRef.clear(); mc->sharedMaterial = nullptr; rtUploaded_ = false; hybridUploaded_ = false; }
+            }
+            ImGui::Separator();
+
+            if (mc->sharedMaterial)   // editing the shared asset -> affects every user
+            {
+                ImGui::TextColored(ImVec4(0.7f, 0.8f, 0.9f, 1), "Shared asset -- edits affect all users.");
+                if (DrawMaterialFields(*mc->sharedMaterial)) { rtUploaded_ = false; hybridUploaded_ = false; }
+                if (ImGui::Button("Save to .material"))
+                { mc->materialRef = SaveMaterialAsset(mc->materialRef, *mc->sharedMaterial);
+                  mc->sharedMaterial = UMaterial::Resolve(mc->materialRef); }
+            }
+            else                      // per-instance override (or the mesh's own default)
+            {
+                Material& m = mc->hasMaterialOverride ? mc->materialOverride : mc->mesh->material;
+                ImGui::ColorEdit3("Diffuse",   &m.kd.x);       snap();
+                ImGui::ColorEdit3("Specular",  &m.ks.x);       snap();
+                ImGui::DragFloat ("Shininess", &m.shininess, 1.0f, 0.0f, 256.0f); snap();
+                float mir = glm::max(m.km.x, glm::max(m.km.y, m.km.z));
+                if (ImGui::SliderFloat("Mirror", &mir, 0.0f, 1.0f)) m.km = glm::vec3(mir);
+                snap();
+                ImGui::TextDisabled("(Mirror reflection shows in GPU RT mode)");
+
+                const std::string tex = m.diffuseTexPath.empty() ? "(none)" : m.diffuseTexPath;
+                ImGui::Text("Texture: %s", tex.c_str());
+                ImGui::Button("Set Diffuse Texture  (drop image / click)", ImVec2(-1, 0));
+                if (ImGui::BeginDragDropTarget())
+                {
+                    if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_TEX"))
+                    { PushUndo(); LoadMaterialTexture(m, CopyToContent(std::string((const char*)pl->Data))); content_.clear(); ScanContent(); }
+                    ImGui::EndDragDropTarget();
+                }
+                if (ImGui::IsItemClicked())
+                {
+                    std::string p = FFileDialog::OpenAsset();
+                    if (!p.empty()) { PushUndo(); LoadMaterialTexture(m, CopyToContent(p)); content_.clear(); ScanContent(); }
+                }
+                if (!m.diffuseTexPath.empty() && ImGui::SmallButton("Clear Texture"))
+                { PushUndo(); m.texData.clear(); m.texWidth = m.texHeight = 0; m.diffuseTexPath.clear(); }
+            }
         }
     }
     // ---- Collision component: its own transform (offset + size) + rigid body ----
@@ -1665,12 +1811,14 @@ void EditorEngine::DrawViewport()
         shown = true;
     }
 
-    // Drop a mesh from the Content Browser onto the viewport -> place it in the
-    // world (imports/copies into Content/ and spawns in front of the camera).
+    // Content Browser -> viewport drops: a mesh spawns a new actor; a material is
+    // applied to the actor under the cursor (ray-picked at the drop point).
     if (!playing_ && ImGui::BeginDragDropTarget())
     {
         if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_MESH"))
             ImportAsset(std::string((const char*)pl->Data));
+        if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_MAT"))
+        { PickActor(w, h); ApplyMaterialToSelected(std::string((const char*)pl->Data)); }
         ImGui::EndDragDropTarget();
     }
 

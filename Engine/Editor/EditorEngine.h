@@ -39,6 +39,11 @@ private:
     void BuildEditorWorld();
     void SaveWorld();                    // editor world -> Content/<name>.world
     void NewWorld();                     // replace editor world with an empty one
+    void NewMaterial();                  // write a fresh Content/Material_N.material
+    void ApplyMaterialToSelected(const std::string& path);  // assign a material asset to the selection
+    // Save a material to a native .material (a .mtl source is written as <stem>.material,
+    // never overwritten). Refreshes the browser; returns the path actually written.
+    std::string SaveMaterialAsset(const std::string& path, const Material& m);
     void LoadWorld(const std::string& path);   // replace editor world from a .world
     void SetEditorWorld(UWorld* w, const std::string& name);  // swap + rebind UI state
 
@@ -71,6 +76,8 @@ private:
     void DrawViewport();
     void DrawContentBrowser();
     void DrawBuildLog();                  // background-build output panel
+    void DrawMaterialEditor();            // double-click a .material -> edit the shared asset
+    bool DrawMaterialFields(Material& m); // shared kd/ks/shininess/mirror/texture widgets (returns changed)
     void DrawRenderSettings();            // AA / GI quality popup (persisted to ini)
     void LoadRenderSettings();            // Config/EditorSettings.ini -> members
     void SaveRenderSettings();            // members -> Config/EditorSettings.ini
@@ -99,6 +106,8 @@ private:
     bool showDemo_     = false;
     bool showBuildLog_ = false;
     bool showRenderSettings_ = false;
+    bool showMatEditor_ = false;          // material editor window open
+    std::string matEditPath_;             // Content path of the material being edited
     // Render settings (ini-persisted): independent Editor + Game profiles. The
     // editor viewport uses editorRS_, the played game (PIE + standalone) uses
     // gameRS_, so the editing view and the game can render differently.
