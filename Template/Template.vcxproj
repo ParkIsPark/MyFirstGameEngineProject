@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
-    <ProjectConfiguration Include="Debug|Win32">
-      <Configuration>Debug</Configuration>
+    <ProjectConfiguration Include="Editor|Win32">
+      <Configuration>Editor</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
-    <ProjectConfiguration Include="Release|Win32">
-      <Configuration>Release</Configuration>
+    <ProjectConfiguration Include="Game|Win32">
+      <Configuration>Game</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
   </ItemGroup>
@@ -18,13 +18,13 @@
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Editor|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Game|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
@@ -37,16 +37,18 @@
   <ImportGroup Label="Shared">
   </ImportGroup>
   <!-- Import shared property sheet from repo root via $(SolutionDir) -->
-  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Editor|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="$(SolutionDir)OpenglViewer.props" />
+    <Import Project="$(SolutionDir)EngineRoot.props" />
+    <Import Project="$(EngineRootDir)OpenglViewer.props" />
   </ImportGroup>
-  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Game|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="$(SolutionDir)OpenglViewer.props" />
+    <Import Project="$(SolutionDir)EngineRoot.props" />
+    <Import Project="$(EngineRootDir)OpenglViewer.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Editor|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
@@ -58,13 +60,13 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Game|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;GAME_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
     </ClCompile>
     <Link>
@@ -78,63 +80,127 @@
     <!-- User source -->
     <ClCompile Include="main.cpp" />
     <!-- Engine: Core -->
-    <ClCompile Include="$(SolutionDir)Engine\Core\UScene.cpp" />
-    <ClCompile Include="$(SolutionDir)Engine\Core\UPostProcessFilter.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Core\UScene.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Core\UPostProcessFilter.cpp" />
+    <!-- Engine: Mesh + Rasterizer + Render -->
+    <ClCompile Include="$(EngineRootDir)Engine\Mesh\UMesh.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Mesh\UMeshComponent.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\FTransform.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Render\URenderer.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Render\UWorldRenderer.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Render\USkyHDRI.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Render\UHybridPass.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Acceleration\BVH.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Import\UObjImporter.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Import\UFbxImporter.cpp" />
+    <!-- Engine: Editor + ImGui -->
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\EditorEngine.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\FFileDialog.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\FProcess.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_draw.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_tables.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_demo.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\backends\imgui_impl_glfw.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\backends\imgui_impl_opengl3.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.cpp" />
+    <!-- Engine: Framework -->
+    <ClCompile Include="$(EngineRootDir)Engine\Framework\Engine.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Framework\GameEngine.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Framework\BuildManager.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Framework\FProjectDescriptor.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Framework\USubsystemManager.cpp" />
     <!-- Engine: World -->
-    <ClCompile Include="$(SolutionDir)Engine\World\AActor.cpp" />
-    <ClCompile Include="$(SolutionDir)Engine\World\ACamera.cpp" />
-    <ClCompile Include="$(SolutionDir)Engine\World\CubeSurface.cpp" />
-    <ClCompile Include="$(SolutionDir)Engine\World\PlaneSurface.cpp" />
-    <ClCompile Include="$(SolutionDir)Engine\World\SphereSurface.cpp" />
-    <ClCompile Include="$(SolutionDir)Engine\World\USurface.cpp" />
-    <ClCompile Include="$(SolutionDir)Engine\World\UTilemap.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\World\AActor.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\World\USceneComponent.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Serialization\FArchive.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Serialization\FWorldSerializer.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Serialization\FIniFile.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Mesh\Material.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\World\ACamera.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\World\UWorld.cpp" />
     <!-- Engine: Light -->
-    <ClCompile Include="$(SolutionDir)Engine\Light\ALight.cpp" />
-    <ClCompile Include="$(SolutionDir)Engine\Light\EnvironmentLight.cpp" />
-    <ClCompile Include="$(SolutionDir)Engine\Light\LightComponent.cpp" />
-    <ClCompile Include="$(SolutionDir)Engine\Light\PointLight.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Light\ALight.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Light\EnvironmentLightComponent.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Light\LightComponent.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Light\PointLightComponent.cpp" />
     <!-- Engine: Physics -->
-    <ClCompile Include="$(SolutionDir)Engine\Physics\PhysicalComponent.cpp" />
-    <ClCompile Include="$(SolutionDir)Engine\Physics\UPhysicsWorld.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Physics\UPrimitiveComponent.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Physics\USphereComponent.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Physics\UBoxComponent.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Physics\UPhysicsWorld.cpp" />
     <!-- Engine: Player -->
-    <ClCompile Include="$(SolutionDir)Engine\Player\UPlayerCharacter.cpp" />
-    <ClCompile Include="$(SolutionDir)Engine\Player\UPlayerController.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Player\UPlayerCharacter.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Player\UPlayerController.cpp" />
     <!-- Engine: RayTracing -->
-    <ClCompile Include="$(SolutionDir)Engine\RayTracing\URayTracing.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\RayTracing\UMeshRayTracer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <!-- Engine: Core headers -->
-    <ClInclude Include="$(SolutionDir)Engine\Core\UScene.h" />
-    <ClInclude Include="$(SolutionDir)Engine\Core\UPostProcessFilter.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Core\UScene.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Core\UPostProcessFilter.h" />
+    <!-- Engine: Mesh headers -->
+    <ClInclude Include="$(EngineRootDir)Engine\Mesh\Vertex.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Mesh\Material.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Mesh\UMesh.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Mesh\UMeshComponent.h" />
+    <!-- Engine: Rasterizer headers -->
+    <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\UFrameBuffer.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\FTransform.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\UGBuffer.h" />
+    <!-- Engine: Render headers -->
+    <ClInclude Include="$(EngineRootDir)Engine\Render\URenderer.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\UWorldRenderer.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\USkyHDRI.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderShowFlag.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\UHybridPass.h" />
+    <!-- Engine: Acceleration + Threading headers -->
+    <ClInclude Include="$(EngineRootDir)Engine\Acceleration\BVH.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Threading\ThreadPool.h" />
+    <!-- Engine: Import headers -->
+    <ClInclude Include="$(EngineRootDir)Engine\Import\UObjImporter.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Import\UFbxImporter.h" />
+    <!-- Engine: Editor headers -->
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\EditorEngine.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\FFileDialog.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\FProcess.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.h" />
+    <!-- Engine: Framework headers -->
+    <ClInclude Include="$(EngineRootDir)Engine\Framework\Engine.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Framework\GameEngine.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Framework\BuildManager.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Framework\FProjectDescriptor.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Framework\USubsystem.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Framework\USubsystemManager.h" />
     <!-- Engine: World headers -->
-    <ClInclude Include="$(SolutionDir)Engine\World\AActor.h" />
-    <ClInclude Include="$(SolutionDir)Engine\World\ACamera.h" />
-    <ClInclude Include="$(SolutionDir)Engine\World\CubeSurface.h" />
-    <ClInclude Include="$(SolutionDir)Engine\World\PlaneSurface.h" />
-    <ClInclude Include="$(SolutionDir)Engine\World\SphereSurface.h" />
-    <ClInclude Include="$(SolutionDir)Engine\World\USurface.h" />
-    <ClInclude Include="$(SolutionDir)Engine\World\UTilemap.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\World\AActor.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\World\USceneComponent.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Serialization\FArchive.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Serialization\FWorldSerializer.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Serialization\FIniFile.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\World\ACamera.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\World\UWorld.h" />
     <!-- Engine: Light headers -->
-    <ClInclude Include="$(SolutionDir)Engine\Light\ALight.h" />
-    <ClInclude Include="$(SolutionDir)Engine\Light\EnvironmentLight.h" />
-    <ClInclude Include="$(SolutionDir)Engine\Light\LightComponent.h" />
-    <ClInclude Include="$(SolutionDir)Engine\Light\PointLight.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Light\ALight.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Light\EnvironmentLightComponent.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Light\LightComponent.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Light\PointLightComponent.h" />
     <!-- Engine: Physics headers -->
-    <ClInclude Include="$(SolutionDir)Engine\Physics\PhysicalComponent.h" />
-    <ClInclude Include="$(SolutionDir)Engine\Physics\UPhysicsWorld.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Physics\UPrimitiveComponent.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Physics\UShapeComponent.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Physics\USphereComponent.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Physics\UBoxComponent.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Physics\UPhysicsWorld.h" />
     <!-- Engine: Player headers -->
-    <ClInclude Include="$(SolutionDir)Engine\Player\UPlayerCharacter.h" />
-    <ClInclude Include="$(SolutionDir)Engine\Player\UPlayerController.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Player\UPlayerCharacter.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Player\UPlayerController.h" />
     <!-- Engine: RayTracing headers -->
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\URayTracing.h" />
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\URay.h" />
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\URayTracingPass.h" />
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\RenderConfig.h" />
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\GeometryPass.h" />
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\MaterialPass.h" />
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\DirectLightPass.h" />
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\IndirectLightPass.h" />
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\PostProcessPass.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\UMeshRayTracer.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\RTShading.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\URay.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

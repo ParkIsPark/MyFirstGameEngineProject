@@ -1,28 +1,47 @@
 #pragma once
-#include "USurface.h"
 #include <glm/glm.hpp>
+#include "USceneComponent.h"
 
-class PhysicalComponent;
+class UPrimitiveComponent;
+class UMeshComponent;
 
 class AActor
 {
 public:
     AActor();
-    ~AActor();
+    virtual ~AActor();
 
-    glm::vec3        position = glm::vec3(0.0f);
-    USurface*        surface  = nullptr;
-    PhysicalComponent* physics = nullptr;
+    std::string name;                         // unique within a world (serialization id)
 
-    glm::vec3 GetPosition() const { return position; }
+    // The root scene component owns the actor's transform. Other components
+    // attach under it (SetMesh / future attachments) to form the scene graph.
+    USceneComponent      rootComponent;
+    UMeshComponent*      mesh    = nullptr;   // mesh instance, attached to rootComponent
+    UPrimitiveComponent* physics = nullptr;   // root primitive: shape + rigid body
 
-    // Sets surface and wires the owner back-pointer so surface can read position.
-    void SetSurface(USurface* s);
+    // ---- transform accessors (delegate to rootComponent; all writes MarkDirty) ----
+    glm::vec3 GetActorLocation() const { return rootComponent.GetWorldLocation(); }
+    void      SetActorLocation(const glm::vec3& v) { rootComponent.relLocation = v; rootComponent.MarkDirty(); }
+    glm::vec3 GetActorRotation() const { return rootComponent.relRotation; }
+    void      SetActorRotation(const glm::vec3& v) { rootComponent.relRotation = v; rootComponent.MarkDirty(); }
+    glm::vec3 GetActorScale()    const { return rootComponent.relScale; }
+    void      SetActorScale(const glm::vec3& v)    { rootComponent.relScale = v; rootComponent.MarkDirty(); }
+    glm::vec3 GetPosition()      const { return GetActorLocation(); } // back-compat alias
 
-    // Sets physics component and wires the owner back-pointer.
-    void SetPhysics(PhysicalComponent* p);
+    // Sets the mesh instance and attaches it under the root component.
+    void SetMesh(UMeshComponent* m);
+    // Sets the physics component and wires the owner back-pointer.
+    void SetPhysics(UPrimitiveComponent* p);
+
+    // ---- serialization contract (P2) ----
+    virtual const char* TypeName() const { return "Actor"; }
+    virtual void        Serialize(FArchive& ar);   // name + root transform
 
     virtual void Tick(float DeltaTime);
+
+    // Public lifecycle drivers so UWorld can dispatch the protected hooks.
+    void DispatchBeginPlay() { BeginPlay(); }
+    void DispatchEndPlay()   { EndPlay(); }
 
 protected:
     virtual void BeginPlay();

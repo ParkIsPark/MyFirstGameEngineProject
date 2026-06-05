@@ -160,5 +160,5 @@ void UPlayerController::UpdateCameraFollow()
 {
     if (!camera || !pawn) return;
     const glm::vec3 forward = -camera->w;
-    camera->eye = pawn->position + cameraOffset - forward * cameraDistance;
+    camera->eye = pawn->GetActorLocation() + cameraOffset - forward * cameraDistance;
 }

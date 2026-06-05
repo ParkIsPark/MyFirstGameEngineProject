@@ -5,177 +5,161 @@
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine">
-      <UniqueIdentifier>{10000000-0000-0000-0000-000000000001}</UniqueIdentifier>
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000000}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Framework">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000001}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Core">
-      <UniqueIdentifier>{10000000-0000-0000-0000-000000000002}</UniqueIdentifier>
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000002}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\World">
-      <UniqueIdentifier>{10000000-0000-0000-0000-000000000003}</UniqueIdentifier>
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000003}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Engine\Light">
-      <UniqueIdentifier>{10000000-0000-0000-0000-000000000004}</UniqueIdentifier>
+    <Filter Include="Engine\Serialization">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000020}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Engine\Physics">
-      <UniqueIdentifier>{10000000-0000-0000-0000-000000000005}</UniqueIdentifier>
+    <Filter Include="Engine\Mesh">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000004}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Engine\Player">
-      <UniqueIdentifier>{10000000-0000-0000-0000-000000000007}</UniqueIdentifier>
+    <Filter Include="Engine\Rasterizer">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000005}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Render">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000006}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\RayTracing">
-      <UniqueIdentifier>{10000000-0000-0000-0000-000000000006}</UniqueIdentifier>
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000007}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Acceleration">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000008}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Threading">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000009}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Import">
+      <UniqueIdentifier>{20000000-0000-0000-0000-00000000000a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Editor">
+      <UniqueIdentifier>{20000000-0000-0000-0000-00000000000b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Editor\External\imgui">
+      <UniqueIdentifier>{20000000-0000-0000-0000-00000000000c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Editor\External\imgui\backends">
+      <UniqueIdentifier>{20000000-0000-0000-0000-00000000000d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Light">
+      <UniqueIdentifier>{20000000-0000-0000-0000-00000000000e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Physics">
+      <UniqueIdentifier>{20000000-0000-0000-0000-00000000000f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Player">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000010}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <!-- User source -->
-    <ClCompile Include="main.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <!-- Engine: Core -->
-    <ClCompile Include="$(SolutionDir)Engine\Core\UScene.cpp">
-      <Filter>Engine\Core</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\Core\UPostProcessFilter.cpp">
-      <Filter>Engine\Core</Filter>
-    </ClCompile>
-    <!-- Engine: World -->
-    <ClCompile Include="$(SolutionDir)Engine\World\AActor.cpp">
-      <Filter>Engine\World</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\World\ACamera.cpp">
-      <Filter>Engine\World</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\World\CubeSurface.cpp">
-      <Filter>Engine\World</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\World\PlaneSurface.cpp">
-      <Filter>Engine\World</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\World\SphereSurface.cpp">
-      <Filter>Engine\World</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\World\USurface.cpp">
-      <Filter>Engine\World</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\World\UTilemap.cpp">
-      <Filter>Engine\World</Filter>
-    </ClCompile>
-    <!-- Engine: Light -->
-    <ClCompile Include="$(SolutionDir)Engine\Light\ALight.cpp">
-      <Filter>Engine\Light</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\Light\EnvironmentLight.cpp">
-      <Filter>Engine\Light</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\Light\LightComponent.cpp">
-      <Filter>Engine\Light</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\Light\PointLight.cpp">
-      <Filter>Engine\Light</Filter>
-    </ClCompile>
-    <!-- Engine: Physics -->
-    <ClCompile Include="$(SolutionDir)Engine\Physics\PhysicalComponent.cpp">
-      <Filter>Engine\Physics</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\Physics\UPhysicsWorld.cpp">
-      <Filter>Engine\Physics</Filter>
-    </ClCompile>
-    <!-- Engine: Player -->
-    <ClCompile Include="$(SolutionDir)Engine\Player\UPlayerCharacter.cpp">
-      <Filter>Engine\Player</Filter>
-    </ClCompile>
-    <ClCompile Include="$(SolutionDir)Engine\Player\UPlayerController.cpp">
-      <Filter>Engine\Player</Filter>
-    </ClCompile>
-    <!-- Engine: RayTracing -->
-    <ClCompile Include="$(SolutionDir)Engine\RayTracing\URayTracing.cpp">
-      <Filter>Engine\RayTracing</Filter>
-    </ClCompile>
+    <ClCompile Include="main.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Framework\Engine.cpp"><Filter>Engine\Framework</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Framework\GameEngine.cpp"><Filter>Engine\Framework</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Framework\BuildManager.cpp"><Filter>Engine\Framework</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Framework\FProjectDescriptor.cpp"><Filter>Engine\Framework</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Framework\USubsystemManager.cpp"><Filter>Engine\Framework</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Core\UScene.cpp"><Filter>Engine\Core</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Core\UPostProcessFilter.cpp"><Filter>Engine\Core</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\World\AActor.cpp"><Filter>Engine\World</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\World\USceneComponent.cpp"><Filter>Engine\World</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Serialization\FArchive.cpp"><Filter>Engine\Serialization</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Serialization\FWorldSerializer.cpp"><Filter>Engine\Serialization</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Serialization\FIniFile.cpp"><Filter>Engine\Serialization</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Mesh\Material.cpp"><Filter>Engine\Mesh</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\World\ACamera.cpp"><Filter>Engine\World</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\World\UWorld.cpp"><Filter>Engine\World</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Mesh\UMesh.cpp"><Filter>Engine\Mesh</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Mesh\UMeshComponent.cpp"><Filter>Engine\Mesh</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\FTransform.cpp"><Filter>Engine\Rasterizer</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.cpp"><Filter>Engine\Rasterizer</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Render\URenderer.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Render\UWorldRenderer.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Render\USkyHDRI.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Render\UHybridPass.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\RayTracing\UMeshRayTracer.cpp"><Filter>Engine\RayTracing</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Acceleration\BVH.cpp"><Filter>Engine\Acceleration</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Import\UObjImporter.cpp"><Filter>Engine\Import</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Import\UFbxImporter.cpp"><Filter>Engine\Import</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\EditorEngine.cpp"><Filter>Engine\Editor</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\FFileDialog.cpp"><Filter>Engine\Editor</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\FProcess.cpp"><Filter>Engine\Editor</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_draw.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_tables.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_widgets.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui_demo.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\backends\imgui_impl_glfw.cpp"><Filter>Engine\Editor\External\imgui\backends</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\backends\imgui_impl_opengl3.cpp"><Filter>Engine\Editor\External\imgui\backends</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.cpp"><Filter>Engine\Editor</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Light\ALight.cpp"><Filter>Engine\Light</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Light\EnvironmentLightComponent.cpp"><Filter>Engine\Light</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Light\LightComponent.cpp"><Filter>Engine\Light</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Light\PointLightComponent.cpp"><Filter>Engine\Light</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Physics\UPrimitiveComponent.cpp"><Filter>Engine\Physics</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Physics\USphereComponent.cpp"><Filter>Engine\Physics</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Physics\UBoxComponent.cpp"><Filter>Engine\Physics</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Physics\UPhysicsWorld.cpp"><Filter>Engine\Physics</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Player\UPlayerCharacter.cpp"><Filter>Engine\Player</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Player\UPlayerController.cpp"><Filter>Engine\Player</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <!-- Engine: Core headers -->
-    <ClInclude Include="$(SolutionDir)Engine\Core\UScene.h">
-      <Filter>Engine\Core</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\Core\UPostProcessFilter.h">
-      <Filter>Engine\Core</Filter>
-    </ClInclude>
-    <!-- Engine: World headers -->
-    <ClInclude Include="$(SolutionDir)Engine\World\AActor.h">
-      <Filter>Engine\World</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\World\ACamera.h">
-      <Filter>Engine\World</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\World\CubeSurface.h">
-      <Filter>Engine\World</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\World\PlaneSurface.h">
-      <Filter>Engine\World</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\World\SphereSurface.h">
-      <Filter>Engine\World</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\World\USurface.h">
-      <Filter>Engine\World</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\World\UTilemap.h">
-      <Filter>Engine\World</Filter>
-    </ClInclude>
-    <!-- Engine: Light headers -->
-    <ClInclude Include="$(SolutionDir)Engine\Light\ALight.h">
-      <Filter>Engine\Light</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\Light\EnvironmentLight.h">
-      <Filter>Engine\Light</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\Light\LightComponent.h">
-      <Filter>Engine\Light</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\Light\PointLight.h">
-      <Filter>Engine\Light</Filter>
-    </ClInclude>
-    <!-- Engine: Physics headers -->
-    <ClInclude Include="$(SolutionDir)Engine\Physics\PhysicalComponent.h">
-      <Filter>Engine\Physics</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\Physics\UPhysicsWorld.h">
-      <Filter>Engine\Physics</Filter>
-    </ClInclude>
-    <!-- Engine: Player headers -->
-    <ClInclude Include="$(SolutionDir)Engine\Player\UPlayerCharacter.h">
-      <Filter>Engine\Player</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\Player\UPlayerController.h">
-      <Filter>Engine\Player</Filter>
-    </ClInclude>
-    <!-- Engine: RayTracing headers -->
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\RenderConfig.h">
-      <Filter>Engine\RayTracing</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\URayTracing.h">
-      <Filter>Engine\RayTracing</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\URay.h">
-      <Filter>Engine\RayTracing</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\URayTracingPass.h">
-      <Filter>Engine\RayTracing</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\GeometryPass.h">
-      <Filter>Engine\RayTracing</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\MaterialPass.h">
-      <Filter>Engine\RayTracing</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\DirectLightPass.h">
-      <Filter>Engine\RayTracing</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\IndirectLightPass.h">
-      <Filter>Engine\RayTracing</Filter>
-    </ClInclude>
-    <ClInclude Include="$(SolutionDir)Engine\RayTracing\PostProcessPass.h">
-      <Filter>Engine\RayTracing</Filter>
-    </ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Framework\Engine.h"><Filter>Engine\Framework</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Framework\GameEngine.h"><Filter>Engine\Framework</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Framework\BuildManager.h"><Filter>Engine\Framework</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Framework\FProjectDescriptor.h"><Filter>Engine\Framework</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Framework\USubsystem.h"><Filter>Engine\Framework</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Framework\USubsystemManager.h"><Filter>Engine\Framework</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Core\UScene.h"><Filter>Engine\Core</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Core\UPostProcessFilter.h"><Filter>Engine\Core</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\World\AActor.h"><Filter>Engine\World</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\World\USceneComponent.h"><Filter>Engine\World</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Serialization\FArchive.h"><Filter>Engine\Serialization</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Serialization\FWorldSerializer.h"><Filter>Engine\Serialization</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Serialization\FIniFile.h"><Filter>Engine\Serialization</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\World\ACamera.h"><Filter>Engine\World</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\World\UWorld.h"><Filter>Engine\World</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Mesh\Vertex.h"><Filter>Engine\Mesh</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Mesh\Material.h"><Filter>Engine\Mesh</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Mesh\UMesh.h"><Filter>Engine\Mesh</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Mesh\UMeshComponent.h"><Filter>Engine\Mesh</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\UFrameBuffer.h"><Filter>Engine\Rasterizer</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\FTransform.h"><Filter>Engine\Rasterizer</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.h"><Filter>Engine\Rasterizer</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\UGBuffer.h"><Filter>Engine\Rasterizer</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\URenderer.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\UWorldRenderer.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\USkyHDRI.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderShowFlag.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\UHybridPass.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Acceleration\BVH.h"><Filter>Engine\Acceleration</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Threading\ThreadPool.h"><Filter>Engine\Threading</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Import\UObjImporter.h"><Filter>Engine\Import</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Import\UFbxImporter.h"><Filter>Engine\Import</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\EditorEngine.h"><Filter>Engine\Editor</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\FFileDialog.h"><Filter>Engine\Editor</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\FProcess.h"><Filter>Engine\Editor</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.h"><Filter>Engine\Editor</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Light\ALight.h"><Filter>Engine\Light</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Light\EnvironmentLightComponent.h"><Filter>Engine\Light</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Light\LightComponent.h"><Filter>Engine\Light</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Light\PointLightComponent.h"><Filter>Engine\Light</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Physics\UPrimitiveComponent.h"><Filter>Engine\Physics</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Physics\UShapeComponent.h"><Filter>Engine\Physics</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Physics\USphereComponent.h"><Filter>Engine\Physics</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Physics\UBoxComponent.h"><Filter>Engine\Physics</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Physics\UPhysicsWorld.h"><Filter>Engine\Physics</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Player\UPlayerCharacter.h"><Filter>Engine\Player</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Player\UPlayerController.h"><Filter>Engine\Player</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\UMeshRayTracer.h"><Filter>Engine\RayTracing</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\RTShading.h"><Filter>Engine\RayTracing</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\URay.h"><Filter>Engine\RayTracing</Filter></ClInclude>
   </ItemGroup>
 </Project>

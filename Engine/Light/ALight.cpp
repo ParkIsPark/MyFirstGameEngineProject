@@ -1,8 +1,12 @@
 #include "ALight.h"
-#include "UScene.h"
-#include "ACamera.h"
-#include "URay.h"
-#include "URayTracing.h"
+#include "FArchive.h"
+
+REGISTER_ACTOR("Light", ALight)
+
+// ALight is an actor that owns a LightComponent. The light component is a
+// USceneComponent attached under the actor's root, so the light's world
+// position follows the actor transform (GetWorldLocation()). On load the world
+// serializer recreates the light as a child [Component] and wires lightComp.
 
 ALight::ALight()
     : lightComp(nullptr)
@@ -12,6 +16,11 @@ ALight::ALight()
 ALight::ALight(LightComponent* comp)
     : lightComp(comp)
 {
+    if (comp)
+    {
+        comp->owner = this;
+        comp->AttachTo(&rootComponent);
+    }
 }
 
 ALight::~ALight()
@@ -19,17 +28,7 @@ ALight::~ALight()
     delete lightComp;
 }
 
-glm::vec3 ALight::illuminate(
-    const glm::vec3&   hitPoint,
-    const glm::vec3&   normal,
-    const AActor*      actor,
-    const URay&        ray,
-    const UScene&      scene,
-    const ACamera&     camera,
-    int                depth,
-    const URayTracing* tracer) const
+void ALight::Serialize(FArchive& ar)
 {
-    if (lightComp)
-        return lightComp->illuminate(hitPoint, normal, actor, ray, scene, camera, depth, tracer);
-    return glm::vec3(0.0f);
+    AActor::Serialize(ar);   // name + root transform; the light is a child component
 }

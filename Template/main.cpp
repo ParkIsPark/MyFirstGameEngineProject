@@ -1,111 +1,41 @@
-#include <Windows.h>
-#include <iostream>
-#include <GL/glew.h>
-#include <GL/freeglut.h>
+// main.cpp -- entry point for a project built on MyFirstGameEngine.
+//
+// One executable, two roles (like Unreal's editor/standalone):
+//   * EDITOR build  (no GAME_BUILD)  -> opens the ImGui editor on this project.
+//   * GAME   build  (GAME_BUILD set) -> boots straight into the standalone game.
+// Either build also honors `--game [world]` on the command line, so the editor's
+// "Play (Window)" can spawn this same exe as a standalone game window.
+//
+// The boot reads <name>.proj -> Setting/DefaultEngine.ini -> Content/<StartupWorld>
+// (Engine::Run wires this); GAME_BUILD just flips the no-argument default.
 
-#define GLFW_INCLUDE_GLU
-#define GLFW_DLL
-#include <GLFW/glfw3.h>
-#include <vector>
+#include <string>
+#include "EditorEngine.h"
+#include "GameEngine.h"
 
-#define GLM_SWIZZLE
-#include <glm/glm.hpp>
-#include <glm/gtc/constants.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtx/string_cast.hpp>
+static const char* kProj = "__PROJECT_NAME__.proj";
 
-using namespace glm;
-
-// Engine
-#include "UScene.h"
-#include "ACamera.h"
-#include "URayTracing.h"
-
-// -------------------------------------------------
-// Global Variables
-// -------------------------------------------------
-int Width  = 1280;
-int Height = 720;
-std::vector<float> OutputImage;
-
-UScene      scene;
-ACamera     camera;
-URayTracing rayTracer;
-// -------------------------------------------------
-
-
-void render()
+int main(int argc, char** argv)
 {
-    // Fill OutputImage with per-pixel RGB floats in [0,1].
-    // Row-major, origin at bottom-left (matches glDrawPixels).
-    //
-    // Example (CPU ray tracing):
-    //   rayTracer.Render(scene, camera, /*mode=*/0);
-    //   OutputImage = scene.outputImage;
-    //
-    // Stub: grey background
-    OutputImage.assign(Width * Height * 3, 0.5f);
-}
+    const std::string arg = (argc > 1) ? argv[1] : "";
 
-
-void resize_callback(GLFWwindow*, int nw, int nh)
-{
-    Width  = nw;
-    Height = nh;
-    glViewport(0, 0, nw, nh);
-
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0.0, static_cast<double>(Width),
-            0.0, static_cast<double>(Height),
-            1.0, -1.0);
-
-    OutputImage.reserve(Width * Height * 3);
-    render();
-}
-
-
-int main(int argc, char* argv[])
-{
-    GLFWwindow* window;
-
-    if (!glfwInit())
-        return -1;
-
-    window = glfwCreateWindow(Width, Height, "OpenGL Viewer", NULL, NULL);
-    if (!window)
+    // Explicit standalone game request (editor Play-in-new-window spawns this).
+    if (arg == "--game")
     {
-        glfwTerminate();
-        return -1;
+        GameEngine game((argc > 2) ? argv[2] : "");   // ""=boot StartupWorld from .proj
+        if (!game.Init(1280, 720, "__PROJECT_NAME__")) return -1;
+        return game.Run(kProj);
     }
 
-    glfwMakeContextCurrent(window);
-
-    if (glewInit() != GLEW_OK)
-    {
-        std::cerr << "GLEW init failed\n";
-        return -1;
-    }
-
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-
-    glfwSetFramebufferSizeCallback(window, resize_callback);
-    resize_callback(NULL, Width, Height);
-
-    while (!glfwWindowShouldClose(window))
-    {
-        glClear(GL_COLOR_BUFFER_BIT);
-        glDrawPixels(Width, Height, GL_RGB, GL_FLOAT, OutputImage.data());
-        glfwSwapBuffers(window);
-        glfwPollEvents();
-
-        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS ||
-            glfwGetKey(window, GLFW_KEY_Q)      == GLFW_PRESS)
-            glfwSetWindowShouldClose(window, GL_TRUE);
-    }
-
-    glfwDestroyWindow(window);
-    glfwTerminate();
-    return 0;
+#ifdef GAME_BUILD
+    // Packaged game: double-click -> play.
+    GameEngine game("");
+    if (!game.Init(1280, 720, "__PROJECT_NAME__")) return -1;
+    return game.Run(kProj);
+#else
+    // Editor build: author the project.
+    EditorEngine editor;
+    if (!editor.Init(1280, 800, "__PROJECT_NAME__ Editor")) return -1;
+    return editor.Run(kProj);
+#endif
 }

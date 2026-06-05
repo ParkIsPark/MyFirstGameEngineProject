@@ -9,6 +9,10 @@ class UPhysicsWorld
 public:
     glm::vec3 gravity = glm::vec3(0.0f, -9.8f, 0.0f);
 
+    // Floor is a world parameter now, not a plane actor (shape != surface).
+    bool  enableFloor = false;
+    float floorY      = 0.0f;
+
     void Tick(float dt, UScene& scene);
 
 private:
