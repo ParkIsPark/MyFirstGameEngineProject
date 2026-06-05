@@ -22,8 +22,10 @@ unsigned int USkyHDRI::GetOrLoad(const std::string& path)
     float* data = stbi_loadf(path.c_str(), &w, &h, &n, 3);
     if (!data)
     {
-        std::printf("[Sky] failed to load HDRI '%s'\n", path.c_str());
-        loadedPath_.clear();
+        // Keep loadedPath_ = path (do NOT clear): a failed load must be remembered
+        // so we don't re-attempt the (failed, expensive) disk read every frame --
+        // that retry storm shows up as a hard lag with no sky ever appearing.
+        std::printf("[Sky] failed to load HDRI '%s': %s\n", path.c_str(), stbi_failure_reason());
         return 0;
     }
 

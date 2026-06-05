@@ -79,6 +79,8 @@ private:
     unsigned int nodeTbo_ = 0, nodeTex_ = 0;   // uNodes: concatenated BLAS nodes (2 texels/node)
     unsigned int idxTbo_  = 0, idxTex_  = 0;   // uTriIdx: concat leaf -> local triangle index (R32F)
     unsigned int instTbo_ = 0, instTex_ = 0;   // uInstances: 7 texels/instance
+    unsigned int tlasNodeTbo_ = 0, tlasNodeTex_ = 0;  // uTlasNodes: BVH over instances
+    unsigned int tlasIdxTbo_  = 0, tlasIdxTex_  = 0;  // uTlasIdx: TLAS leaf -> instance
     int          numTris_  = 0;
     int          numNodes_ = 0;
     int          numInstances_ = 0;

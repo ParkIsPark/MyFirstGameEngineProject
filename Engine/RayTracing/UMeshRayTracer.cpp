@@ -28,6 +28,44 @@
 static const int TEXELS_PER_TRI  = 6;   // v0..v2(.w=u), n0..n2(.w=v)  [LOCAL space]
 static const int TEXELS_PER_INST = 7;   // invM r0,r1,r2 | (albedo,km) | (layer,nodeOff,triOff,idxOff) | wbbMin | wbbMax
 
+// TLAS = a small BVH over the instances' world-space AABBs (median split on the
+// longest centroid axis). Same BVHNode layout as a mesh BVH so the GLSL stack
+// traversal is identical. Built each frame (cheap: O(instances)) so the shader's
+// ray cost stays ~O(log instances) instead of looping every instance -- which,
+// multiplied by GI samples, was overrunning the GPU watchdog (TDR) and crashing.
+namespace {
+struct TlasBox { glm::vec3 mn, mx, c; int inst; };
+
+int buildTlasNode(std::vector<TlasBox>& b, int start, int count,
+                  std::vector<BVHNode>& nodes, std::vector<uint32_t>& order)
+{
+    const int ni = (int)nodes.size();
+    nodes.push_back(BVHNode{});
+
+    glm::vec3 bmn(1e30f), bmx(-1e30f);
+    for (int i = start; i < start + count; ++i) { bmn = glm::min(bmn, b[i].mn); bmx = glm::max(bmx, b[i].mx); }
+
+    if (count <= 2)                                   // leaf
+    {
+        BVHNode n; n.bbMin = bmn; n.bbMax = bmx;
+        n.leftOrTriStart = (int)order.size(); n.rightOrTriCount = count;
+        for (int i = start; i < start + count; ++i) order.push_back((uint32_t)b[i].inst);
+        nodes[ni] = n; return ni;
+    }
+
+    const glm::vec3 ext = bmx - bmn;
+    const int axis = (ext.x >= ext.y && ext.x >= ext.z) ? 0 : (ext.y >= ext.z ? 1 : 2);
+    std::sort(b.begin() + start, b.begin() + start + count,
+              [axis](const TlasBox& A, const TlasBox& B) { return A.c[axis] < B.c[axis]; });
+    const int half = count / 2;
+    const int L = buildTlasNode(b, start,        half,         nodes, order);
+    const int R = buildTlasNode(b, start + half, count - half, nodes, order);
+    BVHNode n; n.bbMin = bmn; n.bbMax = bmx;
+    n.leftOrTriStart = L; n.rightOrTriCount = -R;     // inner: left = L, right = -(b.w)
+    nodes[ni] = n; return ni;
+}
+} // namespace
+
 static const char* VERT_SRC = R"GLSL(
 #version 330 core
 layout(location = 0) in vec2 aPos;
@@ -58,6 +96,8 @@ uniform samplerBuffer uTris;          // 6 texels per triangle, MESH-LOCAL (conc
 uniform samplerBuffer uNodes;         // concat BLAS nodes: 2 texels/node (bbMin|left, bbMax|count)
 uniform samplerBuffer uTriIdx;        // concat BLAS leaf -> mesh-local triangle index (R32F)
 uniform samplerBuffer uInstances;     // 7 texels per instance (see C++ side)
+uniform samplerBuffer uTlasNodes;     // TLAS: BVH over instances, 2 texels/node
+uniform samplerBuffer uTlasIdx;       // TLAS leaf -> instance index (R32F)
 uniform sampler2DArray uTexArr;       // per-instance diffuse textures (layer in instance.4.x)
 uniform int            uHasTex;
 
@@ -97,7 +137,7 @@ vec3 hitAlbedo(int inst, int tri, float hu, float hv) {
     float a = 1.0 - hu - hv;
     float u = a * texelFetch(uTris, tri*6+0).w + hu * texelFetch(uTris, tri*6+1).w + hv * texelFetch(uTris, tri*6+2).w;
     float v = a * texelFetch(uTris, tri*6+3).w + hu * texelFetch(uTris, tri*6+4).w + hv * texelFetch(uTris, tri*6+5).w;
-    return texture(uTexArr, vec3(u, v, float(li))).rgb;
+    return textureLod(uTexArr, vec3(u, v, float(li)), 0.0).rgb;   // explicit LOD: called from divergent ray code
 }
 )GLSL";
 
@@ -177,35 +217,71 @@ bool blasOccluded(vec3 lo, vec3 ld, int nodeOff, int triOff, int idxOff, float m
     return false;
 }
 
-// ---- TLAS = a linear loop over instances (scenes have few objects). Each
-// instance is world-AABB rejected, then the ray is pushed into mesh-local space
-// and traced against the (cached) BLAS. Returns the global triangle + instance. ----
+// Trace one instance: world-AABB reject, push the ray into mesh-local space, then
+// traverse the (cached) BLAS. Updates the global closest t / hit on success.
+void traceInstance(int i, vec3 ro, vec3 rd, vec3 invD,
+                   inout float t, inout int tri, inout float u, inout float v, inout int inst) {
+    if (!_slab(ro, invD, instMin(i), instMax(i), t)) return;
+    vec4 r0 = instR0(i), r1 = instR1(i), r2 = instR2(i), off = instOff(i);
+    vec3 lo = xfPoint(r0, r1, r2, ro);
+    vec3 ld = xfDir  (r0, r1, r2, rd);
+    int th; float uu, vv;
+    if (blasClosest(lo, ld, int(off.y), int(off.z), int(off.w), t, th, uu, vv)) {
+        tri = th; u = uu; v = vv; inst = i;
+    }
+}
+
+// ---- TLAS traversal (BVH over instances) -> per-instance BLAS. O(log instances)
+// so GI/shadow rays stay cheap even with many objects. Returns global tri + instance. ----
 bool traceClosest(vec3 ro, vec3 rd, out float t, out int tri, out float u, out float v, out int inst) {
+    t = 1e30; tri = -1; inst = -1;
+    if (uNumInstances <= 0) return false;
     vec3 invD = 1.0 / rd;
-    t = 1e30; tri = -1; inst = -1; bool found = false;
-    for (int i = 0; i < uNumInstances; ++i) {
-        if (!_slab(ro, invD, instMin(i), instMax(i), t)) continue;
-        vec4 r0 = instR0(i), r1 = instR1(i), r2 = instR2(i), off = instOff(i);
-        vec3 lo = xfPoint(r0, r1, r2, ro);
-        vec3 ld = xfDir  (r0, r1, r2, rd);
-        int th; float uu, vv;
-        if (blasClosest(lo, ld, int(off.y), int(off.z), int(off.w), t, th, uu, vv)) {
-            tri = th; u = uu; v = vv; inst = i; found = true;
+    int stack[32]; int sp = 0; stack[sp++] = 0;
+    while (sp > 0) {
+        int ni = stack[--sp];
+        vec4 a = texelFetch(uTlasNodes, ni * 2 + 0);
+        vec4 b = texelFetch(uTlasNodes, ni * 2 + 1);
+        if (!_slab(ro, invD, a.xyz, b.xyz, t)) continue;
+        int rc = int(b.w);
+        if (rc > 0) {                                   // leaf: a few instances
+            int start = int(a.w);
+            for (int k = 0; k < rc; ++k)
+                traceInstance(int(texelFetch(uTlasIdx, start + k).x), ro, rd, invD, t, tri, u, v, inst);
+        } else if (sp + 2 <= 32) {
+            stack[sp++] = int(a.w);
+            stack[sp++] = -rc;
         }
     }
-    return found;
+    return inst >= 0;
 }
 
 // Two-level any-hit occlusion (shadow / GI rays). Definition for the prototype in
 // RTShading.h -- the shared shadeSurface/directLight call this.
 bool occluded(vec3 ro, vec3 rd, float maxT, float tMin) {
+    if (uNumInstances <= 0) return false;
     vec3 invD = 1.0 / rd;
-    for (int i = 0; i < uNumInstances; ++i) {
-        if (!_slab(ro, invD, instMin(i), instMax(i), maxT)) continue;
-        vec4 r0 = instR0(i), r1 = instR1(i), r2 = instR2(i), off = instOff(i);
-        vec3 lo = xfPoint(r0, r1, r2, ro);
-        vec3 ld = xfDir  (r0, r1, r2, rd);
-        if (blasOccluded(lo, ld, int(off.y), int(off.z), int(off.w), maxT, tMin)) return true;
+    int stack[32]; int sp = 0; stack[sp++] = 0;
+    while (sp > 0) {
+        int ni = stack[--sp];
+        vec4 a = texelFetch(uTlasNodes, ni * 2 + 0);
+        vec4 b = texelFetch(uTlasNodes, ni * 2 + 1);
+        if (!_slab(ro, invD, a.xyz, b.xyz, maxT)) continue;
+        int rc = int(b.w);
+        if (rc > 0) {                                   // leaf
+            int start = int(a.w);
+            for (int k = 0; k < rc; ++k) {
+                int i = int(texelFetch(uTlasIdx, start + k).x);
+                if (!_slab(ro, invD, instMin(i), instMax(i), maxT)) continue;
+                vec4 r0 = instR0(i), r1 = instR1(i), r2 = instR2(i), off = instOff(i);
+                vec3 lo = xfPoint(r0, r1, r2, ro);
+                vec3 ld = xfDir  (r0, r1, r2, rd);
+                if (blasOccluded(lo, ld, int(off.y), int(off.z), int(off.w), maxT, tMin)) return true;
+            }
+        } else if (sp + 2 <= 32) {
+            stack[sp++] = int(a.w);
+            stack[sp++] = -rc;
+        }
     }
     return false;
 }
@@ -485,6 +561,8 @@ void UMeshRayTracer::UploadWorld(const std::vector<const UMesh*>& meshes,
     // ---- Per-instance records (rebuilt every call -- this is the cheap part). ----
     std::vector<glm::vec4> inst;
     inst.reserve(meshes.size() * TEXELS_PER_INST);
+    std::vector<TlasBox>   boxes;                      // for the TLAS over instances
+    boxes.reserve(meshes.size());
     numInstances_ = 0;
     for (size_t i = 0; i < meshes.size(); ++i)
     {
@@ -512,9 +590,25 @@ void UMeshRayTracer::UploadWorld(const std::vector<const UMesh*>& meshes,
         }
         inst.emplace_back(wmn, 0.0f);
         inst.emplace_back(wmx, 0.0f);
+        boxes.push_back({ wmn, wmx, (wmn + wmx) * 0.5f, numInstances_ });
         ++numInstances_;
     }
     uploadBufferTex(instTbo_, instTex_, GL_RGBA32F, inst.data(), inst.size() * sizeof(glm::vec4));
+
+    // Build + upload the TLAS (BVH over the instance AABBs).
+    std::vector<BVHNode>  tlasNodes;
+    std::vector<uint32_t> tlasOrder;
+    if (!boxes.empty()) buildTlasNode(boxes, 0, (int)boxes.size(), tlasNodes, tlasOrder);
+    std::vector<glm::vec4> tlasTexels;
+    tlasTexels.reserve(tlasNodes.size() * 2);
+    for (const BVHNode& n : tlasNodes)
+    {
+        tlasTexels.emplace_back(n.bbMin, (float)n.leftOrTriStart);
+        tlasTexels.emplace_back(n.bbMax, (float)n.rightOrTriCount);
+    }
+    std::vector<float> tlasIdx(tlasOrder.begin(), tlasOrder.end());
+    uploadBufferTex(tlasNodeTbo_, tlasNodeTex_, GL_RGBA32F, tlasTexels.data(), tlasTexels.size() * sizeof(glm::vec4));
+    uploadBufferTex(tlasIdxTbo_,  tlasIdxTex_,  GL_R32F,    tlasIdx.data(),    tlasIdx.size()    * sizeof(float));
 }
 
 void UMeshRayTracer::RenderFrame(const ACamera& cam, int width, int height) const
@@ -556,6 +650,10 @@ void UMeshRayTracer::RenderFrame(const ACamera& cam, int width, int height) cons
     glActiveTexture(GL_TEXTURE5); glBindTexture(GL_TEXTURE_BUFFER, instTex_);
     glUniform1i(glGetUniformLocation(prog_, "uInstances"), 5);
     glUniform1i(glGetUniformLocation(prog_, "uNumInstances"), numInstances_);
+    glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_BUFFER, tlasNodeTex_);
+    glUniform1i(glGetUniformLocation(prog_, "uTlasNodes"), 3);
+    glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER, tlasIdxTex_);
+    glUniform1i(glGetUniformLocation(prog_, "uTlasIdx"), 6);
     glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D, skyTex_);
     glUniform1i(glGetUniformLocation(prog_, "uSky"), 7);
     glUniform1i(glGetUniformLocation(prog_, "uHasSky"), skyTex_ ? 1 : 0);
@@ -585,6 +683,10 @@ void UMeshRayTracer::Cleanup()
     if (idxTbo_)  { glDeleteBuffers(1, &idxTbo_);  idxTbo_ = 0; }
     if (instTex_) { glDeleteTextures(1, &instTex_); instTex_ = 0; }
     if (instTbo_) { glDeleteBuffers(1, &instTbo_);  instTbo_ = 0; }
+    if (tlasNodeTex_) { glDeleteTextures(1, &tlasNodeTex_); tlasNodeTex_ = 0; }
+    if (tlasNodeTbo_) { glDeleteBuffers(1, &tlasNodeTbo_);  tlasNodeTbo_ = 0; }
+    if (tlasIdxTex_)  { glDeleteTextures(1, &tlasIdxTex_); tlasIdxTex_ = 0; }
+    if (tlasIdxTbo_)  { glDeleteBuffers(1, &tlasIdxTbo_);  tlasIdxTbo_ = 0; }
     if (texArr_)  { glDeleteTextures(1, &texArr_); texArr_ = 0; texLayers_ = 0; }
     if (vbo_)     { glDeleteBuffers(1, &vbo_);  vbo_  = 0; }
     if (vao_)     { glDeleteVertexArrays(1, &vao_); vao_ = 0; }

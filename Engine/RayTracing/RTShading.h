@@ -59,7 +59,10 @@ vec3 skyColor(vec3 rd) {
         vec3 d = normalize(rd);
         float u = atan(d.z, d.x) * 0.15915494 + 0.5;            // 1/(2*pi)
         float v = asin(clamp(d.y, -1.0, 1.0)) * 0.31830989 + 0.5; // 1/pi
-        return texture(uSky, vec2(u, v)).rgb;
+        // textureLod (NOT texture): this is called from divergent ray-traced control
+        // flow (GI loops, reflection), where implicit-LOD screen derivatives are
+        // undefined and crash some drivers. Explicit LOD 0 avoids derivatives.
+        return textureLod(uSky, vec2(u, v), 0.0).rgb;
     }
     return gradientSky(rd);
 }
