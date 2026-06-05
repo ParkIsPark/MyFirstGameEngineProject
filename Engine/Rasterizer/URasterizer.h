@@ -27,6 +27,15 @@ struct FShadeParams
     // ambient term is added once regardless of light count.
     std::vector<glm::vec3> extraLightPos;
     std::vector<glm::vec3> extraLightColor;
+
+    // Environment ambient (editor): when true the ambient uses a sky gradient
+    // (albedo * gradient(N) * 0.5), matching the GPU paths, instead of ka*Ia.
+    // Off (default) keeps the HW6 flat-ambient behavior bit-identical.
+    bool      envAmbient = false;
+    glm::vec3 skyHorizon = glm::vec3(0.10f, 0.12f, 0.16f);
+    glm::vec3 skyZenith  = glm::vec3(0.40f, 0.55f, 0.80f);
+    float     skyExp     = 1.0f;
+    float     ambientMul = 1.0f;   // ambient strength scale (render setting)
 };
 
 // ---------------------------------------------------------------------------

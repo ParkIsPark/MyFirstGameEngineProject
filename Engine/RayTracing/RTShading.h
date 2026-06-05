@@ -37,7 +37,17 @@ uniform vec3  uSkyZenith;   // zenith color
 uniform float uSkyExp;      // gradient curve exponent
 uniform int   uGISamples;   // hemisphere GI samples (0 = flat ambient)
 uniform vec3  uEnvTint;     // environment light color * intensity (scales GI)
+uniform int   uShadowSamples; // soft-shadow rays per light (1 = hard shadow)
+uniform float uShadowSoftness;// penumbra radius (light angular size)
 
+// Procedural gradient sky (env-light colors). Used for the matte ambient term so
+// a flat (non-GI) surface never shows the HDRI image directly.
+vec3 gradientSky(vec3 rd) {
+    float k = pow(clamp(rd.y * 0.5 + 0.5, 0.0, 1.0), max(uSkyExp, 0.01));
+    return mix(uSkyHorizon, uSkyZenith, k);
+}
+// Full sky: the HDRI when set (background, mirror reflection, GI gathering),
+// else the gradient.
 vec3 skyColor(vec3 rd) {
     if (uHasSky != 0) {
         vec3 d = normalize(rd);
@@ -45,8 +55,7 @@ vec3 skyColor(vec3 rd) {
         float v = asin(clamp(d.y, -1.0, 1.0)) * 0.31830989 + 0.5; // 1/pi
         return texture(uSky, vec2(u, v)).rgb;
     }
-    float k = pow(clamp(rd.y * 0.5 + 0.5, 0.0, 1.0), max(uSkyExp, 0.01));
-    return mix(uSkyHorizon, uSkyZenith, k);
+    return gradientSky(rd);
 }
 
 // --- hemisphere GI helpers (Unreal-Lumen-style environment lighting + AO) ---
@@ -84,8 +93,11 @@ bool _slab(vec3 ro, vec3 invD, vec3 mn, vec3 mx, float tMax) {
     return enter <= exit;
 }
 
-// Any-hit shadow test up to maxT via stack-based BVH traversal.
-bool occluded(vec3 ro, vec3 rd, float maxT) {
+// Any-hit occlusion up to maxT via stack-based BVH traversal. tMin ignores hits
+// closer than that along the ray -- essential for GI/AO rays, whose origin sits
+// on the surface: without it, grazing samples hit the originating mesh itself and
+// produce black self-occlusion speckles (acne).
+bool occluded(vec3 ro, vec3 rd, float maxT, float tMin) {
     vec3 invD = 1.0 / rd;
     int stack[64]; int sp = 0; stack[sp++] = 0;
     while (sp > 0) {
@@ -100,7 +112,7 @@ bool occluded(vec3 ro, vec3 rd, float maxT) {
                 int ti = int(texelFetch(uTriIdx, start + i).x);
                 float t;
                 if (_rayTriT(ro, rd, triPos(ti,0), triPos(ti,1), triPos(ti,2), t)
-                    && t < maxT - 1e-3) return true;     // any-hit early out
+                    && t > tMin && t < maxT - 1e-3) return true;   // any-hit early out
             }
         } else if (sp + 2 <= 64) {                      // inner
             stack[sp++] = int(a.w);
@@ -109,6 +121,8 @@ bool occluded(vec3 ro, vec3 rd, float maxT) {
     }
     return false;
 }
+// Convenience: shadow rays use the default tiny bias.
+bool occluded(vec3 ro, vec3 rd, float maxT) { return occluded(ro, rd, maxT, 1e-4); }
 
 // Reinhard tone map + gamma: compress accumulated light instead of clipping to
 // flat white when ambient + diffuse + specular (+ multiple lights) stack up.
@@ -121,8 +135,12 @@ vec3 tonemap(vec3 c) {
 // tonemap) radiance: sky ambient (added once) + the sum over every scene light
 // of its Blinn-Phong direct term, each gated by its OWN BVH-traced hard shadow
 // ray. Used unchanged by both render modes.
-vec3 shadeSurface(vec3 P, vec3 N, vec3 albedo) {
+// Ng = geometric (face) normal, used for GI hemisphere + ray offset so samples
+// never dip below the real surface (the cause of GI self-occlusion acne when the
+// smooth/interpolated N differs from the face). N is still used for shading.
+vec3 shadeSurface(vec3 P, vec3 N, vec3 albedo, vec3 Ng) {
     vec3 Vv = normalize(uEye - P);
+    if (dot(Ng, N) < 0.0) Ng = -Ng;       // orient to the shading hemisphere
 
     // Ambient / GI. With an EnvironmentLight (uGISamples>0) gather the environment
     // over the cosine-weighted hemisphere with BVH occlusion (Unreal-Lumen-style:
@@ -130,17 +148,27 @@ vec3 shadeSurface(vec3 P, vec3 N, vec3 albedo) {
     // Otherwise a cheap flat sky term (HW6-style).
     vec3 ambient;
     if (uGISamples > 0) {
+        // Distance-scaled origin offset avoids self-intersection acne (the black
+        // speckles): triangle precision degrades with distance from the camera.
+        // Offset along the FACE normal so samples (upper hemisphere of Ng) never
+        // start below the surface; with that, only a tiny self-bias is needed, so
+        // real nearby occluders are still found (no light leaks in shadowed areas).
+        float eps = 2e-3 + 1e-3 * length(P - uEye);
+        vec3  ro  = P + Ng * eps;
         vec3 gi = vec3(0.0);
         for (int i = 0; i < uGISamples; ++i) {
             float u1 = _giHash(gl_FragCoord.xy + vec2(float(i) * 1.7, float(i) * 3.1));
             float u2 = _giHash(gl_FragCoord.yx + vec2(float(i) * 2.3, float(i) * 0.7));
-            vec3  d  = _giCosHemi(N, u1, u2);
-            if (!occluded(P + N * 1e-3, d, 1.0e9))   // unoccluded -> gather sky
+            vec3  d  = _giCosHemi(Ng, u1, u2);        // hemisphere about the FACE normal
+            if (dot(d, Ng) <= 0.0) continue;          // never sample below the surface
+            if (!occluded(ro, d, 1.0e9))              // unoccluded -> gather sky (tiny bias)
                 gi += skyColor(d);
         }
         ambient = albedo * (gi / float(uGISamples)) * uEnvTint;
     } else {
-        ambient = albedo * skyColor(N) * 0.5;
+        // Matte ambient: soft gradient only (never the HDRI image directly -- the
+        // HDRI lights matte surfaces only through GI / mirror, and shows in the bg).
+        ambient = albedo * gradientSky(N) * 0.5;
     }
 
     vec3 lit = vec3(0.0);
@@ -152,8 +180,28 @@ vec3 shadeSurface(vec3 P, vec3 N, vec3 albedo) {
         float NdotL = max(dot(N, L), 0.0);
         if (NdotL <= 0.0) continue;
 
-        // each light casts its own shadow ray (offset along N to avoid acne)
-        float shadow = occluded(P + N * 1e-3, L, dist) ? 0.0 : 1.0;
+        // Shadow: a hard ray (1 sample) or soft penumbra (N jittered rays toward
+        // a disk around the light direction; fraction unoccluded = shadow factor).
+        // Slope-scaled, distance-scaled origin offset removes self-intersection acne
+        // (black dots) -- the bias grows near the terminator (small N.L) where the
+        // shadow ray skims the surface, and with distance (precision falls off).
+        float sEps = (3e-3 + 1.5e-3 * length(P - uEye)) / max(NdotL, 0.2);
+        vec3 ro = P + N * sEps;
+        float shadow;
+        if (uShadowSamples <= 1) {
+            shadow = occluded(ro, L, dist) ? 0.0 : 1.0;
+        } else {
+            vec3 st, sb; _giBasis(L, st, sb);
+            int blocked = 0;
+            for (int s = 0; s < uShadowSamples; ++s) {
+                float r1 = _giHash(gl_FragCoord.xy + vec2(float(s) * 5.3 + float(i), 1.1));
+                float r2 = _giHash(gl_FragCoord.yx + vec2(float(s) * 2.9, float(i) * 4.7));
+                float rr = uShadowSoftness * sqrt(r1); float ph = 6.2831853 * r2;
+                vec3 Lj = normalize(L + (st * cos(ph) + sb * sin(ph)) * rr);
+                if (occluded(ro, Lj, dist)) ++blocked;
+            }
+            shadow = 1.0 - float(blocked) / float(uShadowSamples);
+        }
         if (shadow <= 0.0) continue;
 
         vec3  H     = normalize(L + Vv);

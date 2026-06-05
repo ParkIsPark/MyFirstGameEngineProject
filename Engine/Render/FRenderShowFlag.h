@@ -18,4 +18,6 @@ struct FRenderShowFlag
     bool depthView   = false;
 
     EShadingModel shading = EShadingModel::Phong;
+
+    float ambientStrength = 1.0f;   // scales the CPU raster's environment ambient
 };

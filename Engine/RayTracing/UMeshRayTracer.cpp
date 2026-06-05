@@ -45,6 +45,7 @@ uniform vec3  uLightPosArr[MAX_LIGHTS];
 uniform vec3  uLightColorArr[MAX_LIGHTS];
 uniform vec3  uKs;                    // specular coefficient (per-tri albedo = diffuse)
 uniform float uShininess;             // Phong exponent
+uniform float uReflMul;               // global mirror-reflection multiplier
 uniform samplerBuffer uTris;          // 8 texels per triangle (see C++ side)
 uniform samplerBuffer uNodes;         // BVH: 2 texels per node (bbMin|left, bbMax|count)
 uniform samplerBuffer uTriIdx;        // BVH leaf -> triangle index (R32F)
@@ -132,22 +133,24 @@ void main() {
     vec3 n1 = triTexel(hit, 4);
     vec3 n2 = triTexel(hit, 5);
     vec3 n  = normalize((1.0 - hu - hv) * n0 + hu * n1 + hv * n2);
+    vec3 ng = normalize(cross(triTexel(hit,1) - triTexel(hit,0), triTexel(hit,2) - triTexel(hit,0))); // face normal
     vec3 albedo = hitAlbedo(hit, hu, hv);            // textured or flat diffuse
-    float km = texelFetch(uTris, hit * 8 + 6).w;     // mirror reflectance (packed in .w)
+    float km = texelFetch(uTris, hit * 8 + 6).w * uReflMul;   // mirror reflectance * global multiplier
     vec3 hitPos = ro + closest * rd;
 
-    vec3 col = shadeSurface(hitPos, n, albedo);
+    vec3 col = shadeSurface(hitPos, n, albedo, ng);
 
     // One mirror bounce: reflect the camera ray and shade what it hits (or sky),
     // then blend by the material's mirror factor km (Blinn-Phong + reflection).
     if (km > 0.001) {
         vec3 rd2 = reflect(rd, n);
-        vec3 ro2 = hitPos + n * 1e-3;
+        vec3 ro2 = hitPos + n * (2e-3 + 1e-3 * length(hitPos - uEye));   // distance-scaled (no acne)
         float c2; int hit2; float u2, v2;
         vec3 rcol;
         if (traceClosest(ro2, rd2, c2, hit2, u2, v2)) {
             vec3 rn = normalize((1.0 - u2 - v2) * triTexel(hit2,3) + u2 * triTexel(hit2,4) + v2 * triTexel(hit2,5));
-            rcol = shadeSurface(ro2 + c2 * rd2, rn, hitAlbedo(hit2, u2, v2));
+            vec3 rng = normalize(cross(triTexel(hit2,1) - triTexel(hit2,0), triTexel(hit2,2) - triTexel(hit2,0)));
+            rcol = shadeSurface(ro2 + c2 * rd2, rn, hitAlbedo(hit2, u2, v2), rng);
         } else {
             rcol = skyColor(rd2);
         }
@@ -370,7 +373,10 @@ void UMeshRayTracer::RenderFrame(const ACamera& cam, int width, int height) cons
         glUniform3fv(glGetUniformLocation(prog_, "uLightColorArr"), nL, glm::value_ptr(lightColor_[0]));
     }
     glUniform3fv(glGetUniformLocation(prog_, "uKs"), 1, glm::value_ptr(mat_.ks));
-    glUniform1f (glGetUniformLocation(prog_, "uShininess"), mat_.shininess);
+    glUniform1f (glGetUniformLocation(prog_, "uShininess"), shininess_);
+    glUniform1f (glGetUniformLocation(prog_, "uReflMul"), reflMul_);
+    glUniform1i (glGetUniformLocation(prog_, "uShadowSamples"), shadowSamples_);
+    glUniform1f (glGetUniformLocation(prog_, "uShadowSoftness"), shadowSoftness_);
 
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_BUFFER, tex_);
     glUniform1i(glGetUniformLocation(prog_, "uTris"), 0);

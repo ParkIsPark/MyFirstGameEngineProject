@@ -277,7 +277,17 @@ namespace
             return kd * lcol * ndl + m.ks * lcol * std::pow(ndh, p);
         };
 
-        glm::vec3 col = m.ka * sp.ambient + contrib(sp.lightPos, sp.lightColor);
+        // Ambient: environment gradient (matches the GPU matte ambient) or the
+        // HW6 flat ka*Ia.
+        glm::vec3 amb;
+        if (sp.envAmbient)
+        {
+            const float k = std::pow(glm::clamp(N.y * 0.5f + 0.5f, 0.0f, 1.0f), glm::max(sp.skyExp, 0.01f));
+            amb = kd * glm::mix(sp.skyHorizon, sp.skyZenith, k) * 0.5f * sp.ambientMul;
+        }
+        else amb = m.ka * sp.ambient;
+
+        glm::vec3 col = amb + contrib(sp.lightPos, sp.lightColor);
         for (size_t i = 0; i < sp.extraLightPos.size(); ++i)
             col += contrib(sp.extraLightPos[i], sp.extraLightColor[i]);
         return col;

@@ -37,7 +37,8 @@ void UWorldRenderer::renderRaster(UWorld& world, int w, int h)
 
     FRenderShowFlag flag;
     flag.shading = (EShadingModel)scene.shadingModel;
-    raster_.RasterShaded(world, flag);
+    sky_.GetOrLoad(scene.skyHDRI);
+    raster_.RasterShaded(world, flag, &sky_);
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (!scene.outputImage.empty())

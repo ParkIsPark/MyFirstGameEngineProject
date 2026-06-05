@@ -76,7 +76,7 @@ void main() {
     vec3 P   = texelFetch(uWorldPos, px, 0).xyz;
     vec3 N   = normalize(texelFetch(uNormal, px, 0).xyz);
     vec3 alb = texelFetch(uAlbedo,   px, 0).xyz;
-    FragColor = vec4(tonemap(shadeSurface(P, N, alb)), 1.0);
+    FragColor = vec4(tonemap(shadeSurface(P, N, alb, N)), 1.0);   // G-buffer: no face normal -> use N
 }
 )GLSL";
 
@@ -241,7 +241,9 @@ void UHybridPass::Render(const ACamera& cam, const std::vector<glm::vec3>& light
     }
     glm::vec3 ks(0.35f);   // match GPU RT mode (UMeshRayTracer) so the shared
     glUniform3fv(glGetUniformLocation(prog_, "uKs"), 1, glm::value_ptr(ks));
-    glUniform1f (glGetUniformLocation(prog_, "uShininess"), 32.0f);   // shadeSurface() looks identical
+    glUniform1f (glGetUniformLocation(prog_, "uShininess"), shininess_);
+    glUniform1i (glGetUniformLocation(prog_, "uShadowSamples"), shadowSamples_);
+    glUniform1f (glGetUniformLocation(prog_, "uShadowSoftness"), shadowSoftness_);
 
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, texWP_);
     glUniform1i(glGetUniformLocation(prog_, "uWorldPos"), 0);

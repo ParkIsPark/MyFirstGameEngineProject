@@ -33,11 +33,13 @@
 #include "UFbxImporter.h"
 #include "FFileDialog.h"
 #include "FProcess.h"
+#include "FIniFile.h"
 
 #include <cstdio>
 #include <cctype>
 #include <cmath>
 #include <sstream>
+#include <fstream>
 #include <filesystem>
 #include <algorithm>
 #include "stb_image.h"          // declaration only; impl lives in USkyHDRI.cpp
@@ -74,6 +76,7 @@ EditorEngine::~EditorEngine()
     if (pieWorld_) { delete pieWorld_; pieWorld_ = nullptr; }
     for (UWorld* w : undoStack_) delete w;
     for (UWorld* w : redoStack_) delete w;
+    delete clipboard_;
     delete editorWorld_;
     for (UMesh* m : meshAssets_) delete m;   // UScene dtor deletes the actors
 }
@@ -305,6 +308,39 @@ AActor* EditorEngine::AddActor(const char* type, const std::string& name)
     return a;
 }
 
+void EditorEngine::CopySelected()
+{
+    auto& actors = editorWorld_->GetScene().Actors;
+    if (selected_ < 0 || selected_ >= (int)actors.size()) return;
+    delete clipboard_;
+    clipboard_ = CloneActor(actors[selected_]);    // detached clone (not spawned)
+    std::printf("[Editor] copied '%s'\n", clipboard_->name.c_str());
+}
+
+void EditorEngine::PasteClipboard()
+{
+    if (!clipboard_) return;
+    PushUndo();
+    AActor* a = CloneActor(clipboard_);
+    a->SetActorLocation(a->GetActorLocation() + glm::vec3(1.0f, 0.0f, 0.0f));  // offset so it's visible
+    editorWorld_->Spawn(a);
+    actorNames_.push_back(a->name.empty() ? "Actor" : a->name);
+    selected_ = (int)editorWorld_->GetScene().Actors.size() - 1;
+    rtUploaded_ = false; hybridUploaded_ = false;
+}
+
+void EditorEngine::DeleteSelected()
+{
+    auto& actors = editorWorld_->GetScene().Actors;
+    if (selected_ < 0 || selected_ >= (int)actors.size()) return;
+    PushUndo();
+    delete actors[selected_];
+    actors.erase(actors.begin() + selected_);
+    actorNames_.erase(actorNames_.begin() + selected_);
+    if (selected_ >= (int)actors.size()) selected_ = (int)actors.size() - 1;
+    rtUploaded_ = false; hybridUploaded_ = false;
+}
+
 void EditorEngine::ImportAsset(const std::string& path)
 {
     namespace fs = std::filesystem;
@@ -387,64 +423,71 @@ UMesh* EditorEngine::LoadMeshFile(const std::string& path)
     return mesh;
 }
 
+AActor* EditorEngine::CloneActor(AActor* sa, bool resetPhysics)
+{
+    AActor* da = nullptr;
+
+    // Lights: clone the concrete light component so type/params survive.
+    if (ALight* sl = dynamic_cast<ALight*>(sa))
+    {
+        LightComponent* lc = nullptr;
+        if (auto* pl = dynamic_cast<PointLightComponent*>(sl->lightComp))
+            lc = new PointLightComponent(pl->LightColor, pl->LightIntensity);
+        else if (auto* el = dynamic_cast<EnvironmentLightComponent*>(sl->lightComp))
+        {
+            auto* e = new EnvironmentLightComponent(el->LightColor, el->LightIntensity);
+            e->horizonColor = el->horizonColor; e->zenithColor = el->zenithColor; e->skyExp = el->skyExp;
+            lc = e;
+        }
+        else if (sl->lightComp)
+            lc = new LightComponent(sl->lightComp->LightColor, sl->lightComp->LightIntensity);
+        da = new ALight(lc);
+    }
+    else
+    {
+        da = new AActor();
+    }
+
+    da->name = sa->name;
+    da->SetActorLocation(sa->GetActorLocation());
+    da->SetActorRotation(sa->GetActorRotation());
+    da->SetActorScale   (sa->GetActorScale());
+
+    if (sa->mesh)
+    {
+        UMeshComponent* mc = new UMeshComponent(*sa->mesh); // shares UMesh asset; copies meshRef + override + rel xform
+        da->SetMesh(mc);                                    // re-parents under da's root
+    }
+    if (sa->physics)
+    {
+        UPrimitiveComponent* p = nullptr;
+        if (sa->physics->GetShape() == EShape::Sphere)
+        { auto* s = new USphereComponent(da); s->radius = static_cast<USphereComponent*>(sa->physics)->radius; p = s; }
+        else if (sa->physics->GetShape() == EShape::Box)
+        { auto* b = new UBoxComponent(da); b->halfExtents = static_cast<UBoxComponent*>(sa->physics)->halfExtents; p = b; }
+        if (p)
+        {
+            p->mass = sa->physics->mass; p->restitution = sa->physics->restitution;
+            p->friction = sa->physics->friction; p->bAffectedByGravity = sa->physics->bAffectedByGravity;
+            p->bSimulate = sa->physics->bSimulate; p->localOffset = sa->physics->localOffset;
+            p->velocity = resetPhysics ? glm::vec3(0.0f) : sa->physics->velocity;
+            da->SetPhysics(p);
+        }
+    }
+    return da;
+}
+
 UWorld* EditorEngine::CopyWorld(UWorld& src, bool resetPhysics)
 {
     UWorld* dst = new UWorld();
     dst->GetScene().shadingModel = src.GetScene().shadingModel;
+    dst->GetScene().renderMode   = src.GetScene().renderMode;
+    dst->GetScene().skyHDRI      = src.GetScene().skyHDRI;
     dst->GetCamera() = src.GetCamera();                 // value copy of all camera fields
+    dst->GetPhysics() = src.GetPhysics();               // floor/gravity settings
 
     for (AActor* sa : src.GetScene().Actors)
-    {
-        AActor* da = nullptr;
-
-        // Lights: clone the concrete light component so type/params survive.
-        if (ALight* sl = dynamic_cast<ALight*>(sa))
-        {
-            LightComponent* lc = nullptr;
-            if (auto* pl = dynamic_cast<PointLightComponent*>(sl->lightComp))
-                lc = new PointLightComponent(pl->LightColor, pl->LightIntensity);
-            else if (auto* el = dynamic_cast<EnvironmentLightComponent*>(sl->lightComp))
-            {
-                auto* e = new EnvironmentLightComponent(el->LightColor, el->LightIntensity);
-                e->horizonColor = el->horizonColor; e->zenithColor = el->zenithColor; e->skyExp = el->skyExp;
-                lc = e;
-            }
-            else if (sl->lightComp)
-                lc = new LightComponent(sl->lightComp->LightColor, sl->lightComp->LightIntensity);
-            da = new ALight(lc);
-        }
-        else
-        {
-            da = new AActor();
-        }
-
-        da->name = sa->name;
-        da->SetActorLocation(sa->GetActorLocation());
-        da->SetActorRotation(sa->GetActorRotation());
-        da->SetActorScale   (sa->GetActorScale());
-
-        if (sa->mesh)
-        {
-            UMeshComponent* mc = new UMeshComponent(*sa->mesh); // shares UMesh asset; copies meshRef + override + rel xform
-            da->SetMesh(mc);                                    // re-parents under da's root
-        }
-        if (sa->physics)
-        {
-            UPrimitiveComponent* p = nullptr;
-            if (sa->physics->GetShape() == EShape::Sphere)
-            { auto* s = new USphereComponent(da); s->radius = static_cast<USphereComponent*>(sa->physics)->radius; p = s; }
-            else if (sa->physics->GetShape() == EShape::Box)
-            { auto* b = new UBoxComponent(da); b->halfExtents = static_cast<UBoxComponent*>(sa->physics)->halfExtents; p = b; }
-            if (p)
-            {
-                p->mass = sa->physics->mass; p->restitution = sa->physics->restitution;
-                p->friction = sa->physics->friction; p->bAffectedByGravity = sa->physics->bAffectedByGravity;
-                p->velocity = resetPhysics ? glm::vec3(0.0f) : sa->physics->velocity;
-                da->SetPhysics(p);
-            }
-        }
-        dst->Spawn(da);
-    }
+        dst->Spawn(CloneActor(sa, resetPhysics));
     return dst;
 }
 
@@ -491,6 +534,7 @@ void EditorEngine::OnStartup()
     hybrid_.Init();            // hybrid shadow pass (PIE: Hybrid mode)
     gpuReady_ = true;
 
+    LoadRenderSettings();
     editorWorld_ = new UWorld();
     BuildEditorWorld();
     ScanContent();
@@ -579,10 +623,15 @@ void EditorEngine::RenderWorldGPU(int w, int h, int mode)
     for (AActor* a : scene.Actors)
         if (ALight* L = dynamic_cast<ALight*>(a))
             if (auto* el = dynamic_cast<EnvironmentLightComponent*>(L->lightComp))
-            { giN = 8; envTint = el->LightColor * el->LightIntensity; horizon = el->horizonColor;
+            { giN = giSamples_; envTint = el->LightColor * el->LightIntensity; horizon = el->horizonColor;
               zenith = el->zenithColor; skyExp = el->skyExp; break; }
+    envTint *= giStrength_;                                // GI brightness (render setting)
     worldRT_.SetGI(giN, envTint, horizon, zenith, skyExp);
     hybrid_.SetGI(giN, envTint, horizon, zenith, skyExp);
+    worldRT_.SetQuality(reflStrength_, rtShininess_);      // reflection multiplier + RT shininess
+    hybrid_.SetQuality(rtShininess_);
+    worldRT_.SetShadow(shadowSamples_, shadowSoftness_);   // soft-shadow quality
+    hybrid_.SetShadow(shadowSamples_, shadowSoftness_);
 
     EnsureFBO(w, h);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
@@ -716,7 +765,11 @@ void EditorEngine::DrawUI()
             if (ImGui::IsKeyPressed(ImGuiKey_Z, false)) Undo();
             if (ImGui::IsKeyPressed(ImGuiKey_Y, false)) Redo();
             if (ImGui::IsKeyPressed(ImGuiKey_S, false)) SaveWorld();
+            if (ImGui::IsKeyPressed(ImGuiKey_C, false)) CopySelected();
+            if (ImGui::IsKeyPressed(ImGuiKey_V, false)) PasteClipboard();
         }
+        if (!playing_ && !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
+            DeleteSelected();
     }
 
     const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -755,6 +808,7 @@ void EditorEngine::DrawUI()
     DrawStatusBar(pos.x, by + bh, sz.x, statusH);
 
     if (showBuildLog_) DrawBuildLog();
+    if (showRenderSettings_) DrawRenderSettings();
     if (showDemo_) ImGui::ShowDemoWindow(&showDemo_);
 }
 
@@ -785,6 +839,72 @@ void EditorEngine::DrawBuildLog()
         ImGui::EndChild();
     }
     ImGui::End();
+}
+
+void EditorEngine::DrawRenderSettings()
+{
+    ImGui::SetNextWindowSize(ImVec2(400, 320), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Render Settings", &showRenderSettings_))
+    {
+        if (playing_) ImGui::TextColored(ImVec4(0.88f, 0.66f, 0.35f, 1), "PIE running -- settings frozen");
+        ImGui::BeginDisabled(playing_);          // frozen while playing the game
+        bool changed = false;
+
+        if (ImGui::CollapsingHeader("Rasterization", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            int aaIdx = (ssaa_ >= 2) ? 1 : 0;
+            const char* aaItems[] = { "Off (1x)", "SSAA 2x" };
+            if (ImGui::Combo("Anti-Aliasing", &aaIdx, aaItems, 2)) { ssaa_ = (aaIdx == 1) ? 2 : 1; changed = true; }
+            changed |= ImGui::SliderFloat("Ambient Strength", &ambientStrength_, 0.0f, 3.0f);
+        }
+        if (ImGui::CollapsingHeader("Ray Tracing", ImGuiTreeNodeFlags_DefaultOpen))
+        {
+            changed |= ImGui::SliderInt  ("GI Samples",        &giSamples_,   0, 32);
+            changed |= ImGui::SliderFloat("GI Strength",       &giStrength_,  0.0f, 3.0f);
+            changed |= ImGui::SliderFloat("Reflection Strength", &reflStrength_, 0.0f, 2.0f);
+            changed |= ImGui::SliderFloat("Shininess",         &rtShininess_, 1.0f, 256.0f);
+            changed |= ImGui::SliderInt  ("Shadow Samples",    &shadowSamples_, 1, 16);
+            changed |= ImGui::SliderFloat("Shadow Softness",   &shadowSoftness_, 0.0f, 0.3f);
+        }
+
+        ImGui::EndDisabled();
+        if (changed) SaveRenderSettings();       // persist immediately to ini
+    }
+    ImGui::End();
+}
+
+void EditorEngine::LoadRenderSettings()
+{
+    FIniFile ini;
+    if (!ini.LoadFromFile("Config/EditorSettings.ini")) return;
+    giSamples_       = ini.GetInt  ("Render", "GISamples", giSamples_);
+    ssaa_            = ini.GetInt  ("Render", "SSAA", ssaa_);
+    ambientStrength_ = ini.GetFloat("Render", "AmbientStrength", ambientStrength_);
+    giStrength_      = ini.GetFloat("Render", "GIStrength", giStrength_);
+    reflStrength_    = ini.GetFloat("Render", "ReflectionStrength", reflStrength_);
+    rtShininess_     = ini.GetFloat("Render", "Shininess", rtShininess_);
+    shadowSamples_   = ini.GetInt  ("Render", "ShadowSamples", shadowSamples_);
+    shadowSoftness_  = ini.GetFloat("Render", "ShadowSoftness", shadowSoftness_);
+    if (shadowSamples_ < 1) shadowSamples_ = 1;  if (shadowSamples_ > 16) shadowSamples_ = 16;
+    if (giSamples_ < 0) giSamples_ = 0;  if (giSamples_ > 32) giSamples_ = 32;
+    if (ssaa_ < 1) ssaa_ = 1;            if (ssaa_ > 2) ssaa_ = 2;
+}
+
+void EditorEngine::SaveRenderSettings()
+{
+    namespace fs = std::filesystem;
+    std::error_code ec; fs::create_directories("Config", ec);
+    std::ofstream f("Config/EditorSettings.ini");
+    if (!f) return;
+    f << "# Editor render preferences (auto-saved).\n[Render]\n"
+      << "GISamples = "          << giSamples_       << "\n"
+      << "SSAA = "               << ssaa_            << "\n"
+      << "AmbientStrength = "    << ambientStrength_ << "\n"
+      << "GIStrength = "         << giStrength_      << "\n"
+      << "ReflectionStrength = " << reflStrength_    << "\n"
+      << "Shininess = "          << rtShininess_     << "\n"
+      << "ShadowSamples = "      << shadowSamples_   << "\n"
+      << "ShadowSoftness = "     << shadowSoftness_  << "\n";
 }
 
 void EditorEngine::DrawMenuBar()
@@ -987,6 +1107,9 @@ void EditorEngine::DrawToolbar()
     const char* gops[] = { "Move", "Rotate", "Scale" };
     for (int i = 0; i < 3; ++i) { if (i) ImGui::SameLine(); if (ImGui::RadioButton(gops[i], gizmoOp_ == i)) gizmoOp_ = i; }
     ImGui::SameLine(0, 8); ImGui::Checkbox("Local", &gizmoLocal_);
+
+    ImGui::SameLine(0, 16);
+    if (ImGui::Button("Render Settings")) showRenderSettings_ = true;
 
     const float fps = ImGui::GetIO().Framerate;
     ImGui::SameLine(ImGui::GetWindowWidth() - 210);
@@ -1287,20 +1410,26 @@ void EditorEngine::DrawViewport()
     // editor and PIE. Rasterizer is the lit shaded preview (Flat/Gouraud/Phong).
     const int effMode = renderMode_;
 
+    // Super-sample AA: render at ssaa_x resolution; the LINEAR-filtered Image draws
+    // it back at screen size (downscale = antialiasing). UI/picking use screen w/h.
+    const int rw = w * ssaa_, rh = h * ssaa_;
+
     bool shown = false;
     if (effMode == 0)                                  // CPU lit rasterizer -> texture
     {
         UScene& scene = world.GetScene();
-        scene.width = w; scene.height = h;
+        scene.width = rw; scene.height = rh;
         FRenderShowFlag flag;
-        flag.shading   = (EShadingModel)scene.shadingModel;   // Flat/Gouraud/Phong (HW6)
-        flag.depthView = depthView_;
-        renderer_.RasterShaded(world, flag);
+        flag.shading         = (EShadingModel)scene.shadingModel;   // Flat/Gouraud/Phong (HW6)
+        flag.depthView       = depthView_;
+        flag.ambientStrength = ambientStrength_;
+        sky_.GetOrLoad(scene.skyHDRI);                 // ensure CPU sky pixels are loaded
+        renderer_.RasterShaded(world, flag, &sky_);   // editor sky for the raster background
         if (!scene.outputImage.empty())
         {
-            EnsureViewportTex(w, h);
+            EnsureViewportTex(rw, rh);
             glBindTexture(GL_TEXTURE_2D, vpTex_);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGB, GL_FLOAT, scene.outputImage.data());
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, rw, rh, GL_RGB, GL_FLOAT, scene.outputImage.data());
             glBindTexture(GL_TEXTURE_2D, 0);
             ImGui::Image((ImTextureID)(intptr_t)vpTex_, avail, ImVec2(0, 1), ImVec2(1, 0));
             shown = true;
@@ -1308,7 +1437,7 @@ void EditorEngine::DrawViewport()
     }
     else                                               // GPU RT / Hybrid -> FBO
     {
-        RenderWorldGPU(w, h, effMode);
+        RenderWorldGPU(rw, rh, effMode);
         ImGui::Image((ImTextureID)(intptr_t)fboTex_, avail, ImVec2(0, 1), ImVec2(1, 0));
         shown = true;
     }

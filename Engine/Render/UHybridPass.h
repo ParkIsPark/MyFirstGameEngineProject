@@ -42,6 +42,8 @@ public:
     void SetGI(int samples, const glm::vec3& tint, const glm::vec3& horizon,
                const glm::vec3& zenith, float skyExp)
     { giSamples_ = samples; envTint_ = tint; skyHorizon_ = horizon; skyZenith_ = zenith; skyExp_ = skyExp; }
+    void SetQuality(float shininess) { shininess_ = shininess; }
+    void SetShadow(int samples, float softness) { shadowSamples_ = samples; shadowSoftness_ = softness; }
 
     void Cleanup();
     bool ready() const { return prog_ != 0; }
@@ -58,6 +60,9 @@ private:
     glm::vec3 skyHorizon_  = glm::vec3(0.10f, 0.12f, 0.16f);
     glm::vec3 skyZenith_   = glm::vec3(0.40f, 0.55f, 0.80f);
     float     skyExp_      = 1.0f;
+    float     shininess_   = 32.0f;
+    int       shadowSamples_  = 1;
+    float     shadowSoftness_ = 0.0f;
     int numTris_  = 0;
     int numNodes_ = 0;
     int gw_ = 0, gh_ = 0;

@@ -48,6 +48,9 @@ private:
     void Redo();
     void ClearHistory();
     AActor* AddActor(const char* type, const std::string& name);  // factory spawn
+    void CopySelected();                  // Ctrl+C -> clone selected into clipboard
+    void PasteClipboard();                // Ctrl+V -> spawn a clone of the clipboard
+    void DeleteSelected();                // Delete -> remove the selected actor
     void ImportAsset(const std::string& path);  // .obj/.fbx -> mesh actor; .world -> load
     UMesh* LoadMeshFile(const std::string& path);  // .obj/.fbx/.mesh/descriptor -> UMesh*
     void RebuildActorNames();            // resync actorNames_ from scene actors
@@ -57,6 +60,7 @@ private:
     // Lossless deep copy (name + transform + mesh[shared] + material + physics +
     // lights + camera + shadingModel). resetPhysics zeroes velocity (for PIE).
     UWorld* CopyWorld(UWorld& src, bool resetPhysics = false);
+    AActor* CloneActor(AActor* src, bool resetPhysics = false);  // deep copy one actor
     UWorld& ActiveWorld() { return (playing_ && pieWorld_) ? *pieWorld_ : *editorWorld_; }
     void DrawUI();
     void DrawMenuBar();
@@ -66,6 +70,9 @@ private:
     void DrawViewport();
     void DrawContentBrowser();
     void DrawBuildLog();                  // background-build output panel
+    void DrawRenderSettings();            // AA / GI quality popup (persisted to ini)
+    void LoadRenderSettings();            // Config/EditorSettings.ini -> members
+    void SaveRenderSettings();            // members -> Config/EditorSettings.ini
     void DrawStatusBar(float x, float y, float w, float h);
     void ScanContent();
     void EnsureViewportTex(int w, int h);
@@ -83,6 +90,16 @@ private:
     bool imguiReady_   = false;
     bool showDemo_     = false;
     bool showBuildLog_ = false;
+    bool showRenderSettings_ = false;
+    // Render settings (ini-persisted; live in editor, frozen during PIE).
+    int   giSamples_      = 8;    // RT: hemisphere GI samples (env light)
+    int   ssaa_           = 1;    // Raster+RT: super-sample AA factor (1 or 2)
+    float ambientStrength_= 1.0f; // Raster: environment ambient scale
+    float giStrength_     = 1.0f; // RT: GI brightness multiplier
+    float reflStrength_   = 1.0f; // RT: global mirror-reflection multiplier
+    float rtShininess_    = 32.0f;// RT: specular highlight exponent
+    int   shadowSamples_  = 1;    // RT: soft-shadow rays per light (1 = hard)
+    float shadowSoftness_ = 0.05f;// RT: penumbra radius
     BuildManager buildMgr_;
     int  renderMode_ = 0;        // 0=Rasterizer 1=GPU RT 2=Hybrid
     bool depthView_  = false;    // CPU raster preview: grayscale depth instead of shade
@@ -98,6 +115,7 @@ private:
 
     UWorld*   editorWorld_ = nullptr;   // the live edited world (replaceable: New/Load)
     UWorld*   pieWorld_    = nullptr;    // spawned on Play (deep copy of editorWorld_)
+    AActor*   clipboard_   = nullptr;    // Ctrl+C/Ctrl+V actor clipboard (a clone)
     URenderer renderer_;
 
     std::vector<UMesh*>      meshAssets_;   // owned shared mesh assets

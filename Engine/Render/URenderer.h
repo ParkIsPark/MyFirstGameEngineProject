@@ -10,6 +10,7 @@
 class UWorld;
 class UScene;
 class ACamera;
+class USkyHDRI;
 
 // Top-level render mode. CPU-only ray tracing was removed (page 1), so the
 // modes are: rasterizer (CPU primary visibility), pure GPU ray trace, and the
@@ -37,7 +38,7 @@ public:
     // CPU shaded raster (HW6 Q1-Q3): rasterize every actor's mesh with the
     // flag's shading model (Flat/Gouraud/Phong) + Blinn-Phong + gamma, writing
     // scene.outputImage. depthView -> grayscale depth instead.
-    void RasterShaded(UWorld& world, const FRenderShowFlag& flag);
+    void RasterShaded(UWorld& world, const FRenderShowFlag& flag, const USkyHDRI* sky = nullptr);
 
     // Last executed plan, for logging / dispatch tests.
     const std::vector<ERenderStage>& LastPlan() const { return lastPlan_; }

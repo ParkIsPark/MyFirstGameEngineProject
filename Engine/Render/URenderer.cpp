@@ -8,9 +8,13 @@
 #include "UWorld.h"
 #include "ALight.h"
 #include "PointLightComponent.h"
+#include "EnvironmentLightComponent.h"
+#include "USkyHDRI.h"
+#include "URay.h"
 
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 namespace
 {
@@ -151,7 +155,7 @@ void URenderer::GBufferWorld(UScene& scene, const ACamera& cam, int nx, int ny)
 // ---------------------------------------------------------------------------
 // CPU shaded raster (HW6 Q1-Q3) — Flat / Gouraud / Phong + Blinn-Phong + gamma.
 // ---------------------------------------------------------------------------
-void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag)
+void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag, const USkyHDRI* sky)
 {
     UScene&        scene = world.GetScene();
     const ACamera& cam   = world.GetCamera();
@@ -162,11 +166,19 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag)
     FShadeParams sp;
     sp.ambient = glm::vec3(0.2f);
     sp.eye     = cam.eye;
+    sp.envAmbient = true;                                  // sky-gradient ambient (GPU-consistent)
+    sp.ambientMul = flag.ambientStrength;
     std::vector<std::pair<glm::vec3, glm::vec3>> lights;   // (pos, color*intensity)
     for (AActor* a : scene.Actors)
+    {
         if (ALight* L = dynamic_cast<ALight*>(a))
+        {
             if (PointLightComponent* pl = dynamic_cast<PointLightComponent*>(L->lightComp))
                 lights.emplace_back(pl->GetWorldLocation(), pl->LightColor * pl->LightIntensity);
+            else if (auto* el = dynamic_cast<EnvironmentLightComponent*>(L->lightComp))
+            { sp.skyHorizon = el->horizonColor; sp.skyZenith = el->zenithColor; sp.skyExp = el->skyExp; }
+        }
+    }
 
     if (lights.empty())                                   // fallback: assignment light
     {
@@ -181,7 +193,7 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag)
     }
 
     fb_.Init(nx, ny);
-    fb_.Clear(glm::vec3(0.0f));                 // black background (HW6 reference)
+    fb_.Clear(glm::vec3(0.0f));
 
     for (AActor* actor : scene.Actors)
     {
@@ -192,6 +204,24 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag)
         raster_.DrawMeshShaded(*comp->mesh, xf, ov, sp, flag.shading, fb_);
     }
 
-    if (flag.depthView) fb_.ToDepthImage(scene.outputImage);
-    else                fb_.ToOutputImage(scene.outputImage);
+    if (flag.depthView) { fb_.ToDepthImage(scene.outputImage); return; }
+
+    // Sky background (matches GPU modes): fill un-covered pixels with the HDRI or
+    // the env-light gradient (gamma-corrected to match the lit pixels).
+    const bool hasHDRI = sky && sky->ready();
+    const glm::vec3 invG(1.0f / 2.2f);
+    for (int y = 0; y < ny; ++y)
+        for (int x = 0; x < nx; ++x)
+        {
+            const int idx = y * nx + x;
+            if (fb_.depth[idx] < 1.0f) continue;          // covered by geometry
+            const glm::vec3 dir = cam.generateRay(x, y, nx, ny).direction;
+            glm::vec3 c;
+            if (hasHDRI) c = sky->SampleDir(dir);
+            else { float k = std::pow(glm::clamp(dir.y * 0.5f + 0.5f, 0.0f, 1.0f), glm::max(sp.skyExp, 0.01f));
+                   c = glm::mix(sp.skyHorizon, sp.skyZenith, k); }
+            fb_.color[idx] = glm::pow(glm::clamp(c, 0.0f, 1.0f), invG);
+        }
+
+    fb_.ToOutputImage(scene.outputImage);
 }
