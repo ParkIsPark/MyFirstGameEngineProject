@@ -40,6 +40,7 @@ private:
     std::unique_ptr<FLuaScriptInstance> instance_;
     bool attempted_ = false;
     bool begun_ = false;
+    bool tickFailed_ = false;
     bool callbackActive_ = false;
     bool stopRequested_ = false;
 };

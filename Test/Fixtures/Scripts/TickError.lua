@@ -8,5 +8,5 @@ function Tick(_deltaSeconds)
 end
 
 function EndPlay()
-    Engine.Log("FORBIDDEN_TICK_END")
+    Engine.Log("TICK_ERROR_END")
 end

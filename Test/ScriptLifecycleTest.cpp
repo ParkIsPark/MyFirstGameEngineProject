@@ -57,7 +57,7 @@ int main() {
     auto write = [&](const char* file, const char* source) { std::ofstream(root / "Content/Scripts" / file) << source; };
     write("Empty.lua", "-- no callbacks");
     write("BeginError.lua", "function BeginPlay() error('begin failure') end; function EndPlay() Engine.Log('bad end') end");
-    write("TickError.lua", "function Tick() error('tick failure') end");
+    write("TickError.lua", "function Tick() error('tick failure') end; function EndPlay() Engine.Log('tick failure end') end");
     std::vector<std::string> logs;
     std::function<void(std::string_view)> logCallback;
     UScriptSubsystem scripts([&](std::string_view s) { logs.emplace_back(s); if (logCallback) logCallback(s); });
@@ -109,7 +109,7 @@ int main() {
     {
         UWorld world; add(world, "Bad begin", "BeginError.lua"); add(world, "Bad tick", "TickError.lua"); add(world, "Healthy");
         world.SetScriptSubsystem(&scripts); world.BeginPlay(); world.Tick(.25f); world.Tick(.5f); world.EndPlay();
-        Check(logs.size() == 6 && logs[0].find("begin failure") != std::string::npos && logs[1] == "begin:0" && logs[2].find("tick failure") != std::string::npos && logs[3] == "tick:1:0.25" && logs[5] == "end:2", "failed callbacks isolate and do not repeat or End failed Begin");
+        Check(logs.size() == 7 && logs[0].find("begin failure") != std::string::npos && logs[1] == "begin:0" && logs[2].find("tick failure") != std::string::npos && logs[3] == "tick:1:0.25" && logs[4] == "tick:2:0.5" && logs[5] == "tick failure end" && logs[6] == "end:2", "failed callbacks isolate, suppress repeated Tick, End every successful Begin once, and do not End failed Begin");
         scripts.ClearScriptCache();
     }
     logs.clear();

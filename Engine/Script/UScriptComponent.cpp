@@ -43,15 +43,12 @@ void UScriptComponent::BeginPlay() noexcept
 
 void UScriptComponent::Tick(float deltaSeconds) noexcept
 {
-    if (!begun_ || !instance_ || callbackActive_) return;
+    if (!begun_ || !instance_ || tickFailed_ || callbackActive_) return;
     callbackActive_ = true;
     const bool success = instance_->Tick(deltaSeconds);
     callbackActive_ = false;
-    if (!success)
-    {
-        begun_ = false;
-    }
-    if (!success || stopRequested_) EndPlay();
+    if (!success) tickFailed_ = true;
+    if (stopRequested_) EndPlay();
 }
 
 void UScriptComponent::EndPlay() noexcept
@@ -65,6 +62,7 @@ void UScriptComponent::EndPlay() noexcept
     callbackActive_ = false;
     instance_.reset();
     attempted_ = false;
+    tickFailed_ = false;
     subsystem_ = nullptr;
     stopRequested_ = false;
 }

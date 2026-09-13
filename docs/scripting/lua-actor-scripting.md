@@ -156,7 +156,7 @@ Every load and callback crosses a protected Lua boundary and restores the VM sta
 
 - missing file, syntax error, invalid callback field, or top-level error: report the load failure and create no live instance;
 - `BeginPlay` error: release only that instance; it receives neither Tick nor End;
-- first `Tick` error: report once, release only that instance, and suppress later-frame spam; serialized `Enabled` remains unchanged;
+- first `Tick` error: report once and suppress later-frame Tick calls/spam; retain the successfully begun instance until Stop so its `EndPlay` runs exactly once, then release all references; serialized `Enabled` remains unchanged;
 - `EndPlay` error: report once, continue later component/Actor shutdown, and release all references;
 - missing optional callback: success/no diagnostic.
 

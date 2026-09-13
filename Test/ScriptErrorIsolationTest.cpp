@@ -162,11 +162,17 @@ namespace
 
         world.BeginPlay();
         Check(lua_gettop(state) == initialTop, "BeginPlay restores VM stack");
-        Check(RegistryObjects(state) > baselineRegistryObjects, "live components own registry objects");
+        const size_t liveRegistryObjects = RegistryObjects(state);
+        Check(liveRegistryObjects > baselineRegistryObjects, "live components own registry objects");
         world.Tick(0.25f);
         Check(lua_gettop(state) == initialTop, "first Tick restores VM stack");
+        Check(RegistryObjects(state) == liveRegistryObjects,
+            "Tick failure retains its begun instance references until Stop");
         world.Tick(0.5f);
         Check(lua_gettop(state) == initialTop, "later Tick restores VM stack");
+        Check(Count(output, "TASK8_TICK_SENTINEL") == 1 &&
+              Count(output, "TICK_ERROR_END") == 0,
+            "failed Tick reports once, suppresses later Tick, and does not End before Stop");
         world.EndPlay();
         Check(lua_gettop(state) == initialTop, "EndPlay restores VM stack");
         Check(RegistryObjects(state) == baselineRegistryObjects,
@@ -182,8 +188,8 @@ namespace
         Check(Count(output, "FORBIDDEN_BEGIN_TICK") == 0 &&
               Count(output, "FORBIDDEN_BEGIN_END") == 0,
             "failed Begin instance never Ticks or Ends");
-        Check(Count(output, "FORBIDDEN_TICK_END") == 0,
-            "failed Tick instance is released without End callback");
+        Check(Count(output, "TICK_ERROR_END") == 1,
+            "successfully begun Tick-failed instance receives exactly one End at Stop");
         Check(Count(output, "SAME_BEGIN") == 1 && Count(output, "SAME_TICK") == 2 &&
               Count(output, "SAME_END") == 1 && Count(output, "NEIGHBOR_BEGIN") == 1 &&
               Count(output, "NEIGHBOR_TICK") == 2 && Count(output, "NEIGHBOR_END") == 1,
