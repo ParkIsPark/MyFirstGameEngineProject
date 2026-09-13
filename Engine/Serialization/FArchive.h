@@ -20,6 +20,9 @@ class FArchive
 public:
     virtual ~FArchive() = default;
     virtual bool IsLoading() const = 0;
+    // Loading archives can distinguish an omitted legacy field from an
+    // explicitly present field whose value is empty or otherwise invalid.
+    virtual bool HasField(const char* key) const { return false; }
 
     virtual void Field(const char* key, float& v)       = 0;
     virtual void Field(const char* key, int& v)         = 0;
@@ -57,6 +60,7 @@ class FLoadArchive : public FArchive
 public:
     explicit FLoadArchive(const std::string& block);
     bool IsLoading() const override { return true; }
+    bool HasField(const char* key) const override { return kv_.find(key) != kv_.end(); }
     void Field(const char* key, float& v)       override;
     void Field(const char* key, int& v)         override;
     void Field(const char* key, bool& v)        override;

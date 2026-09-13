@@ -60,6 +60,14 @@ namespace
         std::ifstream input("Test/Fixtures/ScriptComponentWorld.world");
         return { std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>() };
     }
+
+    size_t CountOccurrences(const std::string& text, const std::string& needle)
+    {
+        size_t count = 0;
+        for (size_t pos = 0; (pos = text.find(needle, pos)) != std::string::npos; pos += needle.size())
+            ++count;
+        return count;
+    }
 }
 
 int main()
@@ -92,6 +100,18 @@ int main()
         FLoadArchive explicitEmpty("Enabled = 0\nScript =\n");
         const bool rejected = Throws([&] { component.Serialize(explicitEmpty); });
         Check("explicit empty serialized script is rejected without changing existing state",
+            rejected && component.IsEnabled() &&
+            component.ScriptPath() == std::filesystem::path("Content/Scripts/Keep.lua"));
+    }
+
+    // Mutation caught: using a representable control byte as the missing-field marker.
+    {
+        UScriptComponent component;
+        component.SetEnabled(true);
+        component.SetScriptPath("Content/Scripts/Keep.lua");
+        FLoadArchive explicitControl("Enabled = 0\nScript = \x1D\n");
+        const bool rejected = Throws([&] { component.Serialize(explicitControl); });
+        Check("explicit control-character script is rejected without changing existing state",
             rejected && component.IsEnabled() &&
             component.ScriptPath() == std::filesystem::path("Content/Scripts/Keep.lua"));
     }
@@ -189,7 +209,7 @@ int main()
             loadedActor && loadedActor->mesh && loadedActor->physics &&
             ScriptComponents(*loadedActor).size() == 1 && loadedLight && loadedLight->lightComp &&
             ScriptComponents(*loadedLight).size() == 1 &&
-            saved.find("[Collision]") != std::string::npos &&
+            CountOccurrences(saved, "[Collision]") == 1 &&
             saved.find("Type = Primitive") == std::string::npos);
         delete loaded;
     }
@@ -210,14 +230,17 @@ int main()
         delete loaded;
     }
 
-    // Mutation caught: dropping format-1 compatibility or making a format-2 fixture unstable.
+    // Mutation caught: dropping format-1 component defaults or making a format-2 fixture unstable.
     {
-        UWorld* old = FWorldSerializer::Load("WorldFormat = 1\n\n[Actor]\nType = Actor\nName = Legacy\nLoc = 1 2 3\n");
+        UWorld* old = FWorldSerializer::Load(
+            "WorldFormat = 1\n\n[Actor]\nType = Actor\nName = Legacy\nLoc = 1 2 3\n\n"
+            "[Collision]\nShape = Box\n");
         const std::string fixture = ReadFixture();
         UWorld* fixtureLoaded = FWorldSerializer::Load(fixture);
         const std::string resaved = fixtureLoaded ? FWorldSerializer::Save(*fixtureLoaded) : "";
-        Check("format 1 remains loadable and format 2 fixture is save-load-save stable",
+        Check("format 1 preserves existing component defaults and format 2 fixture is save-load-save stable",
             old && old->GetScene().Actors.size() == 1 && old->GetScene().Actors.front()->name == "Legacy" &&
+            old->GetScene().Actors.front()->physics && old->GetScene().Actors.front()->physics->IsEnabled() &&
             fixtureLoaded && fixture == resaved);
         delete old;
         delete fixtureLoaded;

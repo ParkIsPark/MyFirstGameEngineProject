@@ -3,6 +3,10 @@
 #include "FScriptPath.h"
 #include "FArchive.h"
 
+// Preserve registration for consumers that directly link this concrete type
+// and query FComponentFactory before loading any world.
+REGISTER_COMPONENT("ScriptComponent", UScriptComponent)
+
 void RegisterScriptComponentType()
 {
     static const bool registered = [] {
@@ -24,12 +28,10 @@ void UScriptComponent::Serialize(FArchive& ar)
 {
     const bool priorEnabled = IsEnabled();
     UActorComponent::Serialize(ar);
-    // A sentinel distinguishes an omitted legacy field from an explicitly
-    // present empty field, which must fail the same validation as SetScriptPath.
-    static constexpr char kMissingScript[] = "\x1D";
-    std::string serialized = ar.IsLoading() ? kMissingScript : scriptPath_.generic_string();
+    const bool hasScript = !ar.IsLoading() || ar.HasField("Script");
+    std::string serialized = scriptPath_.generic_string();
     ar.Field("Script", serialized);
-    if (ar.IsLoading() && serialized != kMissingScript)
+    if (ar.IsLoading() && hasScript)
     {
         try { SetScriptPath(serialized); } // validates before replacing the prior path
         catch (...)
