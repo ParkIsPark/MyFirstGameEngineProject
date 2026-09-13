@@ -90,6 +90,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Mesh\UMeshComponent.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\FTransform.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Render\FRenderPipelinePlan.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\URenderer.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\UWorldRenderer.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\USkyHDRI.cpp" />
@@ -198,6 +199,8 @@
     <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Rasterizer\UGBuffer.h" />
     <!-- Engine: Render headers -->
+    <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderFeatures.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderPipelinePlan.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\URenderer.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\UWorldRenderer.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\USkyHDRI.h" />

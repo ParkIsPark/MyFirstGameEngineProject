@@ -78,6 +78,7 @@
     <ClCompile Include="Engine\Rasterizer\FTransform.cpp" />
     <ClCompile Include="Engine\Rasterizer\URasterizer.cpp" />
     <!-- Engine: Render -->
+    <ClCompile Include="Engine\Render\FRenderPipelinePlan.cpp" />
     <ClCompile Include="Engine\Render\URenderer.cpp" />
     <ClCompile Include="Engine\Render\UWorldRenderer.cpp" />
     <ClCompile Include="Engine\Render\USkyHDRI.cpp" />
@@ -188,6 +189,8 @@
     <ClInclude Include="Engine\Rasterizer\URasterizer.h" />
     <ClInclude Include="Engine\Rasterizer\UGBuffer.h" />
     <!-- Engine: Render headers -->
+    <ClInclude Include="Engine\Render\FRenderFeatures.h" />
+    <ClInclude Include="Engine\Render\FRenderPipelinePlan.h" />
     <ClInclude Include="Engine\Render\URenderer.h" />
     <ClInclude Include="Engine\Render\UWorldRenderer.h" />
     <ClInclude Include="Engine\Render\USkyHDRI.h" />

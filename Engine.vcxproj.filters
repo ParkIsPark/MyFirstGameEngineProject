@@ -99,6 +99,7 @@
     <ClCompile Include="Engine\Rasterizer\FTransform.cpp"><Filter>Engine\Rasterizer</Filter></ClCompile>
     <ClCompile Include="Engine\Rasterizer\URasterizer.cpp"><Filter>Engine\Rasterizer</Filter></ClCompile>
     <!-- Render -->
+    <ClCompile Include="Engine\Render\FRenderPipelinePlan.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\URenderer.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\UWorldRenderer.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\USkyHDRI.cpp"><Filter>Engine\Render</Filter></ClCompile>
@@ -203,6 +204,8 @@
     <ClInclude Include="Engine\Rasterizer\URasterizer.h"><Filter>Engine\Rasterizer</Filter></ClInclude>
     <ClInclude Include="Engine\Rasterizer\UGBuffer.h"><Filter>Engine\Rasterizer</Filter></ClInclude>
     <!-- Render -->
+    <ClInclude Include="Engine\Render\FRenderFeatures.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="Engine\Render\FRenderPipelinePlan.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\URenderer.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\UWorldRenderer.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\USkyHDRI.h"><Filter>Engine\Render</Filter></ClInclude>
