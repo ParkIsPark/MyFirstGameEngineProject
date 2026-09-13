@@ -220,7 +220,7 @@ public:
 - Modify: `Engine/Serialization/FWorldSerializer.cpp`
 - Modify: component factory definitions and registration
 - Create: `Test/ScriptComponentSerializationTest.cpp`
-- Create: `Test/Fixtures/ScriptComponentWorld.json`
+- Create: `Test/Fixtures/ScriptComponentWorld.world`
 - Modify: project/filter files
 
 **Interfaces:**
@@ -234,14 +234,13 @@ public:
 };
 ```
 
-**Serialized shape:**
+**Serialized shape inside the repository's format-2 `.world` text:**
 
-```json
-{
-  "Type": "ScriptComponent",
-  "Enabled": true,
-  "Script": "Content/Scripts/Rotator.lua"
-}
+```text
+  [Component]
+Type = ScriptComponent
+Enabled = true
+Script = Content/Scripts/Rotator.lua
 ```
 
 - [ ] Test a world containing two script components saves and loads path/enabled state and preserves component order. Test unknown component types log and skip without losing the actor.
@@ -249,7 +248,7 @@ public:
 - [ ] Generalize the component factory to construct `UActorComponent`, while keeping scene-parent links only for `USceneComponent` instances.
 - [ ] Implement `UScriptComponent` data properties and format-2 serialization. Serialize project-relative paths with forward slashes and reject invalid paths before mutating component state.
 - [ ] Re-run round-trip tests and load one pre-component-format world to verify backward compatibility.
-- [ ] Commit: `git add Engine/Script/UScriptComponent.* Engine/World/AActor.* Engine/Serialization/FWorldSerializer.cpp Test/ScriptComponentSerializationTest.cpp Test/Fixtures/ScriptComponentWorld.json && git commit -m "feat: serialize actor script components"`
+- [ ] Commit: `git add Engine/Script/UScriptComponent.* Engine/World/AActor.* Engine/Serialization/FWorldSerializer.cpp Test/ScriptComponentSerializationTest.cpp Test/Fixtures/ScriptComponentWorld.world && git commit -m "feat: serialize actor script components"`
 
 ## Task 6: Wire Script Execution into Game and PIE Lifecycles
 
