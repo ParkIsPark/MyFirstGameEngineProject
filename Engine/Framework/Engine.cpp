@@ -1,6 +1,7 @@
 #include "Engine.h"
 #include "UWorld.h"
 #include "FWorldSerializer.h"
+#include "../Script/UScriptSubsystem.h"
 
 #include <iostream>
 #include <filesystem>
@@ -9,6 +10,11 @@
 #define GLFW_INCLUDE_GLU
 #define GLFW_DLL
 #include <GLFW/glfw3.h>
+
+Engine::Engine()
+{
+    subsystems_.Register(new UScriptSubsystem());
+}
 
 Engine::~Engine()
 {

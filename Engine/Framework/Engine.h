@@ -29,6 +29,7 @@ class  UWorld;
 class Engine
 {
 public:
+    Engine();
     virtual ~Engine();
 
     bool Init(int width = 1024, int height = 1024, const char* title = "Engine");

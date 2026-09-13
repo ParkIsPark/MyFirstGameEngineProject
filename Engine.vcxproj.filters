@@ -69,6 +69,8 @@
     <ClCompile Include="Engine\Framework\BuildManager.cpp"><Filter>Engine\Framework</Filter></ClCompile>
     <ClCompile Include="Engine\Framework\FProjectDescriptor.cpp"><Filter>Engine\Framework</Filter></ClCompile>
     <ClCompile Include="Engine\Framework\USubsystemManager.cpp"><Filter>Engine\Framework</Filter></ClCompile>
+    <ClCompile Include="Engine\Script\FLuaBindingRegistry.cpp"><Filter>Engine\Script</Filter></ClCompile>
+    <ClCompile Include="Engine\Script\UScriptSubsystem.cpp"><Filter>Engine\Script</Filter></ClCompile>
     <!-- Core -->
     <ClCompile Include="Engine\Core\UScene.cpp"><Filter>Engine\Core</Filter></ClCompile>
     <ClCompile Include="Engine\Core\UPostProcessFilter.cpp"><Filter>Engine\Core</Filter></ClCompile>
@@ -228,5 +230,7 @@
     <ClInclude Include="Engine\Player\UPlayerCharacter.h"><Filter>Engine\Player</Filter></ClInclude>
     <ClInclude Include="Engine\Player\UPlayerController.h"><Filter>Engine\Player</Filter></ClInclude>
     <ClInclude Include="Engine\Script\LuaInclude.h"><Filter>Engine\Script</Filter></ClInclude>
+    <ClInclude Include="Engine\Script\FLuaBindingRegistry.h"><Filter>Engine\Script</Filter></ClInclude>
+    <ClInclude Include="Engine\Script\UScriptSubsystem.h"><Filter>Engine\Script</Filter></ClInclude>
   </ItemGroup>
 </Project>
