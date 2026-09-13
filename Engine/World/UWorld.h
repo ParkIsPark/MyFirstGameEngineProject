@@ -4,6 +4,7 @@
 #include "../Physics/UPhysicsWorld.h"
 
 class AActor;
+class UScriptSubsystem;
 
 // ---------------------------------------------------------------------------
 // UWorld (E4) — runtime scene container (Unreal UWorld analogue).
@@ -18,17 +19,27 @@ class AActor;
 class UWorld
 {
 public:
+    ~UWorld();
     void Spawn(AActor* a);     // add an actor (UScene takes ownership / deletes it)
+    bool Destroy(AActor* actor);
+    // Borrowed for subsequent Play sessions; may only change outside Play.
+    void SetScriptSubsystem(UScriptSubsystem* subsystem);
 
     void BeginPlay();          // dispatch BeginPlay() to every actor once
     void Tick(float dt);       // physics.Tick(dt) -> each actor->Tick(dt)
-    void EndPlay();            // dispatch EndPlay() to every actor
+    void EndPlay() noexcept;   // dispatch EndPlay() to every actor
 
     UScene&        GetScene()   { return scene_; }
     ACamera&       GetCamera()  { return camera_; }
     UPhysicsWorld& GetPhysics() { return physics_; }
 
 private:
+    void BeginActor(AActor* actor);
+    void EndActor(AActor* actor) noexcept;
+    void RequireMutationAllowed() const;
+    UScriptSubsystem* scripts_ = nullptr;
+    bool playing_ = false;
+    bool dispatching_ = false;
     UScene        scene_;
     ACamera       camera_;
     UPhysicsWorld physics_;

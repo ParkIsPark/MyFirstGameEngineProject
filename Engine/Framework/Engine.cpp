@@ -130,8 +130,11 @@ int Engine::Run(const char* projPath)
         std::cout << "[Engine] startup world '" << wp << "' "
                   << (world_ ? "loaded" : "not found") << "\n";
     }
+    auto* scripts = subsystems_.Get<UScriptSubsystem>();
+    scripts->SetProjectRoot(projPath ? std::filesystem::absolute(projPath).parent_path()
+                                    : std::filesystem::current_path());
     subsystems_.InitAll();
-    if (world_) world_->BeginPlay();
+    if (world_) { world_->SetScriptSubsystem(scripts); world_->BeginPlay(); }
 
     lastTime_ = glfwGetTime();
     while (!glfwWindowShouldClose(window_))
@@ -152,6 +155,7 @@ int Engine::Run(const char* projPath)
     }
 
     if (world_) world_->EndPlay();
+    OnShutdown();
     subsystems_.ShutdownAll();
     delete world_;
     world_ = nullptr;

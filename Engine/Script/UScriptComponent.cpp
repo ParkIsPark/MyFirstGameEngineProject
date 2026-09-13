@@ -2,6 +2,60 @@
 
 #include "FScriptPath.h"
 #include "FArchive.h"
+#include "UScriptSubsystem.h"
+#include "../World/AActor.h"
+
+UScriptComponent::UScriptComponent() = default;
+UScriptComponent::~UScriptComponent() { EndPlay(); }
+UScriptComponent::UScriptComponent(const UScriptComponent& other)
+    : UActorComponent(other), scriptPath_(other.scriptPath_) {}
+
+void UScriptComponent::ConfigureRuntime(UScriptSubsystem* subsystem) noexcept
+{
+    subsystem_ = subsystem;
+}
+
+void UScriptComponent::BeginPlay() noexcept
+{
+    if (!subsystem_ || attempted_ || !IsEnabled() || scriptPath_.empty()) return;
+    attempted_ = true;
+    try
+    {
+        const auto* actor = GetOwner();
+        size_t index = 0;
+        if (actor)
+            for (const auto& component : actor->Components())
+            {
+                if (component.get() == this) break;
+                ++index;
+            }
+        instance_ = subsystem_->CreateScriptInstance(scriptPath_,
+            (actor ? actor->name : "(unowned)") + " ScriptComponent[" + std::to_string(index) + "]");
+        if (instance_ && instance_->BeginPlay()) begun_ = true;
+        else instance_.reset();
+    }
+    catch (...) { instance_.reset(); }
+}
+
+void UScriptComponent::Tick(float deltaSeconds) noexcept
+{
+    if (begun_ && instance_ && !instance_->Tick(deltaSeconds))
+    {
+        begun_ = false;
+        instance_.reset();
+    }
+}
+
+void UScriptComponent::EndPlay() noexcept
+{
+    // Clear the flag before invoking user code, including diagnostic sinks.
+    const bool end = begun_;
+    begun_ = false;
+    if (end && instance_) instance_->EndPlay();
+    instance_.reset();
+    attempted_ = false;
+    subsystem_ = nullptr;
+}
 
 // Preserve registration for consumers that directly link this concrete type
 // and query FComponentFactory before loading any world.

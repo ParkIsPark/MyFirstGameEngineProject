@@ -1,6 +1,9 @@
 // Build/run from the repository root (PowerShell):
-// & C:\msys64\ucrt64\bin\g++.exe -std=c++17 -DGLM_FORCE_RADIANS -Iinclude -IEngine/World -IEngine/Mesh -IEngine/Physics -IEngine/Light -IEngine/Serialization -IEngine/Core -IEngine/RayTracing Test/ActorComponentLifecycleTest.cpp Engine/World/UActorComponent.cpp Engine/World/AActor.cpp Engine/World/USceneComponent.cpp Engine/Physics/UPrimitiveComponent.cpp Engine/Physics/UBoxComponent.cpp Engine/Light/ALight.cpp Engine/Light/LightComponent.cpp Engine/Serialization/FArchive.cpp Engine/World/UWorld.cpp Engine/World/ACamera.cpp Engine/Core/UScene.cpp Engine/Physics/UPhysicsWorld.cpp Engine/Physics/USphereComponent.cpp -o actor_component_test.exe
-// if ($LASTEXITCODE -eq 0) { .\actor_component_test.exe }
+// $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+// $msbuild = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
+// & $msbuild Engine.sln /m /p:Configuration=Debug /p:Platform=Win32 /clp:ErrorsOnly
+// $cmd = 'call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" -arch=x86 >nul && cl /nologo /std:c++17 /EHsc /MDd /DWIN32 /D_DEBUG /Iinclude /IEngine\Serialization /IEngine\World /IEngine\Script /IThirdParty\Lua\5.4.9\src /IEngine\Core /IEngine\Light /IEngine\Mesh /IEngine\Physics /IEngine\Import /IEngine\RayTracing /IEngine\Acceleration Test\ActorComponentLifecycleTest.cpp /Fe:ActorComponentLifecycleTest.exe bin\Engine.lib /link /LIBPATH:lib glew32.lib freeglut.lib glfw3dll.lib opengl32.lib glu32.lib assimp-vc143-mt.lib'; & cmd.exe /d /c $cmd
+// $env:Path = "$PWD\bin;$env:Path"; .\ActorComponentLifecycleTest.exe
 #include "UActorComponent.h"
 #include "AActor.h"
 #include "UBoxComponent.h"

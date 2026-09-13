@@ -33,6 +33,7 @@ public:
 
 protected:
     void OnStartup() override;
+    void OnShutdown() override;
     void Render()    override;
 
 private:

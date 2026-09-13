@@ -38,6 +38,7 @@ public:
 protected:
     // ---- hooks (override in the app) ----
     virtual void    OnStartup() {}              // once, after GL is ready
+    virtual void    OnShutdown() {}             // finish derived worlds before subsystem shutdown
     virtual UWorld* WorldSetting() { return nullptr; } // build world + spawn (code hook)
     virtual void    Tick(float dt);             // world_->Tick(dt) then Render()
     virtual void    Render() {}                 // draw the frame (every frame)

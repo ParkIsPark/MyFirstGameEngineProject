@@ -35,6 +35,8 @@
 #include "FFileDialog.h"
 #include "FProcess.h"
 #include "FIniFile.h"
+#include "../Script/UScriptComponent.h"
+#include "../Script/UScriptSubsystem.h"
 
 #include <cstdio>
 #include <cctype>
@@ -69,6 +71,7 @@ namespace {
 
 EditorEngine::~EditorEngine()
 {
+    OnStop();
     if (imguiReady_)
     {
         ImGui_ImplOpenGL3_Shutdown();
@@ -496,6 +499,9 @@ AActor* EditorEngine::CloneActor(AActor* sa, bool resetPhysics)
             da->SetPhysics(p);
         }
     }
+    for (const auto& component : sa->Components())
+        if (auto* script = dynamic_cast<UScriptComponent*>(component.get()))
+            da->AddComponent<UScriptComponent>(*script);
     return da;
 }
 
@@ -531,12 +537,16 @@ UWorld* EditorEngine::CopyWorld(UWorld& src, bool resetPhysics)
 
 void EditorEngine::OnPlay()
 {
+    if (playing_ || !editorWorld_) return;
     pieWorld_ = CopyWorld(*editorWorld_, /*resetPhysics=*/true);   // deep copy (UMesh shared)
     // No forced floor: bodies fall freely unless the world enables one (a Plane
     // actor with a Box collider can serve as ground).
+    pieWorld_->SetScriptSubsystem(subsystems_.Get<UScriptSubsystem>());
     pieWorld_->BeginPlay();
     playing_ = true;
 }
+
+void EditorEngine::OnShutdown() { OnStop(); }
 
 void EditorEngine::OnStop()
 {
