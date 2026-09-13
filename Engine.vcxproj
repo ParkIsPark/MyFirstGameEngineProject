@@ -90,6 +90,7 @@
     <!-- Engine: Editor + ImGui -->
     <ClCompile Include="Engine\Editor\EditorEngine.cpp" />
     <ClCompile Include="Engine\Editor\FEditorAssetWorkflow.cpp" />
+    <ClCompile Include="Engine\Editor\FEditorScriptWorkflow.cpp" />
     <ClCompile Include="Engine\Editor\FFileDialog.cpp" />
     <ClCompile Include="Engine\Editor\FProcess.cpp" />
     <ClCompile Include="Engine\Editor\External\imgui\imgui.cpp" />

@@ -1,5 +1,9 @@
 // ScriptEditorWorkflowTest.cpp -- focused GL-free Task 7 coverage.
 //
+// MSYS2 UCRT64 filesystem-focused build/run (the macro selects the assertions
+// whose exact production unit is FEditorAssetWorkflow.cpp):
+//   C:\msys64\ucrt64\bin\g++.exe -std=c++17 -Wall -Wextra -DTASK7_UCRT_FILESYSTEM_ONLY -Iinclude -IEngine\Editor -IEngine\Serialization -IEngine\World -IEngine\Script -IEngine\Core -IEngine\Light -IEngine\Mesh -IEngine\Physics -IEngine\RayTracing Test\ScriptEditorWorkflowTest.cpp Engine\Editor\FEditorAssetWorkflow.cpp -o script_editor_filesystem_ucrt64_test.exe; if ($LASTEXITCODE -eq 0) { .\script_editor_filesystem_ucrt64_test.exe }
+//
 // Build/run from the repository root after building Engine.sln Debug|Win32:
 //   $cmd = 'call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" -arch=x86 >nul && cl /nologo /utf-8 /std:c++17 /EHsc /MDd /DWIN32 /D_DEBUG /Fo:bin\ScriptEditorWorkflowTest.obj /Iinclude /IEngine\Editor /IEngine\Serialization /IEngine\World /IEngine\Script /IEngine\Core /IEngine\Light /IEngine\Mesh /IEngine\Physics /IEngine\Import /IEngine\RayTracing /IEngine\Acceleration Test\ScriptEditorWorkflowTest.cpp /Fe:script_editor_workflow_test.exe bin\Engine.lib /link /OPT:NOREF,NOICF /LIBPATH:lib glew32.lib freeglut.lib glfw3dll.lib opengl32.lib glu32.lib assimp-vc143-mt.lib'; & cmd.exe /d /c $cmd
 //   $env:Path = "$PWD\bin;$env:Path"; .\script_editor_workflow_test.exe
@@ -57,6 +61,7 @@ namespace
         return result;
     }
 
+#ifndef TASK7_UCRT_FILESYSTEM_ONLY
     size_t Count(const std::string& text, const std::string& needle)
     {
         size_t count = 0;
@@ -64,6 +69,7 @@ namespace
             ++count;
         return count;
     }
+#endif
 
     bool MakeDirectoryLink(const fs::path& link, const fs::path& target)
     {
@@ -74,6 +80,21 @@ namespace
         {
             const std::wstring command = L"cmd.exe /d /c mklink /J \"" + link.wstring() +
                 L"\" \"" + target.wstring() + L"\" >nul";
+            return _wsystem(command.c_str()) == 0;
+        }
+#endif
+        return !ec;
+    }
+
+    bool MakeFileLink(const fs::path& link, const fs::path& target)
+    {
+        std::error_code ec;
+        fs::create_symlink(target, link, ec);
+#ifdef _WIN32
+        if (ec)
+        {
+            const std::wstring command = L"cmd.exe /d /c mklink \"" + link.wstring() +
+                L"\" \"" + target.wstring() + L"\" >nul 2>nul";
             return _wsystem(command.c_str()) == 0;
         }
 #endif
@@ -99,6 +120,12 @@ int main()
     Write(content / "Scripts" / "Top.lua", "top");
     Write(content / "Scripts" / "Nested" / "Deep.LUA", "deep");
     Write(content / "Scripts" / "Nested" / "Ignore.txt", "ignore");
+    const fs::path externalPayload = root / "External Files" / "Payload.txt";
+    Write(externalPayload, "external payload");
+    const bool madeFileEscape = MakeFileLink(content / "Scripts" / "Linked.lua", externalPayload);
+    const fs::path externalTree = root / "External Tree";
+    Write(externalTree / "Escaped.lua", "must stay external");
+    const bool madeDiscoveryJunction = MakeDirectoryLink(content / "Scripts" / "LinkedOutside", externalTree);
 
     // Mutation caught: replacing recursive traversal with a root-only scan, flattening
     // relative paths, or failing to classify Lua case-insensitively.
@@ -116,6 +143,51 @@ int main()
     });
     Check(nested != assets.end() && ResolveEditorContentPath(content, *nested) == content / "Scripts/Nested/Deep.LUA",
         "content entries reconstruct the original full nested path");
+    FEditorContentAsset forgedEscape{ fs::path("../External Files/Payload.txt"), "Script", "[Lua]" };
+    FEditorContentAsset linkedEscape{ fs::path("Scripts/LinkedOutside/Escaped.lua"), "Script", "[Lua]" };
+    Check(madeDiscoveryJunction &&
+          std::none_of(assets.begin(), assets.end(), [](const auto& asset) {
+              return asset.relativePath.generic_string().find("Payload.txt") != std::string::npos ||
+                     asset.relativePath.generic_string().find("LinkedOutside") != std::string::npos;
+          }) &&
+          ResolveEditorContentPath(content, forgedEscape).empty() &&
+          ResolveEditorContentPath(content, linkedEscape).empty() &&
+          (!madeFileEscape || ResolveEditorContentPath(content,
+              FEditorContentAsset{ fs::path("Scripts/Linked.lua"), "Script", "[Lua]" }).empty()) &&
+          fs::exists(externalPayload),
+        "content discovery and resolution reject lexical escapes and external reparses");
+
+    std::string mutationError;
+    Check(!RenameEditorContentAsset(content, linkedEscape, "Renamed.lua", mutationError) &&
+          !DeleteEditorContentAsset(content, linkedEscape, mutationError) &&
+          fs::exists(externalTree / "Escaped.lua"),
+        "rename and delete reject content identities crossing an external reparse");
+    Write(content / "Scripts" / "Mutable" / "Rename.lua", "rename me");
+    Write(content / "Scripts" / "Mutable" / "Delete.lua", "delete me");
+    FEditorContentAsset renameAsset{ fs::path("Scripts/Mutable/Rename.lua"), "Script", "[Lua]" };
+    FEditorContentAsset deleteAsset{ fs::path("Scripts/Mutable/Delete.lua"), "Script", "[Lua]" };
+    Check(RenameEditorContentAsset(content, renameAsset, "Renamed.lua", mutationError) &&
+          DeleteEditorContentAsset(content, deleteAsset, mutationError) &&
+          fs::exists(content / "Scripts/Mutable/Renamed.lua") &&
+          !fs::exists(content / "Scripts/Mutable/Delete.lua"),
+        "rename and delete preserve safe nested content identity");
+    Write(content / "RootRename.lua", "root rename");
+    FEditorContentAsset rootRenameAsset{ fs::path("RootRename.lua"), "Script", "[Lua]" };
+    Check(RenameEditorContentAsset(content, rootRenameAsset, "RootRenamed.lua", mutationError) &&
+          fs::exists(content / "RootRenamed.lua"),
+        "rename preserves existing root-level content behavior");
+
+    Write(content / "RootCollision.png", "root body");
+    Write(content / "Textures" / "RootCollision.png", "nested body");
+    bool copiedAsset = true;
+    std::string copyError;
+    const fs::path retainedNested = CopyEditorAssetToContent(
+        content / "Textures/RootCollision.png", content, copiedAsset, copyError);
+    Check(retainedNested == fs::absolute(content / "Textures/RootCollision.png").lexically_normal() &&
+          !copiedAsset && copyError.empty() &&
+          Read(content / "RootCollision.png") == "root body" &&
+          Read(content / "Textures/RootCollision.png") == "nested body",
+        "copy-to-content preserves an existing nested asset without flattening or overwrite");
     Check(EditorWorldNameFromPath(content, content / "Root.world") == fs::path("Root") &&
           EditorWorldNameFromPath(content, content / "Worlds/Nested.world") == fs::path("Worlds/Nested"),
         "root and nested world names preserve their content-relative save locations");
@@ -125,6 +197,18 @@ int main()
           dottedWorldSave == content / "Worlds/New.Version.world" &&
           fs::is_directory(content / "Worlds"),
         "nested world save preparation creates its preserved parent path without changing dotted names");
+
+    auto pickerModel = DiscoverEditorContent(content);
+    const auto pickerIndex = static_cast<size_t>(std::distance(pickerModel.begin(),
+        std::find_if(pickerModel.begin(), pickerModel.end(), [](const auto& asset) {
+            return asset.relativePath.generic_string() == "Scripts/Top.lua";
+        })));
+    const fs::path stableSelection = SelectEditorScriptAsset(content, pickerModel, pickerIndex);
+    pickerModel.clear();
+    Check(stableSelection == fs::absolute(content / "Scripts/Top.lua").lexically_normal(),
+        "script picker returns a stable path value before its model is refreshed");
+
+#ifndef TASK7_UCRT_FILESYSTEM_ONLY
 
     AActor actor;
     actor.SetMesh(new UMeshComponent());
@@ -167,6 +251,31 @@ int main()
           !missing.validationMessage.empty() && !directory.succeeded && !directory.validationMessage.empty() &&
           first.ScriptPath() == prior && undoCount == 1,
         "invalid script choices report validation and leave the prior assignment atomic");
+
+    UScriptComponent aliasComponent;
+    const fs::path aliasPath = root / "External Files" / "Alias.lua";
+    const bool madeAlias = MakeFileLink(aliasPath, externalPayload);
+    const fs::path aliasedDirectoryTarget = root / "Aliased Source";
+    Write(aliasedDirectoryTarget / "Alias.lua", "aliased Lua body");
+    const bool madeAliasJunction = MakeDirectoryLink(root / "External Files" / "LinkedAlias", aliasedDirectoryTarget);
+    const auto aliasResult = madeAlias
+        ? AssignEditorLuaScript(aliasComponent, aliasPath, content, {})
+        : AssignEditorLuaScript(aliasComponent,
+            root / "External Files/LinkedAlias/Alias.lua", content, {});
+    Check((madeAlias || madeAliasJunction) && !aliasResult.succeeded && !aliasResult.validationMessage.empty() &&
+          aliasComponent.ScriptPath().empty() && !fs::exists(content / "Scripts/Payload.txt") &&
+          !fs::exists(content / "Scripts/Alias.lua"),
+        "assignment rejects Lua selections containing a file or directory reparse");
+
+    const fs::path rollbackSource = root / "External Files" / "Rollback.lua";
+    Write(rollbackSource, "rollback body");
+    UScriptComponent rollbackComponent;
+    const auto rolledBack = AssignEditorLuaScript(rollbackComponent, rollbackSource, content, [] {
+        throw std::runtime_error("undo callback rejected change");
+    });
+    Check(!rolledBack.succeeded && !rolledBack.validationMessage.empty() &&
+          rollbackComponent.ScriptPath().empty() && !fs::exists(content / "Scripts/Rollback.lua"),
+        "failed component assignment rolls back an external Lua copy");
 
     const fs::path escapedContent = root / "Escaped Project" / "Content";
     const fs::path escapedTarget = root / "Outside Project";
@@ -263,6 +372,7 @@ int main()
     editing->RemoveNonSpatialComponent(&editingScript);
     Check(logs.empty(), "all editor assignment operations remain Lua-free before Play");
     scripts.Shutdown();
+#endif
 
     fs::remove_all(root);
     std::cout << "=== script editor workflow: " << failures << " failed ===\n";

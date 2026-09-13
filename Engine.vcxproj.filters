@@ -113,6 +113,7 @@
     <!-- Editor -->
     <ClCompile Include="Engine\Editor\EditorEngine.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <ClCompile Include="Engine\Editor\FEditorAssetWorkflow.cpp"><Filter>Engine\Editor</Filter></ClCompile>
+    <ClCompile Include="Engine\Editor\FEditorScriptWorkflow.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <ClCompile Include="Engine\Editor\FFileDialog.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <ClCompile Include="Engine\Editor\FProcess.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <ClCompile Include="Engine\Editor\External\imgui\imgui.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>

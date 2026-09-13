@@ -100,6 +100,7 @@
     <!-- Engine: Editor + ImGui -->
     <ClCompile Include="$(EngineRootDir)Engine\Editor\EditorEngine.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\FEditorAssetWorkflow.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\FEditorScriptWorkflow.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\FFileDialog.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\FProcess.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui.cpp" />

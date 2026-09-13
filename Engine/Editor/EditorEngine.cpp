@@ -787,12 +787,14 @@ std::string EditorEngine::CopyToContent(const std::string& src)
     fs::path sp(src);
     if (!fs::exists(sp, ec) || !fs::is_regular_file(sp, ec)) return src;   // descriptor/missing
 
-    fs::create_directories(contentDir_, ec);
     const fs::path destDir = fs::path(contentDir_);
-    // Already inside Content/? keep the path as-is (avoid copying onto itself).
-    const fs::path spParent = fs::weakly_canonical(sp.parent_path(), ec);
-    const fs::path cdAbs    = fs::weakly_canonical(destDir, ec);
-    if (!ec && spParent == cdAbs) return src;
+    bool copied = false;
+    std::string copyError;
+    const fs::path localAsset = CopyEditorAssetToContent(sp, destDir, copied, copyError);
+    if (localAsset.empty()) return src;
+    // Existing nested Content assets retain their complete identity. In
+    // particular, do not flatten Content/Textures/Foo.png onto Content/Foo.png.
+    if (!copied) return localAsset.string();
 
     auto copyOne = [&](const fs::path& from) -> bool {
         if (from.empty()) return false;
@@ -801,8 +803,6 @@ std::string EditorEngine::CopyToContent(const std::string& src)
         fs::copy_file(from, destDir / from.filename(), fs::copy_options::overwrite_existing, e);
         return !e;
     };
-
-    copyOne(sp);                                   // the asset itself
 
     std::string ext = sp.extension().string();
     for (char& c : ext) c = (char)std::tolower((unsigned char)c);
@@ -836,7 +836,7 @@ std::string EditorEngine::CopyToContent(const std::string& src)
             }
         }
     }
-    return (destDir / sp.filename()).string();
+    return localAsset.string();
 }
 
 void EditorEngine::SetActorParent(AActor* child, AActor* parent)
@@ -1229,12 +1229,18 @@ void EditorEngine::DrawContentBrowser()
         if (!p.empty()) ImportAsset(p);
     }
 
-    std::error_code ec;
     if (!toDelete.empty())
-    { fs::remove((fs::path(contentDir_) / toDelete).lexically_normal(), ec); content_.clear(); ScanContent(); }
+    {
+        std::string error;
+        DeleteEditorContentAsset(contentDir_, FEditorContentAsset{ toDelete, {}, {} }, error);
+        content_.clear(); ScanContent();
+    }
     if (!renFrom.empty() && !renTo.empty() && renFrom != renTo)
-    { fs::rename((fs::path(contentDir_) / renFrom).lexically_normal(),
-                 (fs::path(contentDir_) / renTo).lexically_normal(), ec); content_.clear(); ScanContent(); }
+    {
+        std::string error;
+        RenameEditorContentAsset(contentDir_, FEditorContentAsset{ renFrom, {}, {} }, renTo.filename(), error);
+        content_.clear(); ScanContent();
+    }
 }
 
 void EditorEngine::NewMaterial()
@@ -1891,19 +1897,27 @@ void EditorEngine::DrawDetails()
             ImGui::EndDragDropTarget();
         }
         if (ImGui::IsItemClicked()) ImGui::OpenPopup("PickScriptAsset");
+        std::filesystem::path pickedScript;
         if (ImGui::BeginPopup("PickScriptAsset"))
         {
             bool any = false;
-            for (const FEditorContentAsset& entry : content_)
+            for (size_t assetIndex = 0; assetIndex < content_.size(); ++assetIndex)
+            {
+                const FEditorContentAsset& entry = content_[assetIndex];
                 if (entry.category == "Script")
                 {
                     any = true;
                     const std::string label = entry.relativePath.generic_string();
-                    if (ImGui::MenuItem(label.c_str())) assign(ResolveEditorContentPath(contentDir_, entry));
+                    if (ImGui::MenuItem(label.c_str()))
+                        pickedScript = SelectEditorScriptAsset(contentDir_, content_, assetIndex);
                 }
+            }
             if (!any) ImGui::TextDisabled("(no .lua files beneath Content/Scripts)");
             ImGui::EndPopup();
         }
+        // Assignment refreshes content_; do it only after iteration has ended so
+        // the popup never retains an invalidated vector reference/iterator.
+        if (!pickedScript.empty()) assign(pickedScript);
 
         if (ImGui::Button("Import External .lua..."))
         {

@@ -21,13 +21,29 @@ if ([string]::IsNullOrWhiteSpace($ProjectDir)) { $ProjectDir = $PSScriptRoot }
 $ProjectDir = [System.IO.Path]::GetFullPath($ProjectDir)
 $PropsPath  = Join-Path $ProjectDir 'EngineRoot.props'
 
+function Test-PathContainsReparsePoint([string]$Path, [string]$StopRoot) {
+    $current = [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+    $stop = [System.IO.Path]::GetFullPath($StopRoot).TrimEnd('\', '/')
+    while ($true) {
+        if (-not $current.StartsWith($stop, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $true }
+        if ($current.Equals($stop, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+        $parent = [System.IO.Directory]::GetParent($current)
+        if ($null -eq $parent) { return $true }
+        $current = $parent.FullName.TrimEnd('\', '/')
+    }
+}
+
 function Get-ProjectScriptManifest([string]$Root) {
     $items = [System.Collections.Generic.List[string]]::new()
     $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
     $scriptsRoot = Join-Path $Root 'Content\Scripts'
-    if (Test-Path -LiteralPath $scriptsRoot -PathType Container) {
+    if ((Test-Path -LiteralPath $scriptsRoot -PathType Container) -and
+        -not (Test-PathContainsReparsePoint $scriptsRoot $rootFull)) {
         foreach ($file in Get-ChildItem -LiteralPath $scriptsRoot -Recurse -File) {
             if ($file.Extension -ine '.lua') { continue }
+            if (Test-PathContainsReparsePoint $file.FullName $scriptsRoot) { continue }
             $fileFull = [System.IO.Path]::GetFullPath($file.FullName)
             $relative = $fileFull.Substring($rootFull.Length).TrimStart('\', '/').Replace('\', '/')
             $items.Add($relative)

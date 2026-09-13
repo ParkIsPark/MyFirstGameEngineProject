@@ -1,11 +1,15 @@
 #include "FEditorAssetWorkflow.h"
 
-#include "../Script/UScriptComponent.h"
-#include "../World/AActor.h"
-
 #include <algorithm>
 #include <cctype>
 #include <system_error>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -39,8 +43,76 @@ namespace
         auto child = candidate.begin();
         auto parent = root.begin();
         for (; parent != root.end(); ++parent, ++child)
-            if (child == candidate.end() || *child != *parent) return false;
+            if (child == candidate.end() || !SamePathPart(*child, *parent)) return false;
         return child != candidate.end();
+    }
+
+    bool IsWithinPhysicalRoot(const fs::path& candidate, const fs::path& root)
+    {
+        auto child = candidate.begin();
+        for (auto parent = root.begin(); parent != root.end(); ++parent, ++child)
+            if (child == candidate.end() || !SamePathPart(*child, *parent)) return false;
+        return true;
+    }
+
+    bool IsSafeRelative(const fs::path& path)
+    {
+        if (path.empty() || path.has_root_path() || path == ".") return false;
+        for (const fs::path& part : path)
+            if (part.empty() || part == "." || part == "..") return false;
+        return true;
+    }
+
+    bool IsReparsePoint(const fs::path& path)
+    {
+#ifdef _WIN32
+        const DWORD attributes = GetFileAttributesW(path.c_str());
+        return attributes != INVALID_FILE_ATTRIBUTES &&
+            (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+#else
+        std::error_code ec;
+        return fs::is_symlink(fs::symlink_status(path, ec));
+#endif
+    }
+
+    bool HasReparsePoint(const fs::path& root, const fs::path& candidate)
+    {
+        if (!IsWithin(candidate, root)) return true;
+        fs::path current = root;
+        if (IsReparsePoint(current)) return true;
+        const fs::path relative = candidate.lexically_relative(root);
+        for (const fs::path& part : relative)
+        {
+            current /= part;
+            if (IsReparsePoint(current)) return true;
+        }
+        return false;
+    }
+
+    bool HasAnyReparsePoint(const fs::path& candidate)
+    {
+        fs::path current = candidate.root_path();
+        for (const fs::path& part : candidate.relative_path())
+        {
+            current /= part;
+            if (IsReparsePoint(current)) return true;
+        }
+        return false;
+    }
+
+    fs::path ResolveSafeContentEntry(const fs::path& contentRoot, const fs::path& relative)
+    {
+        if (!IsSafeRelative(relative)) return {};
+        std::error_code ec;
+        const fs::path root = fs::absolute(contentRoot, ec).lexically_normal();
+        if (ec) return {};
+        const fs::path candidate = (root / relative).lexically_normal();
+        if (!IsWithin(candidate, root) || HasReparsePoint(root, candidate)) return {};
+        const fs::path physicalRoot = fs::weakly_canonical(root, ec);
+        if (ec) return {};
+        const fs::path physicalCandidate = fs::weakly_canonical(candidate, ec);
+        if (ec || !IsStrictlyWithinPhysicalRoot(physicalCandidate, physicalRoot)) return {};
+        return candidate;
     }
 
     void Classify(const fs::path& path, std::string& category, std::string& icon)
@@ -56,12 +128,6 @@ namespace
         else if (ext == ".lua")                           { category = "Script";   icon = "[Lua]"; }
     }
 
-    FEditorScriptAssignment Reject(std::string message)
-    {
-        FEditorScriptAssignment result;
-        result.validationMessage = std::move(message);
-        return result;
-    }
 }
 
 std::vector<FEditorContentAsset> DiscoverEditorContent(const fs::path& contentRoot)
@@ -70,16 +136,22 @@ std::vector<FEditorContentAsset> DiscoverEditorContent(const fs::path& contentRo
     std::error_code ec;
     if (!fs::is_directory(contentRoot, ec)) return result;
 
-    fs::recursive_directory_iterator current(contentRoot,
+    const fs::path lexicalRoot = fs::absolute(contentRoot, ec).lexically_normal();
+    if (ec || IsReparsePoint(lexicalRoot)) return result;
+
+    fs::recursive_directory_iterator current(lexicalRoot,
         fs::directory_options::skip_permission_denied, ec), end;
     while (!ec && current != end)
     {
         const fs::directory_entry entry = *current;
+        const bool reparse = IsReparsePoint(entry.path());
+        if (reparse && entry.is_directory()) current.disable_recursion_pending();
         current.increment(ec);
+        if (reparse) continue;
         std::error_code entryError;
         if (!entry.is_regular_file(entryError)) continue;
-        fs::path relative = fs::relative(entry.path(), contentRoot, entryError);
-        if (entryError || relative.empty()) continue;
+        fs::path relative = entry.path().lexically_normal().lexically_relative(lexicalRoot);
+        if (!IsSafeRelative(relative) || ResolveSafeContentEntry(lexicalRoot, relative).empty()) continue;
         FEditorContentAsset asset;
         asset.relativePath = relative.lexically_normal();
         Classify(asset.relativePath, asset.category, asset.icon);
@@ -94,7 +166,161 @@ std::vector<FEditorContentAsset> DiscoverEditorContent(const fs::path& contentRo
 
 fs::path ResolveEditorContentPath(const fs::path& contentRoot, const FEditorContentAsset& asset)
 {
-    return (contentRoot / asset.relativePath).lexically_normal();
+    return ResolveSafeContentEntry(contentRoot, asset.relativePath);
+}
+
+fs::path CopyEditorAssetToContent(
+    const fs::path& selectedFile,
+    const fs::path& contentRoot,
+    bool& copied,
+    std::string& error)
+{
+    copied = false;
+    error.clear();
+    std::error_code ec;
+    if (selectedFile.empty() || !fs::is_regular_file(selectedFile, ec) || ec)
+    {
+        error = "The selected asset is not a regular file.";
+        return {};
+    }
+
+    const fs::path source = fs::absolute(selectedFile, ec).lexically_normal();
+    if (ec || HasAnyReparsePoint(source))
+    {
+        error = "The selected asset crosses a reparse point.";
+        return {};
+    }
+    fs::create_directories(contentRoot, ec);
+    if (ec)
+    {
+        error = "Could not create Content: " + ec.message();
+        return {};
+    }
+    const fs::path root = fs::absolute(contentRoot, ec).lexically_normal();
+    if (ec || IsReparsePoint(root))
+    {
+        error = "Could not resolve a safe Content directory.";
+        return {};
+    }
+    const fs::path physicalRoot = fs::weakly_canonical(root, ec);
+    if (ec)
+    {
+        error = "Could not resolve Content: " + ec.message();
+        return {};
+    }
+    const fs::path physicalSource = fs::weakly_canonical(source, ec);
+    if (ec)
+    {
+        error = "Could not resolve the selected asset: " + ec.message();
+        return {};
+    }
+
+    if (IsStrictlyWithinPhysicalRoot(physicalSource, physicalRoot))
+    {
+        const fs::path relative = source.lexically_relative(root);
+        if (!IsSafeRelative(relative) || ResolveSafeContentEntry(root, relative).empty())
+        {
+            error = "The selected Content asset has an unsafe identity.";
+            return {};
+        }
+        return source;
+    }
+
+    const fs::path destination = root / source.filename();
+    fs::copy_file(source, destination, fs::copy_options::overwrite_existing, ec);
+    if (ec)
+    {
+        error = "Could not copy the asset into Content: " + ec.message();
+        return {};
+    }
+    copied = true;
+    return destination;
+}
+
+bool RenameEditorContentAsset(
+    const fs::path& contentRoot,
+    const FEditorContentAsset& asset,
+    const fs::path& newLeaf,
+    std::string& error)
+{
+    error.clear();
+    if (newLeaf.empty() || newLeaf != newLeaf.filename() || newLeaf == "." || newLeaf == "..")
+    {
+        error = "The new asset name must be one filename.";
+        return false;
+    }
+    const fs::path source = ResolveSafeContentEntry(contentRoot, asset.relativePath);
+    if (source.empty())
+    {
+        error = "The selected asset has an unsafe Content identity.";
+        return false;
+    }
+    std::error_code ec;
+    const fs::path root = fs::absolute(contentRoot, ec).lexically_normal();
+    const fs::path relativeDestination = (asset.relativePath.parent_path() / newLeaf).lexically_normal();
+    if (ec || !IsSafeRelative(relativeDestination))
+    {
+        error = "The renamed asset would leave Content.";
+        return false;
+    }
+    const fs::path destination = (root / relativeDestination).lexically_normal();
+    const fs::path parent = destination.parent_path();
+    if (!IsWithin(destination, root) || HasReparsePoint(root, parent))
+    {
+        error = "The renamed asset would cross a reparse point.";
+        return false;
+    }
+    const fs::path physicalRoot = fs::weakly_canonical(root, ec);
+    const fs::path physicalParent = fs::weakly_canonical(parent, ec);
+    if (ec || !IsWithinPhysicalRoot(physicalParent, physicalRoot))
+    {
+        error = "The renamed asset would leave Content.";
+        return false;
+    }
+    if (fs::exists(destination, ec) || ec)
+    {
+        error = "An asset with that name already exists.";
+        return false;
+    }
+    fs::rename(source, destination, ec);
+    if (ec)
+    {
+        error = "Could not rename the asset: " + ec.message();
+        return false;
+    }
+    return true;
+}
+
+bool DeleteEditorContentAsset(
+    const fs::path& contentRoot,
+    const FEditorContentAsset& asset,
+    std::string& error)
+{
+    error.clear();
+    const fs::path selected = ResolveSafeContentEntry(contentRoot, asset.relativePath);
+    if (selected.empty())
+    {
+        error = "The selected asset has an unsafe Content identity.";
+        return false;
+    }
+    std::error_code ec;
+    if (!fs::is_regular_file(selected, ec) || ec || !fs::remove(selected, ec) || ec)
+    {
+        error = "Could not delete the selected Content asset.";
+        return false;
+    }
+    return true;
+}
+
+fs::path SelectEditorScriptAsset(
+    const fs::path& contentRoot,
+    const std::vector<FEditorContentAsset>& assets,
+    size_t assetIndex)
+{
+    if (assetIndex >= assets.size() || assets[assetIndex].category != "Script") return {};
+    const fs::path selected = ResolveSafeContentEntry(contentRoot, assets[assetIndex].relativePath);
+    if (selected.empty() || Lower(selected.extension().string()) != ".lua") return {};
+    return selected;
 }
 
 fs::path EditorWorldNameFromPath(const fs::path& contentRoot, const fs::path& worldPath)
@@ -116,85 +342,5 @@ fs::path PrepareEditorWorldSavePath(const fs::path& contentRoot, const fs::path&
     result += ".world";
     std::error_code ec;
     fs::create_directories(result.parent_path(), ec);
-    return result;
-}
-
-UScriptComponent* ScriptComponentAt(AActor& actor, size_t componentIndex) noexcept
-{
-    if (componentIndex >= actor.Components().size()) return nullptr;
-    return dynamic_cast<UScriptComponent*>(actor.Components()[componentIndex].get());
-}
-
-FEditorScriptAssignment AssignEditorLuaScript(
-    UScriptComponent& component,
-    const fs::path& selectedFile,
-    const fs::path& contentRoot,
-    const std::function<void()>& beforeChange)
-{
-    if (selectedFile.empty()) return Reject("Choose a Lua file.");
-    if (Lower(selectedFile.extension().string()) != ".lua")
-        return Reject("Script assets must use the .lua extension.");
-
-    std::error_code ec;
-    if (!fs::exists(selectedFile, ec) || ec) return Reject("The selected Lua file does not exist.");
-    if (!fs::is_regular_file(selectedFile, ec) || ec) return Reject("The selected Lua path is not a file.");
-
-    const fs::path source = fs::weakly_canonical(selectedFile, ec);
-    if (ec) return Reject("Could not resolve the selected Lua file: " + ec.message());
-    fs::path projectRoot = contentRoot.parent_path();
-    if (projectRoot.empty()) projectRoot = fs::current_path(ec);
-    if (ec) return Reject("Could not resolve the project directory: " + ec.message());
-    const fs::path canonicalProject = fs::weakly_canonical(projectRoot, ec);
-    if (ec) return Reject("Could not resolve the project directory: " + ec.message());
-    const fs::path canonicalContent = fs::weakly_canonical(contentRoot, ec);
-    if (ec) return Reject("Could not resolve the Content directory: " + ec.message());
-    if (!IsStrictlyWithinPhysicalRoot(canonicalContent, canonicalProject))
-        return Reject("Content resolves outside the project directory.");
-
-    fs::create_directories(contentRoot / "Scripts", ec);
-    if (ec) return Reject("Could not create Content/Scripts: " + ec.message());
-    const fs::path scriptsRoot = fs::weakly_canonical(contentRoot / "Scripts", ec);
-    if (ec) return Reject("Could not resolve Content/Scripts: " + ec.message());
-    // Copy through the resolved physical Scripts path only after proving both
-    // Content and Scripts stayed inside their project-owned parents. This also
-    // rejects junction/symlink escapes before any destination file is created.
-    if (!IsStrictlyWithinPhysicalRoot(scriptsRoot, canonicalContent))
-        return Reject("Content/Scripts resolves outside the project Content directory.");
-
-    fs::path projectRelative;
-    if (IsWithin(source, scriptsRoot))
-    {
-        const fs::path contentRelative = fs::relative(source, canonicalContent, ec);
-        if (ec || contentRelative.empty()) return Reject("Could not make the Lua path project-relative.");
-        projectRelative = fs::path("Content") / contentRelative;
-    }
-    else
-    {
-        const fs::path destination = scriptsRoot / source.filename();
-        if (fs::exists(destination, ec))
-            return Reject("A script named '" + source.filename().string() + "' already exists in Content/Scripts.");
-        ec.clear();
-        if (!fs::copy_file(source, destination, fs::copy_options::none, ec) || ec)
-            return Reject("Could not copy the Lua file into Content/Scripts: " + ec.message());
-        projectRelative = fs::path("Content/Scripts") / source.filename();
-    }
-
-    FEditorScriptAssignment result;
-    try
-    {
-        projectRelative = projectRelative.lexically_normal();
-        result.succeeded = true;
-        result.projectRelativePath = projectRelative;
-        result.changed = component.ScriptPath() != projectRelative;
-        if (result.changed)
-        {
-            if (beforeChange) beforeChange();
-            component.SetScriptPath(projectRelative);
-        }
-    }
-    catch (const std::exception& error)
-    {
-        return Reject(error.what());
-    }
     return result;
 }

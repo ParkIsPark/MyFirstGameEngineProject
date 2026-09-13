@@ -28,6 +28,24 @@ struct FEditorScriptAssignment
 std::vector<FEditorContentAsset> DiscoverEditorContent(const std::filesystem::path& contentRoot);
 std::filesystem::path ResolveEditorContentPath(
     const std::filesystem::path& contentRoot, const FEditorContentAsset& asset);
+std::filesystem::path CopyEditorAssetToContent(
+    const std::filesystem::path& selectedFile,
+    const std::filesystem::path& contentRoot,
+    bool& copied,
+    std::string& error);
+bool RenameEditorContentAsset(
+    const std::filesystem::path& contentRoot,
+    const FEditorContentAsset& asset,
+    const std::filesystem::path& newLeaf,
+    std::string& error);
+bool DeleteEditorContentAsset(
+    const std::filesystem::path& contentRoot,
+    const FEditorContentAsset& asset,
+    std::string& error);
+std::filesystem::path SelectEditorScriptAsset(
+    const std::filesystem::path& contentRoot,
+    const std::vector<FEditorContentAsset>& assets,
+    size_t assetIndex);
 std::filesystem::path EditorWorldNameFromPath(
     const std::filesystem::path& contentRoot, const std::filesystem::path& worldPath);
 std::filesystem::path PrepareEditorWorldSavePath(

@@ -70,3 +70,109 @@ Build output retains existing repository warnings (notably code-page C4819, GLM 
 - A direct non-MSVC/UCRT experiment was not used as acceptance evidence because the reviewed base has a pre-existing GCC-incompatible default argument in `UFbxImporter.h:28`. The required Visual Studio Win32 route above is clean at the error level.
 
 No product-behavior ambiguity or Task 8 scope expansion was required.
+
+## Controller fix round 1 (`dcbea6f`)
+
+All six Important controller findings were reproduced or reduced to a failing
+link/policy assertion before the corresponding production edit.
+
+### RED evidence
+
+1. The first focused MSVC run after adding the path-boundary assertions reported
+   exactly three failures:
+   - `FAIL content discovery and resolution reject lexical escapes and external file reparses`
+   - `FAIL assignment rejects a Lua-named reparse whose resolved target is not Lua`
+   - `FAIL failed component assignment rolls back an external Lua copy`
+   The host does not grant `SeCreateSymbolicLinkPrivilege` (both
+   `std::filesystem::create_symlink` and `cmd mklink` reported insufficient
+   privilege), so the final test automatically uses a real directory junction as
+   the equivalent reparse fixture. The same test will exercise a file symlink
+   when the host permits creating one.
+2. After adding tests for the editor's desired narrow APIs, the focused link failed
+   with four unresolved production symbols: `CopyEditorAssetToContent`,
+   `RenameEditorContentAsset`, `DeleteEditorContentAsset`, and
+   `SelectEditorScriptAsset`. Those assertions cover the nested-name collision,
+   external reparse rename/delete protection, safe nested mutation, and a picker
+   selection that remains valid after its model is cleared.
+3. `Test/ScriptPackagingTest.ps1` created a real junction from
+   `Content/Scripts/LinkedOutside` to an external directory containing
+   `Escaped.lua`, then failed at
+   `FAIL: package manifest policy explicitly rejects filesystem reparse entries`.
+4. The initial required UCRT64 attempt exposed test-command defects in sequence:
+   PowerShell parsed the unquoted `-Wl,--gc-sections`, the include list lacked
+   `Engine/RayTracing`, and the over-coupled helper TU linked against
+   `UScriptComponent::SetScriptPath`. The filesystem operations were then kept in
+   `FEditorAssetWorkflow.cpp` while component assignment moved to
+   `FEditorScriptWorkflow.cpp`; this provides an exact two-input UCRT64 command
+   (test plus its one production TU) at the top of the standalone test rather
+   than silently substituting MSVC.
+5. Final self-review added a root-asset rename assertion to protect existing
+   Content Browser behavior. The UCRT64 run reproduced exactly
+   `FAIL rename preserves existing root-level content behavior`; the physical
+   parent check incorrectly required a strict descendant. Allowing the safe
+   Content root as the destination parent made the same run green while retaining
+   strict containment for files.
+
+### GREEN evidence
+
+Fresh verification after all fixes:
+
+- Exact command recorded at the top of `Test/ScriptEditorWorkflowTest.cpp`:
+  `C:\msys64\ucrt64\bin\g++.exe ... Test\ScriptEditorWorkflowTest.cpp Engine\Editor\FEditorAssetWorkflow.cpp ...`
+  compiled and ran successfully: 10 PASS, `0 failed`. This directly covers
+  recursive lexical identity, real-junction discovery/resolve/rename/delete
+  rejection, safe nested mutation, non-flattening copy, nested world identity,
+  and stable picker selection.
+- Full focused MSVC workflow: 23 PASS, `0 failed`. It additionally covers
+  multiple exact ScriptComponents, external assignment, reparse rejection,
+  rollback after an undo/component-change failure, omitted unassigned
+  serialization, alias-safe removal, and no Lua work during editing.
+- `Test/ScriptPackagingTest.ps1`: all 16 assertions passed. Both dry-run and
+  regular freeze exclude the external reparse, retain its target unchanged, and
+  retain the referenced plus nested-unreferenced scripts under a path with spaces.
+- `Engine.sln` `Debug|Win32`: exit 0; both `Engine.lib` and `Test.exe` built.
+- Task 5 serialization regression: 10 passed, 0 failed.
+- Task 6 real-Lua lifecycle regression: all 18 checks passed.
+- A freshly generated project under `%TEMP%\LuaT7 Final Path` built both
+  `Editor|Win32` and `Game|Win32`; its separate `Editor` and `Game` intermediate
+  directories were produced and the final Game executable was 626,176 bytes.
+  Its manifest was exactly `Content/Scripts/ExampleActor.lua`. The temporary
+  fixture was removed after verification.
+- An intentionally longer first fixture under the already-long worktree hit a
+  Windows compiler-generated-file `C1083` path-length error. Repeating under the
+  shorter `%TEMP%` space-containing path passed; this did not require a product
+  change.
+
+### Fix details and self-review
+
+- Content identity now comes from `lexically_relative`, rejects empty/rooted/dot
+  traversal, rejects reparse components, and confirms canonical physical
+  containment before returning a mutable path. The real Content Browser routes
+  rename and delete through these checked helpers.
+- `EditorEngine::CopyToContent` routes its primary asset through the tested helper.
+  Any safe descendant already beneath Content returns its complete nested path;
+  it is never flattened onto an unrelated root filename. Existing external OBJ
+  sidecar behavior remains intact.
+- Script assignment rejects every source path containing a file or directory
+  reparse, validates the resolved source extension, then normalizes and validates
+  the exact `Content/Scripts/*.lua` serialized identity before copying. A copy is
+  removed if the undo hook or `SetScriptPath` fails.
+- The picker stores a path value while iterating and invokes assignment only after
+  `EndPopup`, so the successful assignment refresh cannot invalidate its active
+  vector reference.
+- Package manifest enumeration rejects a reparse at Scripts, at the file, or at
+  any intervening path component. It still includes every ordinary in-root Lua
+  file, referenced or not.
+- All engine, Test, and Template project/filter pairs include the split production
+  unit and parse/build successfully. No gameplay binding, hot reload, renderer,
+  or Task 8 behavior was added.
+- Headless automation now covers the exact production path/model operations,
+  world save/load and no-edit-execution contract, real Lua Play lifecycle,
+  generation, regular package freeze, both generated build configurations, and
+  manifest output. The only manual-only remainder is visual ImGui click-through
+  (drag/picker/native dialog/clear/remove and observing the standalone window);
+  those real controls compile, but a fake ImGui oracle was deliberately not
+  introduced.
+
+This section supersedes the earlier statement that UCRT64 was not acceptance
+evidence: the final focused command is complete and was actually run.

@@ -40,13 +40,23 @@ Script = Content/Scripts/Referenced.lua
     Write-Utf8 (Join-Path $projectDir 'Content\Scripts\Nested\Unreferenced.lua') 'unreferenced body'
     Write-Utf8 (Join-Path $projectDir 'Content\Outside.lua') 'outside body'
     Write-Utf8 (Join-Path $projectDir 'Content\Scripts\Ignore.txt') 'not lua'
+    $externalScripts = Join-Path $tempRoot 'External Manifest Payload'
+    Write-Utf8 (Join-Path $externalScripts 'Escaped.lua') 'must not package'
+    $manifestLink = Join-Path $projectDir 'Content\Scripts\LinkedOutside'
+    $mklinkCommand = "mklink /J `"$manifestLink`" `"$externalScripts`""
+    & cmd.exe /d /c $mklinkCommand | Out-Null
+    Assert-True ($LASTEXITCODE -eq 0 -and
+                 ((Get-Item -LiteralPath $manifestLink -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) `
+        'manifest fixture contains a real directory reparse point to an external Lua file'
+    Assert-True ((Get-Content -LiteralPath $packageScript -Raw) -match 'ReparsePoint') `
+        'package manifest policy explicitly rejects filesystem reparse entries'
 
     $manifestOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $packageScript `
         -ProjectDir $projectDir -ScriptManifestOnly)
     Assert-True ($LASTEXITCODE -eq 0) 'manifest dry-run succeeds from a project path containing spaces'
     $manifest = @($manifestOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     Assert-True (($manifest -join "`n") -ceq "Content/Scripts/Nested/Unreferenced.lua`nContent/Scripts/Referenced.lua") `
-        'manifest contains exactly sorted in-root Lua files, including referenced and unreferenced policy entries'
+        'dry-run manifest contains exactly sorted in-root Lua files and excludes external reparses'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $projectDir 'ScriptManifest.txt'))) `
         'manifest-only mode is non-mutating'
     Assert-True ((Get-Content -LiteralPath (Join-Path $projectDir 'Content\Scripts\Referenced.lua') -Raw) -ceq 'referenced body' -and
@@ -70,11 +80,13 @@ Script = Content/Scripts/Referenced.lua
     Assert-True ($LASTEXITCODE -eq 0) 'regular package freeze succeeds against a minimal engine root with spaces'
     $writtenManifest = @(Get-Content -LiteralPath (Join-Path $projectDir 'ScriptManifest.txt'))
     Assert-True (($writtenManifest -join "`n") -ceq ($manifest -join "`n")) `
-        'regular package writes the exact same deterministic manifest as dry-run'
+        'regular package writes the same reparse-safe deterministic manifest as dry-run'
     Assert-True ((Test-Path -LiteralPath (Join-Path $projectDir 'Content\Scripts\Referenced.lua')) -and
                  (Test-Path -LiteralPath (Join-Path $projectDir 'Content\Scripts\Nested\Unreferenced.lua')) -and
                  (Get-Content -LiteralPath (Join-Path $projectDir 'Content\Outside.lua') -Raw) -ceq 'outside body') `
         'regular freeze retains all project-owned Content without rebasing or deletion'
+    Assert-True ((Get-Content -LiteralPath (Join-Path $externalScripts 'Escaped.lua') -Raw) -ceq 'must not package') `
+        'regular package leaves the external reparse target untouched'
 
     Write-Utf8 (Join-Path $projectDir 'Content\Scripts\Nested\AddedAfterFreeze.lua') 'late body'
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $packageScript -ProjectDir $projectDir | Out-Null
