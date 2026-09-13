@@ -82,6 +82,7 @@
     <!-- User source -->
     <ClCompile Include="main.cpp" />
     <!-- Engine: Core -->
+    <ClCompile Include="$(EngineRootDir)Engine\Core\FFeatureLifecycle.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Core\UScene.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Core\UPostProcessFilter.cpp" />
     <!-- Engine: Mesh + Rasterizer + Render -->
@@ -185,6 +186,8 @@
   </ItemGroup>
   <ItemGroup>
     <!-- Engine: Core headers -->
+    <ClInclude Include="$(EngineRootDir)Engine\Core\EngineVersion.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Core\FFeatureLifecycle.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Core\UScene.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Core\UPostProcessFilter.h" />
     <!-- Engine: Mesh headers -->

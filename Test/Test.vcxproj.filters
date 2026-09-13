@@ -67,6 +67,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Core\FFeatureLifecycle.cpp"><Filter>Engine\Core</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Core\UScene.cpp"><Filter>Engine\Core</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Core\UPostProcessFilter.cpp"><Filter>Engine\Core</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Mesh\UMesh.cpp"><Filter>Engine\Mesh</Filter></ClCompile>
@@ -161,6 +162,8 @@
     <ClCompile Include="$(EngineRootDir)ThirdParty\Lua\5.4.9\src\lzio.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="$(EngineRootDir)Engine\Core\EngineVersion.h"><Filter>Engine\Core</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Core\FFeatureLifecycle.h"><Filter>Engine\Core</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Core\UScene.h"><Filter>Engine\Core</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Core\UPostProcessFilter.h"><Filter>Engine\Core</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\World\AActor.h"><Filter>Engine\World</Filter></ClInclude>

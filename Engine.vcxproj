@@ -68,6 +68,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <!-- Engine: Core -->
+    <ClCompile Include="Engine\Core\FFeatureLifecycle.cpp" />
     <ClCompile Include="Engine\Core\UScene.cpp" />
     <ClCompile Include="Engine\Core\UPostProcessFilter.cpp" />
     <!-- Engine: Mesh -->
@@ -175,6 +176,8 @@
   </ItemGroup>
   <ItemGroup>
     <!-- Engine: Core headers -->
+    <ClInclude Include="Engine\Core\EngineVersion.h" />
+    <ClInclude Include="Engine\Core\FFeatureLifecycle.h" />
     <ClInclude Include="Engine\Core\UScene.h" />
     <ClInclude Include="Engine\Core\UPostProcessFilter.h" />
     <!-- Engine: Mesh headers -->

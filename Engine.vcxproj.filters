@@ -79,6 +79,7 @@
     <ClCompile Include="Engine\Script\FScriptPath.cpp"><Filter>Engine\Script</Filter></ClCompile>
     <ClCompile Include="Engine\Script\UScriptComponent.cpp"><Filter>Engine\Script</Filter></ClCompile>
     <!-- Core -->
+    <ClCompile Include="Engine\Core\FFeatureLifecycle.cpp"><Filter>Engine\Core</Filter></ClCompile>
     <ClCompile Include="Engine\Core\UScene.cpp"><Filter>Engine\Core</Filter></ClCompile>
     <ClCompile Include="Engine\Core\UPostProcessFilter.cpp"><Filter>Engine\Core</Filter></ClCompile>
     <!-- World -->
@@ -181,6 +182,8 @@
     <ClInclude Include="Engine\Framework\USubsystem.h"><Filter>Engine\Framework</Filter></ClInclude>
     <ClInclude Include="Engine\Framework\USubsystemManager.h"><Filter>Engine\Framework</Filter></ClInclude>
     <!-- Core -->
+    <ClInclude Include="Engine\Core\EngineVersion.h"><Filter>Engine\Core</Filter></ClInclude>
+    <ClInclude Include="Engine\Core\FFeatureLifecycle.h"><Filter>Engine\Core</Filter></ClInclude>
     <ClInclude Include="Engine\Core\UScene.h"><Filter>Engine\Core</Filter></ClInclude>
     <ClInclude Include="Engine\Core\UPostProcessFilter.h"><Filter>Engine\Core</Filter></ClInclude>
     <!-- World -->

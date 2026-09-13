@@ -81,6 +81,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Script\FLuaScriptInstance.cpp"><Filter>Engine\Script</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Script\FScriptPath.cpp"><Filter>Engine\Script</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Script\UScriptComponent.cpp"><Filter>Engine\Script</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Core\FFeatureLifecycle.cpp"><Filter>Engine\Core</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Core\UScene.cpp"><Filter>Engine\Core</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Core\UPostProcessFilter.cpp"><Filter>Engine\Core</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\World\AActor.cpp"><Filter>Engine\World</Filter></ClCompile>
@@ -170,6 +171,8 @@
     <ClInclude Include="$(EngineRootDir)Engine\Framework\FProjectDescriptor.h"><Filter>Engine\Framework</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Framework\USubsystem.h"><Filter>Engine\Framework</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Framework\USubsystemManager.h"><Filter>Engine\Framework</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Core\EngineVersion.h"><Filter>Engine\Core</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Core\FFeatureLifecycle.h"><Filter>Engine\Core</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Core\UScene.h"><Filter>Engine\Core</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Core\UPostProcessFilter.h"><Filter>Engine\Core</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\World\AActor.h"><Filter>Engine\World</Filter></ClInclude>
