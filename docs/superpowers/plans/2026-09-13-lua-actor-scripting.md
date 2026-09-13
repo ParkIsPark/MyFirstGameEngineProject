@@ -148,8 +148,8 @@ public:
 
 class UScriptSubsystem final : public USubsystem {
 public:
-    void OnStartup() override;
-    void OnShutdown() override;
+    void Init() override;
+    void Shutdown() override;
     FLuaBindingRegistry& Bindings();
     lua_State* State() const;
 };
