@@ -25,6 +25,7 @@ public:
     std::string_view TypeName() const override { return "ScriptComponent"; }
     const std::filesystem::path& ScriptPath() const noexcept { return scriptPath_; }
     void SetScriptPath(std::filesystem::path projectRelativePath);
+    void ClearScriptPath() noexcept;
     void Serialize(FArchive& ar) override;
     void BeginPlay() noexcept override;
     void Tick(float deltaSeconds) noexcept override;

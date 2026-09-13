@@ -85,6 +85,19 @@ void AActor::RemoveOwnedComponent(UActorComponent* component)
     components_.erase(it);
 }
 
+bool AActor::RemoveNonSpatialComponent(UActorComponent* component)
+{
+    RequireComponentMutationAllowed();
+    if (!component || component->GetOwner() != this || component == physics || component == mesh ||
+        dynamic_cast<USceneComponent*>(component))
+        return false;
+    auto it = std::find_if(components_.begin(), components_.end(),
+        [component](const auto& owned) { return owned.get() == component; });
+    if (it == components_.end()) return false;
+    components_.erase(it);
+    return true;
+}
+
 void AActor::SetMesh(UMeshComponent* m)
 {
     // Reserve before adoption: AttachTo then cannot allocate after the actor

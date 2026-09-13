@@ -33,6 +33,7 @@
 #include "UObjImporter.h"
 #include "UFbxImporter.h"
 #include "FFileDialog.h"
+#include "FEditorAssetWorkflow.h"
 #include "FProcess.h"
 #include "FIniFile.h"
 #include "../Script/UScriptComponent.h"
@@ -163,14 +164,11 @@ void EditorEngine::BuildEditorWorld()
 
 void EditorEngine::SaveWorld()
 {
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    fs::create_directories(contentDir_, ec);
-    const std::string path = contentDir_ + "/" + worldName_ + ".world";
-    FWorldSerializer::SaveToFile(*editorWorld_, path.c_str());
+    const std::filesystem::path path = PrepareEditorWorldSavePath(contentDir_, worldName_);
+    FWorldSerializer::SaveToFile(*editorWorld_, path.string().c_str());
     content_.clear();          // refresh so the new .world shows in the browser
     ScanContent();
-    std::printf("[Editor] Saved %s\n", path.c_str());
+    std::printf("[Editor] Saved %s\n", path.string().c_str());
 }
 
 void EditorEngine::RebuildActorNames()
@@ -262,8 +260,8 @@ void EditorEngine::LoadWorld(const std::string& path)
 {
     UWorld* w = FWorldSerializer::LoadFromFile(path.c_str());
     if (!w) { std::printf("[Editor] Load failed: %s\n", path.c_str()); return; }
-    std::string stem = std::filesystem::path(path).stem().string();
-    SetEditorWorld(w, stem);
+    const std::string worldName = EditorWorldNameFromPath(contentDir_, path).generic_string();
+    SetEditorWorld(w, worldName);
 
     // Reload CPU diffuse textures from their serialized paths (pixels aren't saved).
     auto reload = [](Material& m) { if (!m.diffuseTexPath.empty() && m.texData.empty()) LoadMaterialTexture(m, m.diffuseTexPath); };
@@ -773,21 +771,7 @@ void EditorEngine::ScanContent()
         std::error_code ec;
         if (!fs::is_directory(d, ec)) continue;
         contentDir_ = d;
-        for (const auto& e : fs::directory_iterator(d, ec))
-        {
-            if (!e.is_regular_file()) continue;
-            std::string name = e.path().filename().string();
-            std::string ext  = e.path().extension().string();
-            for (char& c : ext) c = (char)std::tolower((unsigned char)c);
-
-            const char* cat = "Other"; const char* icon = "[?]";
-            if      (ext == ".world")                         { cat = "World";    icon = "[W]"; }
-            else if (ext == ".obj" || ext == ".fbx")          { cat = "Mesh";     icon = "[M]"; }
-            else if (ext == ".material" || ext == ".mtl")     { cat = "Material"; icon = "[Mat]"; }
-            else if (ext == ".png" || ext == ".jpg")          { cat = "Texture";  icon = "[T]"; }
-            else if (ext == ".hdr")                           { cat = "HDRI";     icon = "[H]"; }
-            content_.push_back({ name, cat, icon });
-        }
+        content_ = DiscoverEditorContent(d);
         break;                                   // first existing dir wins
     }
 }
@@ -1107,9 +1091,10 @@ void EditorEngine::DrawMenuBar()
         if (ImGui::BeginMenu("Open World"))
         {
             bool any = false;
-            for (const ContentEntry& e : content_)
-                if (std::string(e.cat) == "World")
-                { any = true; if (ImGui::MenuItem(e.name.c_str())) LoadWorld(contentDir_ + "/" + e.name); }
+            for (const FEditorContentAsset& e : content_)
+                if (e.category == "World")
+                { const std::string label = e.relativePath.generic_string();
+                  any = true; if (ImGui::MenuItem(label.c_str())) LoadWorld(ResolveEditorContentPath(contentDir_, e).string()); }
             if (!any) ImGui::TextDisabled("(no .world in Content/)");
             ImGui::EndMenu();
         }
@@ -1144,7 +1129,7 @@ void EditorEngine::DrawMenuBar()
 void EditorEngine::DrawContentBrowser()
 {
     namespace fs = std::filesystem;
-    const char* tabs[] = { "All", "World", "Mesh", "Material", "Texture" };
+    const char* tabs[] = { "All", "World", "Mesh", "Material", "Texture", "Script" };
     const int nTabs = (int)(sizeof(tabs) / sizeof(tabs[0]));
     for (int i = 0; i < nTabs; ++i) { if (i) ImGui::SameLine(); if (ImGui::RadioButton(tabs[i], cbFilter_ == i)) cbFilter_ = i; }
     ImGui::SameLine(); if (ImGui::SmallButton("Refresh"))   { content_.clear(); ScanContent(); }
@@ -1155,45 +1140,50 @@ void EditorEngine::DrawContentBrowser()
     const float cell = 96.0f;
     const int cols = (int)(ImGui::GetContentRegionAvail().x / cell);
     int shown = 0;
-    std::string toDelete, renFrom, renTo;
+    fs::path toDelete, renFrom, renTo;
     for (int i = 0; i < (int)content_.size(); ++i)
     {
-        const ContentEntry& e = content_[i];
-        const std::string cat = e.cat;
+        const FEditorContentAsset& e = content_[i];
+        const std::string cat = e.category;
+        const std::string name = e.relativePath.generic_string();
         if (cbFilter_ != 0 && cat != tabs[cbFilter_]) continue;
         if (shown % (cols < 1 ? 1 : cols) != 0) ImGui::SameLine();
         ImGui::PushID(i);
         ImGui::BeginGroup();
-        ImGui::Button((std::string(e.icon) + "##icon").c_str(), ImVec2(74, 52));
+        ImGui::Button((e.icon + "##icon").c_str(), ImVec2(74, 52));
 
         // Mesh / Material / Texture / HDRI assets are drag sources -> drop onto a
         // slot. HDRI (.hdr) and Texture both drag as ASSET_TEX so an .hdr can be
         // dropped onto an Environment Light's Sky Image slot.
-        if ((cat == "Mesh" || cat == "Material" || cat == "Texture" || cat == "HDRI") && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+        if ((cat == "Mesh" || cat == "Material" || cat == "Texture" || cat == "HDRI" || cat == "Script") && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
         {
-            std::string full = contentDir_ + "/" + e.name;
-            const char* pl = cat == "Mesh" ? "ASSET_MESH" : cat == "Material" ? "ASSET_MAT" : "ASSET_TEX";
+            std::string full = ResolveEditorContentPath(contentDir_, e).string();
+            const char* pl = cat == "Mesh" ? "ASSET_MESH" : cat == "Material" ? "ASSET_MAT" :
+                cat == "Script" ? "ASSET_LUA" : "ASSET_TEX";
             ImGui::SetDragDropPayload(pl, full.c_str(), full.size() + 1);
-            ImGui::Text("%s %s", e.icon, e.name.c_str());
+            ImGui::Text("%s %s", e.icon.c_str(), name.c_str());
             ImGui::EndDragDropSource();
         }
 
         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
         {
-            if      (cat == "World")    LoadWorld(contentDir_ + "/" + e.name);
-            else if (cat == "Mesh")     ImportAsset(contentDir_ + "/" + e.name);
-            else if (cat == "Material") { matEditPath_ = contentDir_ + "/" + e.name; showMatEditor_ = true; }
+            const std::string full = ResolveEditorContentPath(contentDir_, e).string();
+            if      (cat == "World")    LoadWorld(full);
+            else if (cat == "Mesh")     ImportAsset(full);
+            else if (cat == "Material") { matEditPath_ = full; showMatEditor_ = true; }
             // HDRI: assign via an Environment Light's Sky Image slot (drag the .hdr there).
         }
         if (ImGui::BeginPopupContextItem("ctx"))
         {
-            if (cat == "World"    && ImGui::MenuItem("Open"))          LoadWorld(contentDir_ + "/" + e.name);
-            if (cat == "Mesh"     && ImGui::MenuItem("Add to Scene"))  ImportAsset(contentDir_ + "/" + e.name);
-            if (cat == "Material" && ImGui::MenuItem("Edit Material")) { matEditPath_ = contentDir_ + "/" + e.name; showMatEditor_ = true; }
-            if (cat == "Material" && ImGui::MenuItem("Apply to Selected")) ApplyMaterialToSelected(contentDir_ + "/" + e.name);
+            const std::string full = ResolveEditorContentPath(contentDir_, e).string();
+            if (cat == "World"    && ImGui::MenuItem("Open"))          LoadWorld(full);
+            if (cat == "Mesh"     && ImGui::MenuItem("Add to Scene"))  ImportAsset(full);
+            if (cat == "Material" && ImGui::MenuItem("Edit Material")) { matEditPath_ = full; showMatEditor_ = true; }
+            if (cat == "Material" && ImGui::MenuItem("Apply to Selected")) ApplyMaterialToSelected(full);
             if (cat == "HDRI") ImGui::TextDisabled("Drag onto an Env Light's Sky Image");
-            if (ImGui::MenuItem("Rename")) { cbRename_ = i; std::snprintf(cbBuf_, sizeof(cbBuf_), "%s", e.name.c_str()); }
-            if (ImGui::MenuItem("Delete")) toDelete = e.name;
+            if (cat == "Script") ImGui::TextDisabled("Drag onto a Script Component");
+            if (ImGui::MenuItem("Rename")) { cbRename_ = i; std::snprintf(cbBuf_, sizeof(cbBuf_), "%s", e.relativePath.filename().string().c_str()); }
+            if (ImGui::MenuItem("Delete")) toDelete = e.relativePath;
             ImGui::EndPopup();
         }
 
@@ -1201,13 +1191,18 @@ void EditorEngine::DrawContentBrowser()
         {
             ImGui::SetNextItemWidth(80);
             if (ImGui::InputText("##ren", cbBuf_, sizeof(cbBuf_), ImGuiInputTextFlags_EnterReturnsTrue))
-            { renFrom = e.name; renTo = cbBuf_; cbRename_ = -1; }
+            {
+                const fs::path leaf(cbBuf_);
+                if (!leaf.empty() && leaf == leaf.filename() && leaf != "." && leaf != "..")
+                { renFrom = e.relativePath; renTo = e.relativePath.parent_path() / leaf; }
+                cbRename_ = -1;
+            }
             if (ImGui::IsItemDeactivated()) cbRename_ = -1;
         }
         else
         {
             ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 80);
-            ImGui::TextWrapped("%s", e.name.c_str());
+            ImGui::TextWrapped("%s", name.c_str());
             ImGui::PopTextWrapPos();
         }
         ImGui::EndGroup();
@@ -1236,9 +1231,10 @@ void EditorEngine::DrawContentBrowser()
 
     std::error_code ec;
     if (!toDelete.empty())
-    { fs::remove(contentDir_ + "/" + toDelete, ec); content_.clear(); ScanContent(); }
+    { fs::remove((fs::path(contentDir_) / toDelete).lexically_normal(), ec); content_.clear(); ScanContent(); }
     if (!renFrom.empty() && !renTo.empty() && renFrom != renTo)
-    { fs::rename(contentDir_ + "/" + renFrom, contentDir_ + "/" + renTo, ec); content_.clear(); ScanContent(); }
+    { fs::rename((fs::path(contentDir_) / renFrom).lexically_normal(),
+                 (fs::path(contentDir_) / renTo).lexically_normal(), ec); content_.clear(); ScanContent(); }
 }
 
 void EditorEngine::NewMaterial()
@@ -1334,9 +1330,10 @@ void EditorEngine::DrawProjectSettings()
         ImGui::InputText("##defworld", buf, sizeof(buf));
         if (ImGui::BeginCombo("Pick from Content", buf[0] ? buf : "(choose)"))
         {
-            for (const ContentEntry& e : content_)
-                if (std::string(e.cat) == "World")
-                { const std::string stem = fs::path(e.name).stem().string();
+            for (const FEditorContentAsset& e : content_)
+                if (e.category == "World")
+                { fs::path world = e.relativePath; world.replace_extension();
+                  const std::string stem = world.generic_string();
                   if (ImGui::Selectable(stem.c_str())) std::snprintf(buf, sizeof(buf), "%s", stem.c_str()); }
             ImGui::EndCombo();
         }
@@ -1592,9 +1589,26 @@ void EditorEngine::DrawDetails()
         if (ImGui::Selectable(cs, detailComp_ == 2)) detailComp_ = 2;
     }
     if (light && light->lightComp && ImGui::Selectable("Light Component", detailComp_ == 3)) detailComp_ = 3;
+    for (size_t componentIndex = 0; componentIndex < a->Components().size(); ++componentIndex)
+    {
+        auto* script = dynamic_cast<UScriptComponent*>(a->Components()[componentIndex].get());
+        if (!script) continue;
+        const std::string path = script->ScriptPath().empty() ? "Unassigned" : script->ScriptPath().generic_string();
+        const std::string label = "Script [" + std::to_string(componentIndex) + "] -- " + path;
+        ImGui::PushID(static_cast<int>(componentIndex));
+        if (ImGui::Selectable(label.c_str(), detailComp_ == static_cast<int>(4 + componentIndex)))
+        {
+            detailComp_ = static_cast<int>(4 + componentIndex);
+            scriptValidation_.clear();
+        }
+        ImGui::PopID();
+    }
+    UScriptComponent* selectedScript = detailComp_ >= 4
+        ? ScriptComponentAt(*a, static_cast<size_t>(detailComp_ - 4)) : nullptr;
     // fall back to Root if the selected component does not exist on this actor
     if ((detailComp_ == 1 && !mc) || (detailComp_ == 2 && !phys) ||
-        (detailComp_ == 3 && !(light && light->lightComp))) detailComp_ = 0;
+        (detailComp_ == 3 && !(light && light->lightComp)) || (detailComp_ >= 4 && !selectedScript))
+        detailComp_ = 0;
     ImGui::Separator();
 
     // Snapshot on edit-start (value unchanged that frame -> correct "before" undo).
@@ -1700,10 +1714,11 @@ void EditorEngine::DrawDetails()
             if (ImGui::BeginPopup("PickMat"))
             {
                 bool any = false;
-                for (const ContentEntry& e : content_)
-                    if (std::string(e.cat) == "Material")
-                    { any = true; if (ImGui::MenuItem(e.name.c_str()))
-                        { PushUndo(); mc->materialRef = contentDir_ + "/" + e.name;
+                for (const FEditorContentAsset& e : content_)
+                    if (e.category == "Material")
+                    { const std::string label = e.relativePath.generic_string();
+                      any = true; if (ImGui::MenuItem(label.c_str()))
+                        { PushUndo(); mc->materialRef = ResolveEditorContentPath(contentDir_, e).string();
                           mc->sharedMaterial = UMaterial::Resolve(mc->materialRef); rtUploaded_ = false; hybridUploaded_ = false; } }
                 if (!any) ImGui::TextDisabled("(no .material in Content/)");
                 ImGui::EndPopup();
@@ -1842,6 +1857,72 @@ void EditorEngine::DrawDetails()
         else
             ImGui::TextDisabled("Position = actor transform (Root)");
     }
+    // ---- Script component ----
+    else if (selectedScript)
+    {
+        ImGui::SeparatorText("Script Component");
+        bool enabled = selectedScript->IsEnabled();
+        if (ImGui::Checkbox("Enabled", &enabled))
+        { PushUndo(); selectedScript->SetEnabled(enabled); }
+
+        const std::string current = selectedScript->ScriptPath().empty()
+            ? "Unassigned" : selectedScript->ScriptPath().generic_string();
+        ImGui::TextWrapped("Script: %s", current.c_str());
+        if (!scriptValidation_.empty())
+            ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.30f, 1.0f), "%s", scriptValidation_.c_str());
+        else if (selectedScript->ScriptPath().empty())
+            ImGui::TextDisabled("Validation: unassigned (valid; it will not execute)");
+        else
+            ImGui::TextDisabled("Validation: assigned for the next Play session");
+
+        auto assign = [&](const std::filesystem::path& selected)
+        {
+            const auto result = AssignEditorLuaScript(*selectedScript, selected, contentDir_, [&] { PushUndo(); });
+            scriptValidation_ = result.validationMessage;
+            if (result.succeeded) { content_.clear(); ScanContent(); }
+        };
+
+        ImGui::Button(selectedScript->ScriptPath().empty()
+            ? "Assign Script  (drop / choose)" : "Change Script  (drop / choose)", ImVec2(-1, 0));
+        if (ImGui::BeginDragDropTarget())
+        {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_LUA"))
+                assign(std::string(static_cast<const char*>(payload->Data)));
+            ImGui::EndDragDropTarget();
+        }
+        if (ImGui::IsItemClicked()) ImGui::OpenPopup("PickScriptAsset");
+        if (ImGui::BeginPopup("PickScriptAsset"))
+        {
+            bool any = false;
+            for (const FEditorContentAsset& entry : content_)
+                if (entry.category == "Script")
+                {
+                    any = true;
+                    const std::string label = entry.relativePath.generic_string();
+                    if (ImGui::MenuItem(label.c_str())) assign(ResolveEditorContentPath(contentDir_, entry));
+                }
+            if (!any) ImGui::TextDisabled("(no .lua files beneath Content/Scripts)");
+            ImGui::EndPopup();
+        }
+
+        if (ImGui::Button("Import External .lua..."))
+        {
+            const std::string selected = FFileDialog::OpenLuaScript();
+            if (!selected.empty()) assign(selected);
+        }
+        if (!selectedScript->ScriptPath().empty())
+        {
+            ImGui::SameLine();
+            if (ImGui::Button("Clear"))
+            { PushUndo(); selectedScript->ClearScriptPath(); scriptValidation_.clear(); }
+        }
+        if (ImGui::Button("Remove Component"))
+        {
+            PushUndo();
+            if (a->RemoveNonSpatialComponent(selectedScript))
+            { detailComp_ = 0; scriptValidation_.clear(); }
+        }
+    }
 
     // ---- Add Component (available from any view) ----
     ImGui::Spacing();
@@ -1853,6 +1934,13 @@ void EditorEngine::DrawDetails()
         if (!a->physics && ImGui::MenuItem("Box Collision"))
         { PushUndo(); auto* b = new UBoxComponent(a); b->halfExtents = glm::vec3(1.0f); a->SetPhysics(b); detailComp_ = 2; }
         if (a->physics) ImGui::TextDisabled("(already has a collider)");
+        if (ImGui::MenuItem("Script Component"))
+        {
+            PushUndo();
+            a->AddComponent<UScriptComponent>();
+            detailComp_ = static_cast<int>(4 + a->Components().size() - 1);
+            scriptValidation_.clear();
+        }
         ImGui::EndPopup();
     }
 

@@ -49,6 +49,9 @@
     <Filter Include="Engine\Editor">
       <UniqueIdentifier>{20000000-0000-0000-0000-00000000000b}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Content\Scripts">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000021}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Engine\Editor\External\imgui">
       <UniqueIdentifier>{20000000-0000-0000-0000-00000000000c}</UniqueIdentifier>
     </Filter>
@@ -136,6 +139,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Import\UObjImporter.cpp"><Filter>Engine\Import</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Import\UFbxImporter.cpp"><Filter>Engine\Import</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\EditorEngine.cpp"><Filter>Engine\Editor</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\FEditorAssetWorkflow.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\FFileDialog.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\FProcess.cpp"><Filter>Engine\Editor</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui.cpp"><Filter>Engine\Editor\External\imgui</Filter></ClCompile>
@@ -193,6 +197,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\Import\UObjImporter.h"><Filter>Engine\Import</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Import\UFbxImporter.h"><Filter>Engine\Import</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Editor\EditorEngine.h"><Filter>Engine\Editor</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\FEditorAssetWorkflow.h"><Filter>Engine\Editor</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Editor\FFileDialog.h"><Filter>Engine\Editor</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Editor\FProcess.h"><Filter>Engine\Editor</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.h"><Filter>Engine\Editor</Filter></ClInclude>
@@ -218,5 +223,8 @@
     <ClInclude Include="$(EngineRootDir)Engine\Script\FLuaScriptInstance.h"><Filter>Engine\Script</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Script\FScriptPath.h"><Filter>Engine\Script</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Script\UScriptComponent.h"><Filter>Engine\Script</Filter></ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Content\Scripts\**\*.lua"><Filter>Content\Scripts</Filter></None>
   </ItemGroup>
 </Project>

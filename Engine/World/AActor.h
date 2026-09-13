@@ -36,6 +36,9 @@ public:
     const std::vector<std::unique_ptr<UActorComponent>>& Components() const { return components_; }
     // Adopts factory-created heap components; throws before touching a foreign owner.
     void AdoptComponent(UActorComponent* component);
+    // Removes one owned non-spatial attachment. Scene components and the typed
+    // mesh/physics aliases must continue through their specialized setters.
+    bool RemoveNonSpatialComponent(UActorComponent* component);
 
     std::string name;                         // unique within a world (serialization id)
 

@@ -8,25 +8,39 @@
 
 namespace FFileDialog
 {
+    namespace
+    {
+        std::string OpenWithFilter(const char* filter, const char* title)
+        {
+            char buf[2048] = {};
+            OPENFILENAMEA ofn = {};
+            ofn.lStructSize = sizeof(ofn);
+            ofn.hwndOwner   = GetActiveWindow();
+            ofn.lpstrFilter = filter;
+            ofn.lpstrFile   = buf;
+            ofn.nMaxFile    = sizeof(buf);
+            ofn.lpstrTitle  = title;
+            // OFN_NOCHANGEDIR: keep the process CWD (Content/ paths stay relative).
+            ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+
+            if (GetOpenFileNameA(&ofn)) return std::string(buf);
+            return std::string();
+        }
+    }
+
     std::string OpenAsset()
     {
-        char buf[2048] = {};
-        // Filter is a double-null-terminated "label\0pattern\0...\0\0" block.
         static const char kFilter[] =
             "Assets (*.obj;*.fbx;*.world;*.hdr;*.png;*.jpg)\0*.obj;*.fbx;*.world;*.hdr;*.png;*.jpg;*.jpeg\0"
             "All Files (*.*)\0*.*\0";
+        return OpenWithFilter(kFilter, "Import Asset");
+    }
 
-        OPENFILENAMEA ofn = {};
-        ofn.lStructSize = sizeof(ofn);
-        ofn.hwndOwner   = GetActiveWindow();
-        ofn.lpstrFilter = kFilter;
-        ofn.lpstrFile   = buf;
-        ofn.nMaxFile    = sizeof(buf);
-        ofn.lpstrTitle  = "Import Asset";
-        // OFN_NOCHANGEDIR: keep the process CWD (Content/ paths stay relative).
-        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-
-        if (GetOpenFileNameA(&ofn)) return std::string(buf);
-        return std::string();
+    std::string OpenLuaScript()
+    {
+        static const char kFilter[] =
+            "Lua Scripts (*.lua)\0*.lua\0"
+            "All Files (*.*)\0*.*\0";
+        return OpenWithFilter(kFilter, "Assign Lua Script");
     }
 }

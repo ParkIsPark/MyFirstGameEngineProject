@@ -89,20 +89,37 @@ void UScriptComponent::SetScriptPath(std::filesystem::path projectRelativePath)
     scriptPath_ = normalized;
 }
 
+void UScriptComponent::ClearScriptPath() noexcept
+{
+    scriptPath_.clear();
+}
+
 void UScriptComponent::Serialize(FArchive& ar)
 {
     const bool priorEnabled = IsEnabled();
     UActorComponent::Serialize(ar);
-    const bool hasScript = !ar.IsLoading() || ar.HasField("Script");
-    std::string serialized = scriptPath_.generic_string();
-    ar.Field("Script", serialized);
-    if (ar.IsLoading() && hasScript)
+    if (!ar.IsLoading())
     {
-        try { SetScriptPath(serialized); } // validates before replacing the prior path
-        catch (...)
+        if (!scriptPath_.empty())
         {
-            SetEnabled(priorEnabled);
-            throw;
+            std::string serialized = scriptPath_.generic_string();
+            ar.Field("Script", serialized);
         }
+        return;
+    }
+
+    if (!ar.HasField("Script"))
+    {
+        ClearScriptPath();
+        return;
+    }
+
+    std::string serialized;
+    ar.Field("Script", serialized);
+    try { SetScriptPath(serialized); } // validates before replacing the prior path
+    catch (...)
+    {
+        SetEnabled(priorEnabled);
+        throw;
     }
 }

@@ -10,6 +10,7 @@
 #include "FRenderQuality.h"
 #include "ThreadPool.h"
 #include "BuildManager.h"
+#include "FEditorAssetWorkflow.h"
 
 #include <vector>
 #include <string>
@@ -129,7 +130,7 @@ private:
     bool playing_    = false;    // Editor vs PIE (Stage 5)
     int  selected_   = -1;       // index into editorWorld_ actors
     int  detailComp_ = 0;        // selected component in Details: 0 Actor 1 Mesh 2 Collision 3 Light
-    std::string worldName_ = "EditorWorld";   // -> Content/<worldName_>.world
+    std::string worldName_ = "EditorWorld";   // Content-relative stem -> Content/<worldName_>.world
 
     std::vector<UWorld*> undoStack_, redoStack_;   // in-memory world snapshots (clones)
     bool gizmoWasUsing_ = false;              // latch: snapshot once per gizmo drag
@@ -142,12 +143,12 @@ private:
     std::vector<UMesh*>      meshAssets_;   // owned shared mesh assets
     std::vector<std::string> actorNames_;   // parallel to scene.Actors
 
-    struct ContentEntry { std::string name; const char* cat; const char* icon; };
-    std::vector<ContentEntry> content_;     // scanned Content/ assets
+    std::vector<FEditorContentAsset> content_; // recursive scan, paths relative to Content/
     std::string contentDir_ = "Content";    // dir ScanContent actually read from
-    int  cbFilter_ = 0;                     // 0=All 1=World 2=Mesh 3=Texture
+    int  cbFilter_ = 0;                     // 0=All, then category tabs in DrawContentBrowser
     int  cbRename_ = -1;                     // content entry index being renamed (-1 none)
     char cbBuf_[128] = {};                   // rename / import-path text buffer
+    std::string scriptValidation_;           // most recent Script Details validation
 
     unsigned int vpTex_  = 0;    // viewport texture (CPU outputImage upload, raster)
     int          vpTexW_ = 0;

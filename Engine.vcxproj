@@ -89,6 +89,7 @@
     <ClCompile Include="Engine\Import\UFbxImporter.cpp" />
     <!-- Engine: Editor + ImGui -->
     <ClCompile Include="Engine\Editor\EditorEngine.cpp" />
+    <ClCompile Include="Engine\Editor\FEditorAssetWorkflow.cpp" />
     <ClCompile Include="Engine\Editor\FFileDialog.cpp" />
     <ClCompile Include="Engine\Editor\FProcess.cpp" />
     <ClCompile Include="Engine\Editor\External\imgui\imgui.cpp" />
@@ -200,6 +201,7 @@
     <ClInclude Include="Engine\Import\UFbxImporter.h" />
     <!-- Engine: Editor headers -->
     <ClInclude Include="Engine\Editor\EditorEngine.h" />
+    <ClInclude Include="Engine\Editor\FEditorAssetWorkflow.h" />
     <ClInclude Include="Engine\Editor\FFileDialog.h" />
     <ClInclude Include="Engine\Editor\FProcess.h" />
     <ClInclude Include="Engine\Editor\External\ImGuizmo\ImGuizmo.h" />
@@ -245,6 +247,9 @@
     <ClInclude Include="Engine\Script\FLuaScriptInstance.h" />
     <ClInclude Include="Engine\Script\FScriptPath.h" />
     <ClInclude Include="Engine\Script\UScriptComponent.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Content\Scripts\**\*.lua" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

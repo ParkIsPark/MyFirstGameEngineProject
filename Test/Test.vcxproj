@@ -97,6 +97,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Import\UObjImporter.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Import\UFbxImporter.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\EditorEngine.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\FEditorAssetWorkflow.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\FFileDialog.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\FProcess.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui.cpp" />
@@ -214,6 +215,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\Script\FLuaScriptInstance.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Script\FScriptPath.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Script\UScriptComponent.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\FEditorAssetWorkflow.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

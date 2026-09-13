@@ -10,19 +10,46 @@
 #>
 
 [CmdletBinding()]
-param()
+param(
+    [string]$ProjectDir = '',
+    [switch]$ScriptManifestOnly
+)
 
 $ErrorActionPreference = 'Stop'
 
-$ProjectDir = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($ProjectDir)) { $ProjectDir = $PSScriptRoot }
+$ProjectDir = [System.IO.Path]::GetFullPath($ProjectDir)
 $PropsPath  = Join-Path $ProjectDir 'EngineRoot.props'
+
+function Get-ProjectScriptManifest([string]$Root) {
+    $items = [System.Collections.Generic.List[string]]::new()
+    $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+    $scriptsRoot = Join-Path $Root 'Content\Scripts'
+    if (Test-Path -LiteralPath $scriptsRoot -PathType Container) {
+        foreach ($file in Get-ChildItem -LiteralPath $scriptsRoot -Recurse -File) {
+            if ($file.Extension -ine '.lua') { continue }
+            $fileFull = [System.IO.Path]::GetFullPath($file.FullName)
+            $relative = $fileFull.Substring($rootFull.Length).TrimStart('\', '/').Replace('\', '/')
+            $items.Add($relative)
+        }
+    }
+    $manifest = $items.ToArray()
+    [Array]::Sort($manifest, [StringComparer]::Ordinal)
+    return $manifest
+}
+
+$scriptManifest = @(Get-ProjectScriptManifest $ProjectDir)
+if ($ScriptManifestOnly) {
+    $scriptManifest | Write-Output
+    return
+}
 
 Write-Host ''
 Write-Host '  Package - freeze engine into this project' -ForegroundColor Cyan
 Write-Host '  =========================================' -ForegroundColor Cyan
 Write-Host ''
 
-if (-not (Test-Path $PropsPath)) {
+if (-not (Test-Path -LiteralPath $PropsPath)) {
     Write-Host "  EngineRoot.props not found at:" -ForegroundColor Red
     Write-Host "    $PropsPath"                    -ForegroundColor Red
     Write-Host ''
@@ -30,13 +57,21 @@ if (-not (Test-Path $PropsPath)) {
 }
 
 # ── Read current EngineRootDir from the .props ────────────────────────────────
-[xml]$xml = Get-Content $PropsPath -Raw -Encoding UTF8
+[xml]$xml = Get-Content -LiteralPath $PropsPath -Raw -Encoding UTF8
 $node = $xml.SelectSingleNode("//*[local-name()='EngineRootDir']")
 if (-not $node) {
     Write-Host "  EngineRoot.props is malformed (no <EngineRootDir>)." -ForegroundColor Red
     exit 1
 }
 $current = $node.'#text'
+
+# The manifest is project-owned metadata, so refresh it even when the engine is
+# already frozen and the engine-copy phase is a no-op.
+$manifestPath = Join-Path $ProjectDir 'ScriptManifest.txt'
+[System.IO.File]::WriteAllLines($manifestPath, $scriptManifest, [System.Text.UTF8Encoding]::new($false))
+Write-Host "  Lua scripts:   $($scriptManifest.Count)  (ScriptManifest.txt)" -ForegroundColor DarkGray
+foreach ($script in $scriptManifest) { Write-Host "    $script" -ForegroundColor DarkGray }
+Write-Host ''
 
 # Already packaged? (literal "$(SolutionDir)")
 if ($current -match '^\s*\$\(SolutionDir\)\s*$') {
@@ -46,7 +81,7 @@ if ($current -match '^\s*\$\(SolutionDir\)\s*$') {
 }
 
 $EngineRoot = $current.TrimEnd('\','/')
-if (-not (Test-Path $EngineRoot)) {
+if (-not (Test-Path -LiteralPath $EngineRoot)) {
     Write-Host "  EngineRootDir points at a missing path:" -ForegroundColor Red
     Write-Host "    $EngineRoot"                            -ForegroundColor Red
     Write-Host '  Edit EngineRoot.props to point at the engine repo, or re-run GenerateProject.bat.' -ForegroundColor Yellow
@@ -63,29 +98,30 @@ Write-Host '  Copying engine sources...' -ForegroundColor Yellow
 $folders = @('Engine', 'include', 'lib')
 foreach ($folder in $folders) {
     $src = Join-Path $EngineRoot $folder
-    if (-not (Test-Path $src)) {
+    if (-not (Test-Path -LiteralPath $src)) {
         Write-Host "    skip $folder\  (not found in engine repo)" -ForegroundColor DarkGray
         continue
     }
     Write-Host "    copy $folder\" -ForegroundColor DarkGray
-    Copy-Item -Path $src -Destination (Join-Path $ProjectDir $folder) -Recurse -Force
+    Copy-Item -LiteralPath $src -Destination (Join-Path $ProjectDir $folder) -Recurse -Force
 }
 
 # Runtime DLLs - refresh in case the engine added new ones since generation.
 $binSrc = Join-Path $EngineRoot 'bin'
-if (Test-Path $binSrc) {
+if (Test-Path -LiteralPath $binSrc) {
     $binDst = Join-Path $ProjectDir 'bin'
-    if (-not (Test-Path $binDst)) { New-Item -ItemType Directory -Path $binDst | Out-Null }
+    if (-not (Test-Path -LiteralPath $binDst)) { New-Item -ItemType Directory -Path $binDst | Out-Null }
     Write-Host '    copy bin\*.dll' -ForegroundColor DarkGray
-    Get-ChildItem -Path $binSrc -Filter '*.dll' -File |
-        Copy-Item -Destination $binDst -Force
+    foreach ($dll in Get-ChildItem -LiteralPath $binSrc -Filter '*.dll' -File) {
+        Copy-Item -LiteralPath $dll.FullName -Destination $binDst -Force
+    }
 }
 
 # OpenglViewer.props - the shared compile-flag sheet.
 $propsSrc = Join-Path $EngineRoot 'OpenglViewer.props'
-if (Test-Path $propsSrc) {
+if (Test-Path -LiteralPath $propsSrc) {
     Write-Host '    copy OpenglViewer.props' -ForegroundColor DarkGray
-    Copy-Item -Path $propsSrc -Destination $ProjectDir -Force
+    Copy-Item -LiteralPath $propsSrc -Destination $ProjectDir -Force
 }
 
 # ── Rewrite EngineRoot.props (point at $(SolutionDir)) ────────────────────────

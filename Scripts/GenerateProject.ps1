@@ -202,6 +202,13 @@ LightIntensity = 1 1 1
 '@
 WriteText (Join-Path $dest 'Content\DefaultWorld.world') $world
 
+# Content\Scripts ships from the template as project-owned source/data. Keep
+# nested paths intact so the editor and packaging manifest see the same assets.
+$templateScripts = Join-Path $TemplateDir 'Content\Scripts'
+if (Test-Path -LiteralPath $templateScripts -PathType Container) {
+    Copy-Item -LiteralPath $templateScripts -Destination (Join-Path $dest 'Content') -Recurse
+}
+
 # ── [4/4] .sln (Editor|Win32 + Game|Win32) ────────────────────────────────────
 $slnLines = @(
     'Microsoft Visual Studio Solution File, Format Version 12.00'

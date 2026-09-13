@@ -99,6 +99,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Import\UFbxImporter.cpp" />
     <!-- Engine: Editor + ImGui -->
     <ClCompile Include="$(EngineRootDir)Engine\Editor\EditorEngine.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\FEditorAssetWorkflow.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\FFileDialog.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\FProcess.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Editor\External\imgui\imgui.cpp" />
@@ -209,6 +210,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\Import\UFbxImporter.h" />
     <!-- Engine: Editor headers -->
     <ClInclude Include="$(EngineRootDir)Engine\Editor\EditorEngine.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\FEditorAssetWorkflow.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Editor\FFileDialog.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Editor\FProcess.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Editor\External\ImGuizmo\ImGuizmo.h" />
@@ -254,6 +256,9 @@
     <ClInclude Include="$(EngineRootDir)Engine\Script\FLuaScriptInstance.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Script\FScriptPath.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Script\UScriptComponent.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Content\Scripts\**\*.lua" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

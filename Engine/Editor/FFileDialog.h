@@ -12,4 +12,6 @@ namespace FFileDialog
     // Opens the OS file picker filtered to importable assets (.obj/.fbx/.world).
     // Returns the chosen absolute path, or "" if the user cancelled.
     std::string OpenAsset();
+    // Lua-only picker used by Script Component assignment/import.
+    std::string OpenLuaScript();
 }
