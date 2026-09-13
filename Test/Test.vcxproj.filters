@@ -101,6 +101,8 @@
     <ClCompile Include="$(EngineRootDir)Engine\Script\UScriptSubsystem.cpp"><Filter>Engine\Script</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Script\FLuaScriptCache.cpp"><Filter>Engine\Script</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Script\FLuaScriptInstance.cpp"><Filter>Engine\Script</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Script\FScriptPath.cpp"><Filter>Engine\Script</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Script\UScriptComponent.cpp"><Filter>Engine\Script</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\World\AActor.cpp"><Filter>Engine\World</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\World\USceneComponent.cpp"><Filter>Engine\World</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\World\UActorComponent.cpp"><Filter>Engine\World</Filter></ClCompile>
@@ -184,5 +186,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\Script\FLuaScriptAsset.h"><Filter>Engine\Script</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Script\FLuaScriptCache.h"><Filter>Engine\Script</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Script\FLuaScriptInstance.h"><Filter>Engine\Script</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Script\FScriptPath.h"><Filter>Engine\Script</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Script\UScriptComponent.h"><Filter>Engine\Script</Filter></ClInclude>
   </ItemGroup>
 </Project>

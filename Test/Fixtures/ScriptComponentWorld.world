@@ -1,0 +1,31 @@
+WorldFormat = 2
+
+[World]
+ShadingModel = 0
+RenderMode = 0
+SkyHDRI =
+FloorEnabled = 1
+FloorY = 0
+Gravity = 0 -9.80000019 0
+
+[Camera]
+Position = 0 0 5
+Yaw = -90
+Pitch = 0
+Fov = 45
+
+[Actor]
+Type = Actor
+Name = FixtureActor
+Loc = 0 0 0
+Rot = 0 0 0
+Scale = 1 1 1
+Parent =
+  [Component]
+Type = ScriptComponent
+Enabled = 1
+Script = Content/Scripts/Fixture.lua
+  [Component]
+Type = ScriptComponent
+Enabled = 0
+Script = Content/Scripts/Disabled.lua

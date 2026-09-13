@@ -28,7 +28,13 @@ void FSaveArchive::Field(const char* key, int& v)         { out_ += key; out_ +=
 void FSaveArchive::Field(const char* key, bool& v)        { out_ += key; out_ += " = "; out_ += (v ? "1" : "0"); out_ += "\n"; }
 void FSaveArchive::Field(const char* key, glm::vec2& v)   { out_ += key; out_ += " = " + f2s(v.x) + " " + f2s(v.y) + "\n"; }
 void FSaveArchive::Field(const char* key, glm::vec3& v)   { out_ += key; out_ += " = " + v2s(v) + "\n"; }
-void FSaveArchive::Field(const char* key, std::string& v) { out_ += key; out_ += " = " + v + "\n"; }
+void FSaveArchive::Field(const char* key, std::string& v)
+{
+    out_ += key;
+    out_ += " =";
+    if (!v.empty()) out_ += " " + v;
+    out_ += "\n";
+}
 
 // ---- FLoadArchive ---------------------------------------------------------
 FLoadArchive::FLoadArchive(const std::string& block)

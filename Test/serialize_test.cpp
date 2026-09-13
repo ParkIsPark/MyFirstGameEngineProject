@@ -8,8 +8,8 @@
 //   g++ -std=c++17 -I include -I Engine/World -I Engine/Mesh \
 //       -I Engine/Serialization \
 //       Test/serialize_test.cpp Engine/Serialization/FArchive.cpp \
-//       Engine/Mesh/Material.cpp Engine/World/USceneComponent.cpp \
-//       Engine/World/AActor.cpp -o serialize_test && ./serialize_test
+//       Engine/Mesh/Material.cpp Engine/World/UActorComponent.cpp \
+//       Engine/World/USceneComponent.cpp Engine/World/AActor.cpp -o serialize_test && ./serialize_test
 // ---------------------------------------------------------------------------
 #include "FArchive.h"
 #include "Material.h"
@@ -65,8 +65,8 @@ int main()
     }
     // T4: component factory creates by TypeName
     {
-        USceneComponent* c = FComponentFactory::Create("Scene");
-        bool ok = c && std::string(c->TypeName()) == "Scene";
+        UActorComponent* c = FComponentFactory::Create("Scene");
+        bool ok = c && dynamic_cast<USceneComponent*>(c) && std::string(c->TypeName()) == "Scene";
         delete c;
         ck("T4", "FComponentFactory Create(\"Scene\")", ok);
     }

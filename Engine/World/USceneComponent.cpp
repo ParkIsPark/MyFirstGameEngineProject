@@ -106,6 +106,7 @@ void USceneComponent::Detach()
 
 void USceneComponent::Serialize(FArchive& ar)
 {
+    UActorComponent::Serialize(ar);
     ar.Field("Name",  name);
     ar.Field("Loc",   relLocation);
     ar.Field("Rot",   relRotation);

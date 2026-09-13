@@ -8,7 +8,7 @@
 //   g++ -std=c++17 -I include -I Engine/Light -I Engine/World -I Engine/Mesh \
 //       -I Engine/Serialization \
 //       Test/light_test.cpp Engine/Light/PointLightComponent.cpp Engine/Light/EnvironmentLightComponent.cpp \
-//       Engine/Light/LightComponent.cpp Engine/Light/ALight.cpp Engine/World/AActor.cpp \
+//       Engine/Light/LightComponent.cpp Engine/Light/ALight.cpp Engine/World/UActorComponent.cpp Engine/World/AActor.cpp \
 //       Engine/World/USceneComponent.cpp Engine/Serialization/FArchive.cpp \
 //       -o light_test && ./light_test
 // ---------------------------------------------------------------------------
@@ -62,10 +62,10 @@ int main()
     }
     // T5/T6: factory create by TypeName
     {
-        USceneComponent* p = FComponentFactory::Create("PointLight");
-        ck("T5", "Create(\"PointLight\")", p && std::string(p->TypeName()) == "PointLight"); delete p;
-        USceneComponent* e = FComponentFactory::Create("EnvLight");
-        ck("T6", "Create(\"EnvLight\")", e && std::string(e->TypeName()) == "EnvLight"); delete e;
+        UActorComponent* p = FComponentFactory::Create("PointLight");
+        ck("T5", "Create(\"PointLight\")", p && dynamic_cast<USceneComponent*>(p) && std::string(p->TypeName()) == "PointLight"); delete p;
+        UActorComponent* e = FComponentFactory::Create("EnvLight");
+        ck("T6", "Create(\"EnvLight\")", e && dynamic_cast<USceneComponent*>(e) && std::string(e->TypeName()) == "EnvLight"); delete e;
     }
     // T7: noon (hour=12)
     {

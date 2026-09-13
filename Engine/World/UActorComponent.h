@@ -2,6 +2,7 @@
 #include <string_view>
 
 class AActor;
+class FArchive;
 
 // Non-spatial component state. Only actor adoption may change ownership.
 class UActorComponent
@@ -9,6 +10,7 @@ class UActorComponent
 public:
     virtual ~UActorComponent() = default;
     virtual std::string_view TypeName() const = 0;
+    virtual void Serialize(FArchive& ar);
     virtual void BeginPlay() {}
     virtual void Tick(float) {}
     virtual void EndPlay() {}

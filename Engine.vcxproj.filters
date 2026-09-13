@@ -73,6 +73,8 @@
     <ClCompile Include="Engine\Script\UScriptSubsystem.cpp"><Filter>Engine\Script</Filter></ClCompile>
     <ClCompile Include="Engine\Script\FLuaScriptCache.cpp"><Filter>Engine\Script</Filter></ClCompile>
     <ClCompile Include="Engine\Script\FLuaScriptInstance.cpp"><Filter>Engine\Script</Filter></ClCompile>
+    <ClCompile Include="Engine\Script\FScriptPath.cpp"><Filter>Engine\Script</Filter></ClCompile>
+    <ClCompile Include="Engine\Script\UScriptComponent.cpp"><Filter>Engine\Script</Filter></ClCompile>
     <!-- Core -->
     <ClCompile Include="Engine\Core\UScene.cpp"><Filter>Engine\Core</Filter></ClCompile>
     <ClCompile Include="Engine\Core\UPostProcessFilter.cpp"><Filter>Engine\Core</Filter></ClCompile>
@@ -237,5 +239,7 @@
     <ClInclude Include="Engine\Script\FLuaScriptAsset.h"><Filter>Engine\Script</Filter></ClInclude>
     <ClInclude Include="Engine\Script\FLuaScriptCache.h"><Filter>Engine\Script</Filter></ClInclude>
     <ClInclude Include="Engine\Script\FLuaScriptInstance.h"><Filter>Engine\Script</Filter></ClInclude>
+    <ClInclude Include="Engine\Script\FScriptPath.h"><Filter>Engine\Script</Filter></ClInclude>
+    <ClInclude Include="Engine\Script\UScriptComponent.h"><Filter>Engine\Script</Filter></ClInclude>
   </ItemGroup>
 </Project>

@@ -92,16 +92,16 @@ private:
     }
 };
 
-class USceneComponent;
+class UActorComponent;
 class AActor;
-using FComponentFactory = TFactory<USceneComponent>;
+using FComponentFactory = TFactory<UActorComponent>;
 using FActorFactory     = TFactory<AActor>;
 
 #define REGISTER_COMPONENT(NAME, CLASS)                                       \
     namespace {                                                               \
         struct CLASS##_Reg {                                                  \
             CLASS##_Reg() { FComponentFactory::Register(                      \
-                NAME, []() -> USceneComponent* { return new CLASS(); }); }    \
+                NAME, []() -> UActorComponent* { return new CLASS(); }); }    \
         } g_##CLASS##_Reg;                                                    \
     }
 

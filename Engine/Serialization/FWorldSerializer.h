@@ -1,5 +1,7 @@
 #pragma once
+#include <functional>
 #include <string>
+#include <string_view>
 
 class UWorld;
 
@@ -15,8 +17,12 @@ class UWorld;
 // ---------------------------------------------------------------------------
 namespace FWorldSerializer
 {
+    using FWarningSink = std::function<void(std::string_view)>;
+
     std::string Save(UWorld& world);
     bool        SaveToFile(UWorld& world, const char* path);
     UWorld*     Load(const std::string& text);     // caller owns the world
     UWorld*     LoadFromFile(const char* path);
+    // Empty restores the default stderr diagnostic behavior.
+    void        SetWarningSink(FWarningSink sink);
 }

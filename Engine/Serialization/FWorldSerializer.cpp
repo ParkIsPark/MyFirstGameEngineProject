@@ -6,6 +6,7 @@
 #include "ACamera.h"
 #include "AActor.h"
 #include "USceneComponent.h"
+#include "UActorComponent.h"
 #include "UMeshComponent.h"
 #include "ALight.h"
 #include "LightComponent.h"
@@ -18,9 +19,19 @@
 #include <fstream>
 #include <vector>
 #include <utility>
+#include <iostream>
+#include <memory>
 
 namespace
 {
+    FWorldSerializer::FWarningSink g_warningSink;
+
+    void Warn(const std::string& message)
+    {
+        if (g_warningSink) g_warningSink(message);
+        else std::cerr << "[World] warning: " << message << '\n';
+    }
+
     std::string trim(const std::string& s)
     {
         size_t a = s.find_first_not_of(" \t\r\n");
@@ -35,7 +46,7 @@ std::string FWorldSerializer::Save(UWorld& world)
     UScene&  sc  = world.GetScene();
     ACamera& cam = world.GetCamera();
 
-    std::string out = "WorldFormat = 1\n\n";
+    std::string out = "WorldFormat = 2\n\n";
 
     out += "[World]\n";
     {
@@ -75,9 +86,10 @@ std::string FWorldSerializer::Save(UWorld& world)
             a.Field("Parent", parentName);
             out += a.str();
         }
-        for (USceneComponent* c : actor->rootComponent.children)
+        for (const auto& owned : actor->Components())
         {
-            if (c->GetOwner() != actor) continue;     // skip child-actor roots (own [Actor] entries)
+            UActorComponent* c = owned.get();
+            if (!c || c == actor->physics) continue;  // physics retains its legacy [Collision] block
             out += "  [Component]\n";
             FSaveArchive a; std::string t(c->TypeName());
             a.Field("Type", t); c->Serialize(a); out += a.str();
@@ -100,7 +112,6 @@ std::string FWorldSerializer::Save(UWorld& world)
             glm::vec3 off = p->localOffset;            a.Field("Offset", off);
             out += a.str();
         }
-        out += "\n";
     }
     return out;
 }
@@ -159,18 +170,36 @@ UWorld* FWorldSerializer::Load(const std::string& text)
         {
             if (!curActor) return;
             std::string type = "Scene"; a.Field("Type", type);
-            USceneComponent* comp = FComponentFactory::Create(type);
-            if (!comp) return;
-            comp->Serialize(a);
-            if (UMeshComponent* mc = dynamic_cast<UMeshComponent*>(comp))
+            std::unique_ptr<UActorComponent> comp(FComponentFactory::Create(type));
+            if (!comp)
+            {
+                Warn("unknown component type '" + type + "' skipped");
+                return;
+            }
+            try { comp->Serialize(a); }
+            catch (const std::exception& error)
+            {
+                Warn("component type '" + type + "' skipped: " + error.what());
+                return;
+            }
+            if (UMeshComponent* mc = dynamic_cast<UMeshComponent*>(comp.get()))
+            {
                 curActor->SetMesh(mc);
-            else if (auto* lc = dynamic_cast<LightComponent*>(comp);
+                comp.release(); // SetMesh adopted it; retain ownership until that succeeds.
+            }
+            else if (auto* lc = dynamic_cast<LightComponent*>(comp.get());
                      lc && dynamic_cast<ALight*>(curActor))
+            {
                 static_cast<ALight*>(curActor)->SetLightComponent(lc);
+                comp.release(); // SetLightComponent adopted it; retain it on a thrown handoff.
+            }
             else
             {
-                curActor->AdoptComponent(comp);
-                comp->AttachTo(&curActor->rootComponent);   // flat: attach under root
+                UActorComponent* raw = comp.get();
+                curActor->AdoptComponent(raw);
+                comp.release(); // Actor ownership now owns raw.
+                if (auto* scene = dynamic_cast<USceneComponent*>(raw))
+                    scene->AttachTo(&curActor->rootComponent); // only spatial attachments have a parent
             }
         }
         else if (hdr == "Collision")
@@ -230,6 +259,11 @@ UWorld* FWorldSerializer::Load(const std::string& text)
 
     for (AActor* a : sc.Actors) if (a) a->rootComponent.MarkDirty();
     return world;
+}
+
+void FWorldSerializer::SetWarningSink(FWarningSink sink)
+{
+    g_warningSink = std::move(sink);
 }
 
 UWorld* FWorldSerializer::LoadFromFile(const char* path)

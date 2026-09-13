@@ -7,7 +7,7 @@
 //       -I Engine/RayTracing -I Engine/Acceleration \
 //       Test/world_serialize_test.cpp Engine/Serialization/FWorldSerializer.cpp \
 //       Engine/Serialization/FArchive.cpp Engine/World/UWorld.cpp \
-//       Engine/World/AActor.cpp Engine/World/USceneComponent.cpp \
+//       Engine/World/UActorComponent.cpp Engine/World/AActor.cpp Engine/World/USceneComponent.cpp \
 //       Engine/World/ACamera.cpp Engine/Core/UScene.cpp \
 //       Engine/Core/UPostProcessFilter.cpp Engine/Mesh/UMesh.cpp \
 //       Engine/Mesh/UMeshComponent.cpp Engine/Mesh/Material.cpp \
