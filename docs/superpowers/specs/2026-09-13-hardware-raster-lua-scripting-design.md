@@ -229,6 +229,9 @@ Developer overrides are stored in local `Config/DeveloperSettings.ini`, not in a
 
 Lua 5.4 source and license are vendored and built with the engine so packaged projects do not require an external Lua installation.
 
+The pinned runtime archive is `https://www.lua.org/ftp/lua-5.4.9.tar.gz`
+(SHA-256 `2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6`).
+
 `UScriptSubsystem`, owned by `USubsystemManager`, is the only layer that directly owns and operates the Lua VM.
 
 ```text
