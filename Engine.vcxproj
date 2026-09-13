@@ -107,6 +107,8 @@
     <ClCompile Include="Engine\Framework\USubsystemManager.cpp" />
     <ClCompile Include="Engine\Script\FLuaBindingRegistry.cpp" />
     <ClCompile Include="Engine\Script\UScriptSubsystem.cpp" />
+    <ClCompile Include="Engine\Script\FLuaScriptCache.cpp" />
+    <ClCompile Include="Engine\Script\FLuaScriptInstance.cpp" />
     <!-- Engine: World -->
     <ClCompile Include="Engine\World\AActor.cpp" />
     <ClCompile Include="Engine\World\USceneComponent.cpp" />
@@ -236,6 +238,9 @@
     <ClInclude Include="Engine\Script\LuaInclude.h" />
     <ClInclude Include="Engine\Script\FLuaBindingRegistry.h" />
     <ClInclude Include="Engine\Script\UScriptSubsystem.h" />
+    <ClInclude Include="Engine\Script\FLuaScriptAsset.h" />
+    <ClInclude Include="Engine\Script\FLuaScriptCache.h" />
+    <ClInclude Include="Engine\Script\FLuaScriptInstance.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

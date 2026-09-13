@@ -2,12 +2,58 @@
 #include "LuaInclude.h"
 
 #include <cstdio>
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
 #include <utility>
 
 namespace
 {
+    int InstanceGetMetatable(lua_State* state)
+    {
+        luaL_checkany(state, 1);
+        // Primitive metatables belong to the shared VM. In particular the
+        // string metatable exposes its shared string library through __index.
+        if (!lua_istable(state, 1) && !lua_isuserdata(state, 1))
+        {
+            lua_pushnil(state);
+            return 1;
+        }
+        if (!lua_getmetatable(state, 1)) { lua_pushnil(state); return 1; }
+        lua_pushliteral(state, "__metatable");
+        lua_rawget(state, -2);
+        if (lua_isnil(state, -1)) lua_pop(state, 1);
+        return 1;
+    }
+
+    int BuildSafeGlobals(lua_State* state)
+    {
+        lua_newtable(state);
+        const int safe = lua_gettop(state);
+        lua_pushglobaltable(state);
+        lua_pushnil(state);
+        while (lua_next(state, -2))
+        {
+            // Tables are copied directly into each instance; omitting them
+            // here prevents nil/removal in an instance revealing a shared table.
+            const char* key = lua_type(state, -2) == LUA_TSTRING ? lua_tostring(state, -2) : nullptr;
+            if (!lua_istable(state, -1) && (!key || std::strcmp(key, "load") != 0))
+            {
+                lua_pushvalue(state, -2);
+                lua_pushvalue(state, -2);
+                lua_rawset(state, safe);
+            }
+            lua_pop(state, 1);
+        }
+        lua_pop(state, 1);
+        lua_pushcfunction(state, InstanceGetMetatable);
+        lua_setfield(state, safe, "getmetatable");
+        // Registry growth may allocate: keep it inside this protected frame.
+        const int reference = luaL_ref(state, LUA_REGISTRYINDEX);
+        lua_pushinteger(state, reference);
+        return 1;
+    }
+
     int OpenLibraries(lua_State* state)
     {
         const luaL_Reg libraries[] = {
@@ -57,6 +103,15 @@ void UScriptSubsystem::Init()
             throw std::runtime_error(error ? error : "library initialization failed");
         }
         bindings_.InstallAll(state_);
+        lua_pushcfunction(state_, BuildSafeGlobals);
+        if (lua_pcall(state_, 0, 1, 0) != LUA_OK)
+        {
+            const char* error = lua_tostring(state_, -1);
+            throw std::runtime_error(error ? error : "safe-global initialization failed");
+        }
+        safeGlobals_ = static_cast<int>(lua_tointeger(state_, -1));
+        lua_pop(state_, 1);
+        cache_ = std::make_unique<FLuaScriptCache>(state_, projectRoot_);
     }
     catch (const std::exception& error)
     {
@@ -73,6 +128,12 @@ void UScriptSubsystem::Init()
 void UScriptSubsystem::Shutdown()
 {
     if (!state_) return;
+    // Instances may be held by components through unique_ptr. Invalidate those
+    // handles and release their references before closing the borrowed VM.
+    while (!instances_.empty()) (*instances_.begin())->Release();
+    cache_.reset();
+    luaL_unref(state_, LUA_REGISTRYINDEX, safeGlobals_);
+    safeGlobals_ = LUA_NOREF;
     lua_State* closing = state_;
     state_ = nullptr;
     lua_close(closing);
@@ -80,6 +141,63 @@ void UScriptSubsystem::Shutdown()
 
 FLuaBindingRegistry& UScriptSubsystem::Bindings() { return bindings_; }
 lua_State* UScriptSubsystem::State() const noexcept { return state_; }
+
+void UScriptSubsystem::SetProjectRoot(std::filesystem::path projectRoot)
+{
+    if (!instances_.empty()) throw std::logic_error("cannot change Lua project root while instances are live");
+    auto root = std::filesystem::canonical(projectRoot);
+    if (!std::filesystem::is_directory(root)) throw std::invalid_argument("Lua project root must be a directory");
+    auto cache = state_ ? std::make_unique<FLuaScriptCache>(state_, root) : nullptr;
+    projectRoot_ = std::move(root);
+    cache_ = std::move(cache);
+}
+
+std::shared_ptr<const FLuaScriptAsset> UScriptSubsystem::LoadScriptAsset(const std::filesystem::path& path)
+{
+    try
+    {
+        if (!cache_) throw std::runtime_error("script subsystem is not initialized");
+        return cache_->Load(path);
+    }
+    catch (const std::exception& error)
+    {
+        try { logSink_("Lua load [" + path.generic_string() + "] [asset]: " + error.what()); }
+        catch (...) {}
+    }
+    catch (...) {}
+    return {};
+}
+
+std::unique_ptr<FLuaScriptInstance> UScriptSubsystem::CreateScriptInstance(
+    const std::filesystem::path& path, std::string diagnosticOwner)
+{
+    try
+    {
+        if (!cache_) throw std::runtime_error("script subsystem is not initialized");
+        auto instance = std::unique_ptr<FLuaScriptInstance>(new FLuaScriptInstance(
+            this, state_, cache_->Load(path), diagnosticOwner, logSink_));
+        instances_.insert(instance.get());
+        if (!instance->Initialize(safeGlobals_)) return {};
+        return instance;
+    }
+    catch (const std::exception& error)
+    {
+        try { logSink_("Lua load [" + path.generic_string() + "] [" + diagnosticOwner + "]: " + error.what()); }
+        catch (...) {}
+    }
+    catch (...)
+    {
+        try { logSink_("Lua load [" + path.generic_string() + "] [" + diagnosticOwner + "]: unknown native exception"); }
+        catch (...) {}
+    }
+    return {};
+}
+
+void UScriptSubsystem::ClearScriptCache()
+{
+    if (!instances_.empty()) throw std::logic_error("cannot clear Lua cache while instances are live");
+    if (cache_) cache_->Clear();
+}
 
 int UScriptSubsystem::Log(lua_State* state)
 {

@@ -117,6 +117,8 @@
     <ClCompile Include="$(EngineRootDir)Engine\Framework\USubsystemManager.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Script\FLuaBindingRegistry.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Script\UScriptSubsystem.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Script\FLuaScriptCache.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Script\FLuaScriptInstance.cpp" />
     <!-- Engine: World -->
     <ClCompile Include="$(EngineRootDir)Engine\World\AActor.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\World\USceneComponent.cpp" />
@@ -245,6 +247,9 @@
     <ClInclude Include="$(EngineRootDir)Engine\Script\LuaInclude.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Script\FLuaBindingRegistry.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Script\UScriptSubsystem.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Script\FLuaScriptAsset.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Script\FLuaScriptCache.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Script\FLuaScriptInstance.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

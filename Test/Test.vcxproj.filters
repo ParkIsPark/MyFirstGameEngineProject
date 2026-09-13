@@ -99,6 +99,8 @@
     <ClCompile Include="$(EngineRootDir)Engine\Framework\USubsystemManager.cpp"><Filter>Engine\Framework</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Script\FLuaBindingRegistry.cpp"><Filter>Engine\Script</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Script\UScriptSubsystem.cpp"><Filter>Engine\Script</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Script\FLuaScriptCache.cpp"><Filter>Engine\Script</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Script\FLuaScriptInstance.cpp"><Filter>Engine\Script</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\World\AActor.cpp"><Filter>Engine\World</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\World\USceneComponent.cpp"><Filter>Engine\World</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\World\UActorComponent.cpp"><Filter>Engine\World</Filter></ClCompile>
@@ -179,5 +181,8 @@
     <ClInclude Include="$(EngineRootDir)Engine\Script\LuaInclude.h"><Filter>Engine\Script</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Script\FLuaBindingRegistry.h"><Filter>Engine\Script</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Script\UScriptSubsystem.h"><Filter>Engine\Script</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Script\FLuaScriptAsset.h"><Filter>Engine\Script</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Script\FLuaScriptCache.h"><Filter>Engine\Script</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Script\FLuaScriptInstance.h"><Filter>Engine\Script</Filter></ClInclude>
   </ItemGroup>
 </Project>
