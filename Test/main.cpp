@@ -15,10 +15,13 @@
 #include <GLFW/glfw3.h>
 
 #include <cstdio>
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <fstream>
+#include <memory>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -35,6 +38,10 @@
 #include "UFbxImporter.h"
 #include "EditorEngine.h"
 #include "GameEngine.h"
+#include "FRenderScene.h"
+#include "UHardwareGBuffer.h"
+#include "UHardwareRasterizer.h"
+#include "UGPUMeshCache.h"
 
 // Load a model trying a few candidate directories (working dir varies between
 // running from bin\ and VS's project dir).
@@ -333,9 +340,432 @@ static int RunMeshRevisionGates()
     return passed ? 0 : 1;
 }
 
+class FHardwareRasterSelfTestApp final : public Engine
+{
+public:
+    int RunGates(const std::string& outputPath)
+    {
+        glfwHideWindow(window_);
+
+        int passed = 0;
+        int failed = 0;
+        auto check = [&](const char* label, bool result)
+        {
+            std::printf("[%s] %s\n", result ? "PASS" : "FAIL", label);
+            result ? ++passed : ++failed;
+        };
+
+        bool initialErrorsCleared = false;
+        for (int attempt = 0; attempt < 16; ++attempt)
+            if (glGetError() == GL_NO_ERROR)
+            {
+                initialErrorsCleared = true;
+                break;
+            }
+        check("initial OpenGL error drain is bounded", initialErrorsCleared);
+
+        FOpenGLMeshUploadAdapter uploadAdapter;
+        UGPUMeshCache meshCache(uploadAdapter);
+        UHardwareGBuffer gbuffer;
+        UHardwareRasterizer rasterizer;
+        std::string diagnostic;
+        check("hardware raster shaders compile and link",
+              rasterizer.Init(ContextGeneration(), &diagnostic));
+        if (!diagnostic.empty()) std::fprintf(stderr, "%s\n", diagnostic.c_str());
+
+        std::unique_ptr<UMesh> cube(UMesh::GenerateCube(glm::vec3(0.75f)));
+        FRenderScene scene;
+        scene.camera.nearDistance = 0.1f;
+        scene.camera.left = -0.1f;
+        scene.camera.rightPlane = 0.1f;
+        scene.camera.bottom = -0.1f;
+        scene.camera.top = 0.1f;
+
+        Material farMaterial;
+        farMaterial.kd = glm::vec3(0.1f, 0.2f, 0.9f);
+        Material frontMaterial;
+        frontMaterial.kd = glm::vec3(0.9f, 0.2f, 0.1f);
+        frontMaterial.ks = glm::vec3(0.6f, 0.5f, 0.4f);
+        frontMaterial.shininess = 48.0f;
+        frontMaterial.km = glm::vec3(0.25f);
+        Material sideMaterial;
+        sideMaterial.kd = glm::vec3(0.1f, 0.8f, 0.2f);
+
+        auto instance = [&](const glm::vec3& position, const Material& material,
+                            std::uint32_t objectIdentity, std::uint32_t materialIdentity)
+        {
+            FRenderMeshInstance result;
+            result.mesh = cube.get();
+            result.modelTransform = glm::translate(glm::mat4(1.0f), position);
+            result.normalTransform = glm::mat3(1.0f);
+            FResolvedRenderMaterial resolved;
+            resolved.source = &material;
+            resolved.albedo = material.kd;
+            resolved.specularColor = material.ks;
+            resolved.shininess = material.shininess;
+            resolved.mirrorFactor = std::max(material.km.x,
+                std::max(material.km.y, material.km.z));
+            result.materialOverride = resolved;
+            result.materialOverrideIdentity = materialIdentity;
+            result.uvTiling = glm::vec2(1.0f);
+            result.shadingModel = ERenderShadingModel::Phong;
+            result.objectIdentity = objectIdentity;
+            return result;
+        };
+
+        scene.meshes.push_back(instance(glm::vec3(0.0f, 0.0f, -8.0f), farMaterial, 1, 11));
+        check("64x64 G-buffer allocation", gbuffer.Resize(64, 64, ContextGeneration()));
+        check("64x64 G-buffer is complete", gbuffer.IsComplete());
+        check("far cube geometry draw", rasterizer.RenderGeometry(
+            scene, meshCache, gbuffer, ContextGeneration(), &diagnostic));
+
+        float farDepth = 1.0f;
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, gbuffer.Framebuffer());
+        glReadPixels(32, 32, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &farDepth);
+
+        scene.meshes.push_back(instance(glm::vec3(0.0f, 0.0f, -5.0f), frontMaterial, 2, 22));
+        FRenderMeshInstance side = instance(
+            glm::vec3(2.2f, 0.0f, -6.0f), sideMaterial, 3, 33);
+        side.modelTransform = side.modelTransform *
+            glm::scale(glm::mat4(1.0f), glm::vec3(-0.7f, 1.2f, 0.8f));
+        side.normalTransform = glm::transpose(glm::inverse(glm::mat3(side.modelTransform)));
+        scene.meshes.push_back(std::move(side));
+        meshCache.BeginFrame();
+
+        GLuint sentinelTextures[2] = {};
+        GLuint sentinelVAO = 0;
+        GLuint sentinelBuffer = 0;
+        glGenTextures(2, sentinelTextures);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, sentinelTextures[0]);
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_2D, sentinelTextures[1]);
+        glGenVertexArrays(1, &sentinelVAO);
+        glBindVertexArray(sentinelVAO);
+        glGenBuffers(1, &sentinelBuffer);
+        glBindBuffer(GL_ARRAY_BUFFER, sentinelBuffer);
+        glViewport(3, 4, 17, 19);
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_CULL_FACE);
+        glDepthFunc(GL_GREATER);
+        glDepthMask(GL_FALSE);
+        glFrontFace(GL_CW);
+        glEnablei(GL_BLEND, 0);
+        glDisablei(GL_BLEND, 1);
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(7, 8, 1, 1);
+        glColorMaski(0, GL_FALSE, GL_TRUE, GL_FALSE, GL_TRUE);
+        glColorMaski(1, GL_TRUE, GL_FALSE, GL_TRUE, GL_FALSE);
+        glDepthRange(0.2, 0.8);
+        glPolygonMode(GL_FRONT, GL_LINE);
+        glPolygonMode(GL_BACK, GL_POINT);
+
+        FRenderScene emptyScene;
+        check("empty scene clears under hostile caller state", rasterizer.RenderGeometry(
+            emptyScene, meshCache, gbuffer, ContextGeneration(), &diagnostic));
+        float emptyCoverage = -1.0f;
+        float emptyDepth = -1.0f;
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, gbuffer.Framebuffer());
+        glReadBuffer(gbuffer.ColorAttachment(EHardwareGBufferSemantic::PositionCoverage));
+        glReadPixels(32, 32, 1, 1, GL_ALPHA, GL_FLOAT, &emptyCoverage);
+        glReadPixels(32, 32, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &emptyDepth);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        check("hostile-state empty clear writes neutral coverage and depth",
+              emptyCoverage == 0.0f && emptyDepth == 1.0f);
+
+        check("overlap and transformed cube geometry draw", rasterizer.RenderGeometry(
+            scene, meshCache, gbuffer, ContextGeneration(), &diagnostic));
+
+        GLint restoredViewport[4] = {};
+        GLint restoredVAO = 0;
+        GLint restoredBuffer = 0;
+        GLint restoredActiveTexture = 0;
+        GLint restoredActiveBinding = 0;
+        GLint restoredUnitZeroBinding = 0;
+        GLint restoredDepthFunction = 0;
+        GLint restoredFrontFace = 0;
+        GLint restoredScissor[4] = {};
+        GLint restoredPolygonMode[2] = {};
+        GLboolean restoredColorMasks[2][4] = {};
+        GLdouble restoredDepthRange[2] = {};
+        GLboolean restoredDepthMask = GL_TRUE;
+        glGetIntegerv(GL_VIEWPORT, restoredViewport);
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &restoredVAO);
+        glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &restoredBuffer);
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &restoredActiveTexture);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &restoredActiveBinding);
+        glActiveTexture(GL_TEXTURE0);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &restoredUnitZeroBinding);
+        glActiveTexture(GL_TEXTURE3);
+        glGetIntegerv(GL_DEPTH_FUNC, &restoredDepthFunction);
+        glGetIntegerv(GL_FRONT_FACE, &restoredFrontFace);
+        glGetIntegerv(GL_SCISSOR_BOX, restoredScissor);
+        glGetIntegerv(GL_POLYGON_MODE, restoredPolygonMode);
+        glGetBooleani_v(GL_COLOR_WRITEMASK, 0, restoredColorMasks[0]);
+        glGetBooleani_v(GL_COLOR_WRITEMASK, 1, restoredColorMasks[1]);
+        glGetDoublev(GL_DEPTH_RANGE, restoredDepthRange);
+        glGetBooleanv(GL_DEPTH_WRITEMASK, &restoredDepthMask);
+        check("geometry pass restores caller OpenGL state",
+              restoredViewport[0] == 3 && restoredViewport[1] == 4 &&
+              restoredViewport[2] == 17 && restoredViewport[3] == 19 &&
+              restoredVAO == static_cast<GLint>(sentinelVAO) &&
+              restoredBuffer == static_cast<GLint>(sentinelBuffer) &&
+              restoredActiveTexture == GL_TEXTURE3 &&
+              restoredActiveBinding == static_cast<GLint>(sentinelTextures[1]) &&
+              restoredUnitZeroBinding == static_cast<GLint>(sentinelTextures[0]) &&
+              restoredDepthFunction == GL_GREATER && restoredFrontFace == GL_CW &&
+              restoredDepthMask == GL_FALSE && !glIsEnabled(GL_DEPTH_TEST) &&
+              glIsEnabled(GL_CULL_FACE) && glIsEnabledi(GL_BLEND, 0) &&
+              !glIsEnabledi(GL_BLEND, 1) &&
+              glIsEnabled(GL_SCISSOR_TEST) &&
+              restoredScissor[0] == 7 && restoredScissor[1] == 8 &&
+              restoredScissor[2] == 1 && restoredScissor[3] == 1 &&
+              restoredPolygonMode[0] == GL_LINE && restoredPolygonMode[1] == GL_POINT &&
+              restoredColorMasks[0][0] == GL_FALSE && restoredColorMasks[0][1] == GL_TRUE &&
+              restoredColorMasks[0][2] == GL_FALSE && restoredColorMasks[0][3] == GL_TRUE &&
+              restoredColorMasks[1][0] == GL_TRUE && restoredColorMasks[1][1] == GL_FALSE &&
+              restoredColorMasks[1][2] == GL_TRUE && restoredColorMasks[1][3] == GL_FALSE &&
+              std::fabs(restoredDepthRange[0] - 0.2) < 0.000001 &&
+              std::fabs(restoredDepthRange[1] - 0.8) < 0.000001);
+
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glActiveTexture(GL_TEXTURE0);
+        glDeleteBuffers(1, &sentinelBuffer);
+        glDeleteVertexArrays(1, &sentinelVAO);
+        glDeleteTextures(2, sentinelTextures);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LESS);
+        glDepthMask(GL_TRUE);
+        glDisable(GL_CULL_FACE);
+        for (GLuint drawBuffer = 0; drawBuffer < 6; ++drawBuffer)
+        {
+            glDisablei(GL_BLEND, drawBuffer);
+            glColorMaski(drawBuffer, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        }
+        glDisable(GL_SCISSOR_TEST);
+        glDepthRange(0.0, 1.0);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        glFrontFace(GL_CCW);
+
+        std::vector<float> positions(64 * 64 * 4);
+        std::vector<float> geometricNormals(64 * 64 * 4);
+        std::vector<float> shadingNormals(64 * 64 * 4);
+        std::vector<float> albedo(64 * 64 * 4);
+        std::vector<float> specular(64 * 64 * 4);
+        std::vector<float> depth(64 * 64);
+        std::vector<std::uint32_t> identities(64 * 64 * 2);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, gbuffer.Framebuffer());
+        glReadBuffer(gbuffer.ColorAttachment(EHardwareGBufferSemantic::PositionCoverage));
+        glReadPixels(0, 0, 64, 64, GL_RGBA, GL_FLOAT, positions.data());
+        glReadBuffer(gbuffer.ColorAttachment(EHardwareGBufferSemantic::GeometricNormal));
+        glReadPixels(0, 0, 64, 64, GL_RGBA, GL_FLOAT, geometricNormals.data());
+        glReadBuffer(gbuffer.ColorAttachment(EHardwareGBufferSemantic::ShadingNormalModel));
+        glReadPixels(0, 0, 64, 64, GL_RGBA, GL_FLOAT, shadingNormals.data());
+        glReadBuffer(gbuffer.ColorAttachment(EHardwareGBufferSemantic::AlbedoShininess));
+        glReadPixels(0, 0, 64, 64, GL_RGBA, GL_FLOAT, albedo.data());
+        glReadBuffer(gbuffer.ColorAttachment(EHardwareGBufferSemantic::SpecularMirror));
+        glReadPixels(0, 0, 64, 64, GL_RGBA, GL_FLOAT, specular.data());
+        glReadBuffer(gbuffer.ColorAttachment(EHardwareGBufferSemantic::Identity));
+        glReadPixels(0, 0, 64, 64, GL_RG_INTEGER, GL_UNSIGNED_INT, identities.data());
+        glReadPixels(0, 0, 64, 64, GL_DEPTH_COMPONENT, GL_FLOAT, depth.data());
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+
+        const std::size_t center = 32u * 64u + 32u;
+        const std::size_t corner = 0;
+        check("center pixel is covered", positions[center * 4 + 3] > 0.5f);
+        check("corner pixel remains invalid", positions[corner * 4 + 3] == 0.0f &&
+              identities[corner * 2] == 0u && identities[corner * 2 + 1] == 0u);
+        const glm::vec3 centerNormal(geometricNormals[center * 4],
+                                     geometricNormals[center * 4 + 1],
+                                     geometricNormals[center * 4 + 2]);
+        check("center normal is finite and normalized",
+              std::isfinite(centerNormal.x) && std::isfinite(centerNormal.y) &&
+              std::isfinite(centerNormal.z) &&
+              std::fabs(glm::length(centerNormal) - 1.0f) < 0.02f);
+        check("center depth is in range", depth[center] > 0.0f && depth[center] < 1.0f);
+        check("front cube wins overlap depth", identities[center * 2] == 2u &&
+              depth[center] < farDepth);
+        check("textureless material fields survive the G-buffer",
+              identities[center * 2 + 1] == 22u &&
+              std::fabs(albedo[center * 4] - 0.9f) < 0.002f &&
+              std::fabs(albedo[center * 4 + 1] - 0.2f) < 0.002f &&
+              std::fabs(albedo[center * 4 + 3] - 48.0f) < 0.02f &&
+              std::fabs(specular[center * 4] - 0.6f) < 0.002f &&
+              std::fabs(specular[center * 4 + 3] - 0.25f) < 0.002f &&
+              std::fabs(shadingNormals[center * 4 + 3] - 2.0f) < 0.002f);
+
+        bool foundSideCube = false;
+        bool sideNormalValid = false;
+        for (std::size_t pixel = 0; pixel < 64u * 64u; ++pixel)
+            if (identities[pixel * 2] == 3u)
+            {
+                foundSideCube = true;
+                const glm::vec3 normal(shadingNormals[pixel * 4],
+                                       shadingNormals[pixel * 4 + 1],
+                                       shadingNormals[pixel * 4 + 2]);
+                sideNormalValid = sideNormalValid ||
+                    (std::isfinite(normal.x) && std::isfinite(normal.y) &&
+                     std::isfinite(normal.z) &&
+                     std::fabs(glm::length(normal) - 1.0f) < 0.02f);
+            }
+        check("mirrored nonuniform cube covers a distinct region", foundSideCube && sideNormalValid);
+        check("shared source mesh uploads once", meshCache.Stats().uploads == 1u &&
+              meshCache.Stats().reuploads == 0u && meshCache.Stats().residentResources == 1u);
+
+        {
+            std::ofstream ppm(outputPath, std::ios::binary);
+            ppm << "P6\n64 64\n255\n";
+            for (int y = 63; y >= 0; --y)
+                for (int x = 0; x < 64; ++x)
+                {
+                    const std::size_t pixel = static_cast<std::size_t>(y * 64 + x) * 4;
+                    const unsigned char rgb[3] = {
+                        static_cast<unsigned char>(glm::clamp(albedo[pixel], 0.0f, 1.0f) * 255.0f),
+                        static_cast<unsigned char>(glm::clamp(albedo[pixel + 1], 0.0f, 1.0f) * 255.0f),
+                        static_cast<unsigned char>(glm::clamp(albedo[pixel + 2], 0.0f, 1.0f) * 255.0f),
+                    };
+                    ppm.write(reinterpret_cast<const char*>(rgb), 3);
+                }
+            check("meaningful PPM output written", static_cast<bool>(ppm));
+        }
+
+        UMesh invalidMesh;
+        invalidMesh.vertices.push_back({glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f),
+                                        glm::vec2(0.0f)});
+        invalidMesh.indices = {0u, 1u, 2u};
+        FRenderScene emptyAndInvalidScene;
+        FRenderMeshInstance invalidInstance;
+        invalidInstance.mesh = &invalidMesh;
+        emptyAndInvalidScene.meshes.push_back(invalidInstance);
+        const std::uint64_t uploadsBeforeInvalid = meshCache.Stats().uploads;
+        check("empty and invalid meshes skip without GL errors",
+              rasterizer.RenderGeometry(emptyAndInvalidScene, meshCache, gbuffer,
+                                        ContextGeneration(), &diagnostic) &&
+              meshCache.Stats().uploads == uploadsBeforeInvalid &&
+              glGetError() == GL_NO_ERROR);
+
+        const std::uint64_t beforeResizeRevision = gbuffer.ResourceRevision();
+        check("invalid resize fails without disturbing live resources",
+              !gbuffer.Resize(0, 48, ContextGeneration()) && gbuffer.IsComplete() &&
+              gbuffer.Width() == 64 && gbuffer.Height() == 64 &&
+              gbuffer.ResourceRevision() == beforeResizeRevision);
+        check("resize to 80x48 succeeds", gbuffer.Resize(80, 48, ContextGeneration()) &&
+              gbuffer.IsComplete() && gbuffer.Width() == 80 && gbuffer.Height() == 48);
+        check("resize back to 64x64 succeeds", gbuffer.Resize(64, 64, ContextGeneration()) &&
+              gbuffer.IsComplete() && gbuffer.Width() == 64 && gbuffer.Height() == 64);
+        check("resize owns one bounded attachment set", gbuffer.OwnedTextureCount() == 7u &&
+              gbuffer.ResourceRevision() == beforeResizeRevision + 2u);
+        check("idempotent resize keeps resources", gbuffer.Resize(64, 64, ContextGeneration()) &&
+              gbuffer.ResourceRevision() == beforeResizeRevision + 2u);
+        check("no unexpected OpenGL error", glGetError() == GL_NO_ERROR);
+
+        std::printf("    probes: farDepth=%.6f frontDepth=%.6f centerNormal=(%.3f,%.3f,%.3f)\n",
+                    farDepth, depth[center], centerNormal.x, centerNormal.y, centerNormal.z);
+
+        FGPUMeshResource oldMeshResource = meshCache.Acquire(*cube, ContextGeneration());
+        const GLuint oldProgram = rasterizer.Program();
+        const GLuint oldFramebuffer = gbuffer.Framebuffer();
+        const GLuint oldDepthTexture = gbuffer.DepthTexture();
+        GLuint oldColorTextures[6] = {};
+        for (unsigned semantic = 0; semantic < 6; ++semantic)
+            oldColorTextures[semantic] = gbuffer.Texture(
+                static_cast<EHardwareGBufferSemantic>(semantic));
+
+        const std::uint64_t recreatedGeneration = ContextGeneration() + 100;
+        const std::uint64_t originalGeneration = ContextGeneration();
+        const std::uint64_t revisionBeforeMismatch = gbuffer.ResourceRevision();
+        check("mismatched caller generation is rejected without mutation",
+              !gbuffer.Resize(64, 64, recreatedGeneration) &&
+              !rasterizer.Init(recreatedGeneration, &diagnostic) &&
+              !rasterizer.RenderGeometry(scene, meshCache, gbuffer,
+                                         recreatedGeneration, &diagnostic) &&
+              gbuffer.ResourceRevision() == revisionBeforeMismatch &&
+              gbuffer.ContextGeneration() == originalGeneration &&
+              rasterizer.ContextGeneration() == originalGeneration &&
+              meshCache.Stats().abandons == 0u);
+        SetActiveRenderTargetContextGeneration(recreatedGeneration);
+        check("generation transition allocates a fresh G-buffer",
+              gbuffer.Resize(64, 64, recreatedGeneration) &&
+              gbuffer.ContextGeneration() == recreatedGeneration &&
+              gbuffer.Framebuffer() != oldFramebuffer);
+        bool oldColorTexturesSurvive = true;
+        for (GLuint texture : oldColorTextures)
+            oldColorTexturesSurvive = oldColorTexturesSurvive && glIsTexture(texture);
+        check("generation transition abandons stale program and mesh names",
+              rasterizer.RenderGeometry(scene, meshCache, gbuffer,
+                                        recreatedGeneration, &diagnostic) &&
+              rasterizer.ContextGeneration() == recreatedGeneration &&
+              rasterizer.Program() != oldProgram &&
+              meshCache.Stats().abandons == 1u &&
+              glIsProgram(oldProgram) && glIsVertexArray(oldMeshResource.vao) &&
+              glIsBuffer(oldMeshResource.vertexBuffer) &&
+              glIsBuffer(oldMeshResource.indexBuffer) &&
+              glIsFramebuffer(oldFramebuffer) && glIsTexture(oldDepthTexture) &&
+              oldColorTexturesSurvive);
+
+        glDeleteProgram(oldProgram);
+        glDeleteBuffers(1, &oldMeshResource.indexBuffer);
+        glDeleteBuffers(1, &oldMeshResource.vertexBuffer);
+        glDeleteVertexArrays(1, &oldMeshResource.vao);
+        glDeleteTextures(6, oldColorTextures);
+        glDeleteTextures(1, &oldDepthTexture);
+        glDeleteFramebuffers(1, &oldFramebuffer);
+
+        const GLuint currentProgram = rasterizer.Program();
+        const GLuint currentFramebuffer = gbuffer.Framebuffer();
+        const GLuint currentDepthTexture = gbuffer.DepthTexture();
+        GLuint currentColorTextures[6] = {};
+        for (unsigned semantic = 0; semantic < 6; ++semantic)
+            currentColorTextures[semantic] = gbuffer.Texture(
+                static_cast<EHardwareGBufferSemantic>(semantic));
+        const FGPUMeshResource currentMeshResource = meshCache.Acquire(
+            *cube, recreatedGeneration);
+        SetActiveRenderTargetContextGeneration(recreatedGeneration);
+        meshCache.Clear();
+        gbuffer.Release();
+        rasterizer.Shutdown();
+        bool currentColorTexturesDeleted = true;
+        for (GLuint texture : currentColorTextures)
+            currentColorTexturesDeleted = currentColorTexturesDeleted && !glIsTexture(texture);
+        check("same-generation shutdown deletes current GL resources",
+              !glIsProgram(currentProgram) && !glIsFramebuffer(currentFramebuffer) &&
+              !glIsTexture(currentDepthTexture) && currentColorTexturesDeleted &&
+              !glIsVertexArray(currentMeshResource.vao) &&
+              !glIsBuffer(currentMeshResource.vertexBuffer) &&
+              !glIsBuffer(currentMeshResource.indexBuffer));
+        SetActiveRenderTargetContextGeneration(originalGeneration);
+        std::printf("=== hardware raster gates: %d passed, %d failed ===\n", passed, failed);
+        return failed == 0 ? 0 : 1;
+    }
+};
+
+static int RunHardwareRasterGates(const std::string& outputPath)
+{
+    FHardwareRasterSelfTestApp app;
+    if (!app.Init(64, 64, "Hardware Raster Self-Test")) return 2;
+    return app.RunGates(outputPath);
+}
+
 int main(int argc, char** argv)
 {
     const std::string arg = (argc > 1) ? argv[1] : "";
+
+    const std::string hardwareRasterPrefix = "--hw-raster-selftest=";
+    if (arg.rfind(hardwareRasterPrefix, 0) == 0)
+    {
+        const std::string outputPath = arg.substr(hardwareRasterPrefix.size());
+        if (outputPath.empty())
+        {
+            std::fprintf(stderr, "--hw-raster-selftest requires an output .ppm path\n");
+            return 2;
+        }
+        return RunHardwareRasterGates(outputPath);
+    }
 
     if (arg == "--fbxtest")
         return RunFbxGates();

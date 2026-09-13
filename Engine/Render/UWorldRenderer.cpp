@@ -10,6 +10,9 @@
 #include "ThreadPool.h"
 #include "UGBuffer.h"
 #include "UHybridPass.h"
+#include "UHardwareGBuffer.h"
+#include "UHardwareRasterizer.h"
+#include "UGPUMeshCache.h"
 #include "UMesh.h"
 #include "URasterizer.h"
 #include "URenderer.h"
@@ -21,6 +24,8 @@
 #include <cstddef>
 #include <utility>
 #include <vector>
+#include <stdexcept>
+#include <string>
 
 namespace
 {
@@ -263,7 +268,11 @@ private:
 } // namespace
 
 UWorldRenderer::UWorldRenderer()
-    : executor_(std::make_unique<FLegacyWorldRenderExecutor>())
+    : executor_(std::make_unique<FLegacyWorldRenderExecutor>()),
+      hardwareUploadAdapter_(std::make_unique<FOpenGLMeshUploadAdapter>()),
+      hardwareMeshCache_(std::make_unique<UGPUMeshCache>(*hardwareUploadAdapter_)),
+      hardwareGBuffer_(std::make_unique<UHardwareGBuffer>()),
+      hardwareRasterizer_(std::make_unique<UHardwareRasterizer>())
 {
 }
 
@@ -280,6 +289,13 @@ UWorldRenderer::~UWorldRenderer()
 void UWorldRenderer::Init()
 {
     if (initialized_ || !executor_) return;
+    if (hardwareRasterizer_)
+    {
+        std::string diagnostic;
+        if (!hardwareRasterizer_->Init(ActiveRenderTargetContextGeneration(), &diagnostic))
+            throw std::runtime_error(diagnostic.empty()
+                ? "Hardware raster initialization failed" : diagnostic);
+    }
     executor_->Init();
     initialized_ = true;
 }
@@ -287,6 +303,9 @@ void UWorldRenderer::Init()
 void UWorldRenderer::Shutdown() noexcept
 {
     if (!executor_) return;
+    if (hardwareMeshCache_) hardwareMeshCache_->Clear();
+    if (hardwareGBuffer_) hardwareGBuffer_->Release();
+    if (hardwareRasterizer_) hardwareRasterizer_->Shutdown();
     executor_->Shutdown();
     initialized_ = false;
 }

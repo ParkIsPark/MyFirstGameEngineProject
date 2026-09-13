@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 #include "Vertex.h"
 
@@ -11,6 +12,7 @@ struct FGPUMeshResource
     unsigned vertexBuffer = 0;
     unsigned indexBuffer = 0;
     std::uint64_t uploadedRevision = 0;
+    std::uint64_t contextGeneration = 0;
     std::size_t indexCount = 0;
 };
 
@@ -27,10 +29,14 @@ class IMeshGPUUploadAdapter
 public:
     virtual ~IMeshGPUUploadAdapter() = default;
 
-    virtual FGPUMeshResource CreateAndUpload(const FMeshGPUUploadView& upload) = 0;
-    virtual void Reupload(FGPUMeshResource& resource,
-                          const FMeshGPUUploadView& upload) noexcept = 0;
+    virtual std::uint64_t ActiveContextGeneration() const noexcept = 0;
+    virtual FGPUMeshResource CreateAndUpload(const FMeshGPUUploadView& upload,
+                                             std::uint64_t contextGeneration) = 0;
+    virtual bool Reupload(FGPUMeshResource& resource,
+                          const FMeshGPUUploadView& upload,
+                          std::string& diagnostic) noexcept = 0;
     virtual void Destroy(FGPUMeshResource& resource) noexcept = 0;
+    virtual void Abandon(FGPUMeshResource& resource) noexcept = 0;
 };
 
 struct FMeshGPUCacheStats
@@ -40,5 +46,7 @@ struct FMeshGPUCacheStats
     std::size_t residentResources = 0;
     std::uint64_t uploads = 0;
     std::uint64_t reuploads = 0;
+    std::uint64_t failedReuploads = 0;
     std::uint64_t releases = 0;
+    std::uint64_t abandons = 0;
 };

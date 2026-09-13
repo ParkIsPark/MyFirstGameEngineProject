@@ -100,6 +100,8 @@
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.cpp"><Filter>Engine\Rasterizer</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\FGraphicsCapabilities.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\FRenderScene.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Render\UHardwareGBuffer.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Render\UHardwareRasterizer.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\FRenderTarget.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\FRenderPipelinePlan.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\UGPUMeshCache.cpp"><Filter>Engine\Render</Filter></ClCompile>
@@ -199,6 +201,9 @@
     <ClInclude Include="$(EngineRootDir)Engine\Render\FGraphicsCapabilities.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderOutputs.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderScene.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\UHardwareGBuffer.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\UHardwareRasterizer.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\HardwareRasterShaders.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderTarget.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FGPUMeshResource.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderFeatures.h"><Filter>Engine\Render</Filter></ClInclude>

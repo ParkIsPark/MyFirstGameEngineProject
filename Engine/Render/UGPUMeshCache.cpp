@@ -1,6 +1,8 @@
 #include "UGPUMeshCache.h"
 
 #include <limits>
+#include <stdexcept>
+#include <string>
 
 namespace
 {
@@ -29,8 +31,13 @@ const FGPUMeshResource& UGPUMeshCache::Acquire(
     const UMesh& mesh,
     std::uint64_t contextGeneration)
 {
+    if (contextGeneration == 0 ||
+        uploadAdapter_.ActiveContextGeneration() != contextGeneration)
+        throw std::invalid_argument(
+            "GPU mesh cache context generation does not match the active context");
+
     if (hasContextGeneration_ && contextGeneration_ != contextGeneration)
-        Clear();
+        AbandonAll();
 
     contextGeneration_ = contextGeneration;
     hasContextGeneration_ = true;
@@ -40,7 +47,15 @@ const FGPUMeshResource& UGPUMeshCache::Acquire(
     if (found == entries_.end())
     {
         FEntry entry;
-        entry.resource = uploadAdapter_.CreateAndUpload(UploadView(mesh));
+        entry.resource = uploadAdapter_.CreateAndUpload(
+            UploadView(mesh), contextGeneration);
+        if (entry.resource.contextGeneration == 0 ||
+            entry.resource.contextGeneration != contextGeneration)
+        {
+            uploadAdapter_.Abandon(entry.resource);
+            throw std::runtime_error(
+                "GPU mesh upload returned an invalid context generation label");
+        }
         entry.resource.uploadedRevision = mesh.GeometryRevision();
         entry.resource.indexCount = mesh.indices.size();
         entry.lastUsedFrame = frame_;
@@ -62,7 +77,13 @@ const FGPUMeshResource& UGPUMeshCache::Acquire(
         FEntry& entry = found->second;
         if (entry.resource.uploadedRevision != mesh.GeometryRevision())
         {
-            uploadAdapter_.Reupload(entry.resource, UploadView(mesh));
+            std::string diagnostic;
+            if (!uploadAdapter_.Reupload(entry.resource, UploadView(mesh), diagnostic))
+            {
+                ++stats_.failedReuploads;
+                throw std::runtime_error(diagnostic.empty()
+                    ? "GPU mesh reupload failed" : diagnostic);
+            }
             entry.resource.uploadedRevision = mesh.GeometryRevision();
             entry.resource.indexCount = mesh.indices.size();
             ++stats_.reuploads;
@@ -104,6 +125,17 @@ void UGPUMeshCache::Clear() noexcept
 {
     for (auto& pair : entries_)
         Release(pair.second);
+    entries_.clear();
+    stats_.residentResources = 0;
+}
+
+void UGPUMeshCache::AbandonAll() noexcept
+{
+    for (auto& pair : entries_)
+    {
+        uploadAdapter_.Abandon(pair.second.resource);
+        ++stats_.abandons;
+    }
     entries_.clear();
     stats_.residentResources = 0;
 }

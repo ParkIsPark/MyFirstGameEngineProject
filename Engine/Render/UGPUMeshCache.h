@@ -34,6 +34,7 @@ private:
     };
 
     void Release(FEntry& entry) noexcept;
+    void AbandonAll() noexcept;
 
     IMeshGPUUploadAdapter& uploadAdapter_;
     std::unordered_map<FMeshAssetId, FEntry> entries_;

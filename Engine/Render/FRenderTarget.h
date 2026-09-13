@@ -37,6 +37,7 @@ public:
 };
 
 void SetActiveRenderTargetContextGeneration(std::uint64_t generation) noexcept;
+std::uint64_t ActiveRenderTargetContextGeneration() noexcept;
 
 // Move-only render destination. A default target is metadata-only. A texture
 // viewport owns its FBO/color/depth attachments and exposes only the color

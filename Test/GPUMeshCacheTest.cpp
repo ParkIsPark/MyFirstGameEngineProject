@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 
@@ -25,13 +26,25 @@ namespace
 class FFakeMeshUploadAdapter final : public IMeshGPUUploadAdapter
 {
 public:
-    FGPUMeshResource CreateAndUpload(const FMeshGPUUploadView& upload) override
+    explicit FFakeMeshUploadAdapter(std::uint64_t activeGeneration)
+        : activeGeneration(activeGeneration) {}
+
+    std::uint64_t ActiveContextGeneration() const noexcept override
+    {
+        return activeGeneration;
+    }
+
+    FGPUMeshResource CreateAndUpload(const FMeshGPUUploadView& upload,
+                                     std::uint64_t contextGeneration) override
     {
         Validate(upload);
+        assert(contextGeneration == activeGeneration);
         FGPUMeshResource resource;
         resource.vao = nextHandle++;
         resource.vertexBuffer = nextHandle++;
         resource.indexBuffer = nextHandle++;
+        resource.contextGeneration = returnedGenerationOverride
+            ? returnedGenerationOverride : contextGeneration;
         assert(liveHandles.insert(resource.vao).second);
         assert(liveHandles.insert(resource.vertexBuffer).second);
         assert(liveHandles.insert(resource.indexBuffer).second);
@@ -40,8 +53,9 @@ public:
         return resource;
     }
 
-    void Reupload(FGPUMeshResource& resource,
-                  const FMeshGPUUploadView& upload) noexcept override
+    bool Reupload(FGPUMeshResource& resource,
+                  const FMeshGPUUploadView& upload,
+                  std::string& diagnostic) noexcept override
     {
         Validate(upload);
         assert(liveHandles.count(resource.vao) == 1);
@@ -49,6 +63,14 @@ public:
         assert(liveHandles.count(resource.indexBuffer) == 1);
         ++reuploadCalls;
         events.push_back('R');
+        if (failNextReupload)
+        {
+            failNextReupload = false;
+            diagnostic = "injected reupload failure";
+            return false;
+        }
+        diagnostic.clear();
+        return true;
     }
 
     void Destroy(FGPUMeshResource& resource) noexcept override
@@ -62,9 +84,24 @@ public:
         events.push_back('D');
     }
 
+    void Abandon(FGPUMeshResource& resource) noexcept override
+    {
+        assert(resource.vao != 0);
+        assert(liveHandles.erase(resource.vao) == 1);
+        assert(liveHandles.erase(resource.vertexBuffer) == 1);
+        assert(liveHandles.erase(resource.indexBuffer) == 1);
+        resource = {};
+        ++abandonCalls;
+        events.push_back('A');
+    }
+
     std::size_t createCalls = 0;
     std::size_t reuploadCalls = 0;
     std::size_t destroyCalls = 0;
+    std::size_t abandonCalls = 0;
+    bool failNextReupload = false;
+    std::uint64_t activeGeneration = 0;
+    std::uint64_t returnedGenerationOverride = 0;
     std::unordered_set<unsigned> liveHandles;
     std::string events;
 
@@ -179,7 +216,7 @@ void CheckBuiltInCompletionHooks()
 
 void CheckAcquireAndRevisionUploads()
 {
-    FFakeMeshUploadAdapter adapter;
+    FFakeMeshUploadAdapter adapter(7);
     {
         UGPUMeshCache cache(adapter);
         UMesh mesh;
@@ -241,7 +278,7 @@ void CheckAcquireAndRevisionUploads()
 
 void CheckFrameReleasePolicy()
 {
-    FFakeMeshUploadAdapter adapter;
+    FFakeMeshUploadAdapter adapter(1);
     {
         UGPUMeshCache cache(adapter);
         UMesh kept;
@@ -270,9 +307,42 @@ void CheckFrameReleasePolicy()
     assert(adapter.liveHandles.empty());
 }
 
+void CheckFailedReuploadRetainsMetadataAndRetries()
+{
+    FFakeMeshUploadAdapter adapter(4);
+    UGPUMeshCache cache(adapter);
+    UMesh mesh;
+    PopulateTriangle(mesh);
+
+    const FGPUMeshResource& initial = cache.Acquire(mesh, 4);
+    const std::uint64_t uploadedRevision = initial.uploadedRevision;
+    const std::size_t uploadedIndexCount = initial.indexCount;
+    mesh.indices.insert(mesh.indices.end(), {0u, 2u, 1u});
+    mesh.FinalizeGeometry();
+
+    adapter.failNextReupload = true;
+    bool threw = false;
+    try { cache.Acquire(mesh, 4); }
+    catch (const std::runtime_error& error)
+    {
+        threw = std::string(error.what()).find("injected reupload failure") != std::string::npos;
+    }
+    assert(threw);
+    assert(initial.uploadedRevision == uploadedRevision);
+    assert(initial.indexCount == uploadedIndexCount);
+    assert(cache.Stats().reuploads == 0);
+    assert(cache.Stats().failedReuploads == 1);
+
+    const FGPUMeshResource& retried = cache.Acquire(mesh, 4);
+    assert(retried.uploadedRevision == mesh.GeometryRevision());
+    assert(retried.indexCount == mesh.indices.size());
+    assert(cache.Stats().reuploads == 1);
+    assert(cache.Stats().failedReuploads == 1);
+}
+
 void CheckContextInvalidationAndClearStats()
 {
-    FFakeMeshUploadAdapter adapter;
+    FFakeMeshUploadAdapter adapter(5);
     {
         UGPUMeshCache cache(adapter);
         UMesh first;
@@ -280,23 +350,25 @@ void CheckContextInvalidationAndClearStats()
         PopulateTriangle(first);
         PopulateTriangle(second);
 
-        cache.Acquire(first, 0);
-        cache.Acquire(second, 0);
+        cache.Acquire(first, 5);
+        cache.Acquire(second, 5);
         assert(cache.Stats().uploads == 2);
         assert(cache.Stats().residentResources == 2);
 
+        adapter.activeGeneration = 12;
         cache.Acquire(first, 12);
-        assert(adapter.events == "CCDDC");
+        assert(adapter.events == "CCAAC");
         assert(cache.Stats().uploads == 3);
         assert(cache.Stats().reuploads == 0);
-        assert(cache.Stats().releases == 2);
+        assert(cache.Stats().releases == 0);
+        assert(cache.Stats().abandons == 2);
         assert(cache.Stats().residentResources == 1);
 
         cache.Clear();
-        assert(cache.Stats().releases == 3);
+        assert(cache.Stats().releases == 1);
         assert(cache.Stats().residentResources == 0);
         cache.Clear();
-        assert(cache.Stats().releases == 3);
+        assert(cache.Stats().releases == 1);
 
         cache.Acquire(second, 12);
         assert(cache.Stats().uploads == 4);
@@ -304,8 +376,55 @@ void CheckContextInvalidationAndClearStats()
     }
     assert(adapter.createCalls == 4);
     assert(adapter.reuploadCalls == 0);
-    assert(adapter.destroyCalls == 4);
+    assert(adapter.destroyCalls == 2);
+    assert(adapter.abandonCalls == 2);
     assert(adapter.liveHandles.empty());
+}
+
+void CheckGenerationAuthorityRejectsBeforeMutation()
+{
+    FFakeMeshUploadAdapter adapter(7);
+    UGPUMeshCache cache(adapter);
+    UMesh mesh;
+    PopulateTriangle(mesh);
+
+    bool mismatchRejected = false;
+    try { cache.Acquire(mesh, 8); }
+    catch (const std::invalid_argument&) { mismatchRejected = true; }
+    assert(mismatchRejected);
+    assert(adapter.events.empty());
+    assert(cache.Stats().residentResources == 0);
+
+    cache.Acquire(mesh, 7);
+    adapter.activeGeneration = 9;
+    mismatchRejected = false;
+    try { cache.Acquire(mesh, 8); }
+    catch (const std::invalid_argument&) { mismatchRejected = true; }
+    assert(mismatchRejected);
+    assert(adapter.events == "C");
+    assert(cache.Stats().abandons == 0);
+    assert(cache.Stats().residentResources == 1);
+
+    cache.Acquire(mesh, 9);
+    assert(adapter.events == "CAC");
+    assert(cache.Stats().abandons == 1);
+}
+
+void CheckCreatedGenerationLabelIsValidated()
+{
+    FFakeMeshUploadAdapter adapter(3);
+    adapter.returnedGenerationOverride = 99;
+    UGPUMeshCache cache(adapter);
+    UMesh mesh;
+    PopulateTriangle(mesh);
+
+    bool rejected = false;
+    try { cache.Acquire(mesh, 3); }
+    catch (const std::runtime_error&) { rejected = true; }
+    assert(rejected);
+    assert(adapter.events == "CA");
+    assert(cache.Stats().residentResources == 0);
+    assert(cache.Stats().uploads == 0);
 }
 } // namespace
 
@@ -315,7 +434,10 @@ int main()
     CheckBuiltInCompletionHooks();
     CheckAcquireAndRevisionUploads();
     CheckFrameReleasePolicy();
+    CheckFailedReuploadRetainsMetadataAndRetries();
     CheckContextInvalidationAndClearStats();
+    CheckGenerationAuthorityRejectsBeforeMutation();
+    CheckCreatedGenerationLabelIsValidated();
     std::cout << "GPUMeshCacheTest passed\n";
     return 0;
 }

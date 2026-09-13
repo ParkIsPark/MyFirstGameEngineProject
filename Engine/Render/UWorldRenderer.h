@@ -12,6 +12,10 @@
 #include <vector>
 
 class ACamera;
+class FOpenGLMeshUploadAdapter;
+class UGPUMeshCache;
+class UHardwareGBuffer;
+class UHardwareRasterizer;
 class UWorld;
 
 struct FWorldRenderRequest
@@ -59,5 +63,11 @@ public:
 
 private:
     std::unique_ptr<IWorldRenderExecutor> executor_;
+    // Prepared for the Task 8 lighting/composite cutover. Task 7 initializes
+    // and owns these real GL resources without executing a hidden extra pass.
+    std::unique_ptr<FOpenGLMeshUploadAdapter> hardwareUploadAdapter_;
+    std::unique_ptr<UGPUMeshCache> hardwareMeshCache_;
+    std::unique_ptr<UHardwareGBuffer> hardwareGBuffer_;
+    std::unique_ptr<UHardwareRasterizer> hardwareRasterizer_;
     bool initialized_ = false;
 };

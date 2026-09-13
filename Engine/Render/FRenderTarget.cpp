@@ -116,6 +116,11 @@ void SetActiveRenderTargetContextGeneration(std::uint64_t generation) noexcept
     DefaultAdapter().SetActiveContextGeneration(generation);
 }
 
+std::uint64_t ActiveRenderTargetContextGeneration() noexcept
+{
+    return DefaultAdapter().ActiveContextGeneration();
+}
+
 FRenderTarget::FRenderTarget(ERenderTargetKind kind,
                              int width,
                              int height,
