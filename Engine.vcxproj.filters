@@ -55,6 +55,12 @@
     <Filter Include="Engine\Player">
       <UniqueIdentifier>{20000000-0000-0000-0000-000000000010}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\Script">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000021}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ThirdParty\Lua\5.4.9">
+      <UniqueIdentifier>{20000000-0000-0000-0000-000000000022}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <!-- Framework -->
@@ -119,6 +125,39 @@
     <!-- Player -->
     <ClCompile Include="Engine\Player\UPlayerCharacter.cpp"><Filter>Engine\Player</Filter></ClCompile>
     <ClCompile Include="Engine\Player\UPlayerController.cpp"><Filter>Engine\Player</Filter></ClCompile>
+    <!-- Lua 5.4.9 library -->
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lapi.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lauxlib.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lbaselib.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lcode.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lcorolib.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lctype.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\ldblib.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\ldebug.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\ldo.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\ldump.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lfunc.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lgc.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\linit.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\liolib.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\llex.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lmathlib.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lmem.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\loadlib.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lobject.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lopcodes.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\loslib.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lparser.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lstate.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lstring.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lstrlib.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\ltable.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\ltablib.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\ltm.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lundump.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lutf8lib.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lvm.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lzio.c"><Filter>ThirdParty\Lua\5.4.9</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
     <!-- Framework -->
@@ -186,5 +225,6 @@
     <!-- Player -->
     <ClInclude Include="Engine\Player\UPlayerCharacter.h"><Filter>Engine\Player</Filter></ClInclude>
     <ClInclude Include="Engine\Player\UPlayerController.h"><Filter>Engine\Player</Filter></ClInclude>
+    <ClInclude Include="Engine\Script\LuaInclude.h"><Filter>Engine\Script</Filter></ClInclude>
   </ItemGroup>
 </Project>

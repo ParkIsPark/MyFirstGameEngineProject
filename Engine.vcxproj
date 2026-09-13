@@ -51,6 +51,7 @@
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(EngineRootDir)ThirdParty\Lua\5.4.9\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <ConformanceMode>true</ConformanceMode>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -61,6 +62,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(EngineRootDir)ThirdParty\Lua\5.4.9\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <ConformanceMode>true</ConformanceMode>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -127,6 +129,39 @@
     <ClCompile Include="Engine\Player\UPlayerController.cpp" />
     <!-- Engine: RayTracing -->
     <ClCompile Include="Engine\RayTracing\UMeshRayTracer.cpp" />
+    <!-- Third-party: Lua 5.4.9 library (lua.c and luac.c intentionally excluded) -->
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lapi.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lauxlib.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lbaselib.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lcode.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lcorolib.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lctype.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\ldblib.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\ldebug.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\ldo.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\ldump.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lfunc.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lgc.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\linit.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\liolib.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\llex.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lmathlib.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lmem.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\loadlib.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lobject.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lopcodes.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\loslib.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lparser.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lstate.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lstring.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lstrlib.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\ltable.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\ltablib.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\ltm.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lundump.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lutf8lib.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lvm.c" />
+    <ClCompile Include="ThirdParty\Lua\5.4.9\src\lzio.c" />
   </ItemGroup>
   <ItemGroup>
     <!-- Engine: Core headers -->
@@ -194,6 +229,7 @@
     <ClInclude Include="Engine\RayTracing\UMeshRayTracer.h" />
     <ClInclude Include="Engine\RayTracing\RTShading.h" />
     <ClInclude Include="Engine\RayTracing\URay.h" />
+    <ClInclude Include="Engine\Script\LuaInclude.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
