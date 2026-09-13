@@ -70,16 +70,16 @@ std::string FWorldSerializer::Save(UWorld& world)
             a.Field("Type", t); actor->Serialize(a);
             // Parent actor name (scene-graph hierarchy); empty = world root.
             std::string parentName;
-            if (actor->rootComponent.attachParent && actor->rootComponent.attachParent->owner)
-                parentName = actor->rootComponent.attachParent->owner->name;
+            if (actor->rootComponent.attachParent && actor->rootComponent.attachParent->GetOwner())
+                parentName = actor->rootComponent.attachParent->GetOwner()->name;
             a.Field("Parent", parentName);
             out += a.str();
         }
         for (USceneComponent* c : actor->rootComponent.children)
         {
-            if (c->owner != actor) continue;     // skip child-actor roots (own [Actor] entries)
+            if (c->GetOwner() != actor) continue;     // skip child-actor roots (own [Actor] entries)
             out += "  [Component]\n";
-            FSaveArchive a; std::string t = c->TypeName();
+            FSaveArchive a; std::string t(c->TypeName());
             a.Field("Type", t); c->Serialize(a); out += a.str();
         }
         if (UPrimitiveComponent* p = actor->physics)   // collision shape + rigid body
@@ -162,13 +162,16 @@ UWorld* FWorldSerializer::Load(const std::string& text)
             USceneComponent* comp = FComponentFactory::Create(type);
             if (!comp) return;
             comp->Serialize(a);
-            comp->owner = curActor;
-            comp->AttachTo(&curActor->rootComponent);   // flat: attach under root
             if (UMeshComponent* mc = dynamic_cast<UMeshComponent*>(comp))
-                curActor->mesh = mc;
-            if (LightComponent* lc = dynamic_cast<LightComponent*>(comp))
-                if (ALight* al = dynamic_cast<ALight*>(curActor))
-                    al->lightComp = lc;
+                curActor->SetMesh(mc);
+            else if (auto* lc = dynamic_cast<LightComponent*>(comp);
+                     lc && dynamic_cast<ALight*>(curActor))
+                static_cast<ALight*>(curActor)->SetLightComponent(lc);
+            else
+            {
+                curActor->AdoptComponent(comp);
+                comp->AttachTo(&curActor->rootComponent);   // flat: attach under root
+            }
         }
         else if (hdr == "Collision")
         {

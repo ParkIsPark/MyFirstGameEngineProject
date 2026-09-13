@@ -18,7 +18,7 @@ void UWorld::Tick(float dt)
     // then per-actor game logic. Controllers tick as actors too.
     physics_.Tick(dt, scene_);
     for (AActor* a : scene_.Actors)
-        a->Tick(dt);
+        a->DispatchTick(dt);
 }
 
 void UWorld::EndPlay()

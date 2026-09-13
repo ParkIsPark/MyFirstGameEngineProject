@@ -2,6 +2,7 @@
 #include <glm/glm.hpp>
 #include <string>
 #include <vector>
+#include "UActorComponent.h"
 
 class AActor;
 class FArchive;
@@ -16,7 +17,7 @@ class FArchive;
 // up the chain changes — a move marks this node and all descendants dirty
 // (MarkDirty), and GetWorldMatrix() rebuilds the cache on the next read.
 // ---------------------------------------------------------------------------
-class USceneComponent
+class USceneComponent : public UActorComponent
 {
 public:
     std::string name;
@@ -27,8 +28,10 @@ public:
 
     USceneComponent*              attachParent = nullptr;
     std::vector<USceneComponent*> children;
-    AActor*                       owner = nullptr;
 
+    USceneComponent() = default;
+    USceneComponent(const USceneComponent& other);
+    USceneComponent& operator=(const USceneComponent& other);
     virtual ~USceneComponent();
 
     glm::mat4        GetRelativeMatrix() const;       // local T*R*S
@@ -45,7 +48,7 @@ public:
     void MarkDirty();                                  // invalidate self + all descendants
 
     // ---- serialization contract (P2) ----
-    virtual const char* TypeName() const { return "Scene"; }   // file Type tag
+    std::string_view TypeName() const override { return "Scene"; }   // file Type tag
     virtual void        Serialize(FArchive& ar);               // name + rel transform
 
     // Test hook: total world-matrix recomputations (cache-correctness checks).

@@ -22,6 +22,24 @@ static glm::mat4 composeTRS(const glm::vec3& t, const glm::vec3& rDeg, const glm
     return m;
 }
 
+USceneComponent::USceneComponent(const USceneComponent& other)
+    : UActorComponent(other), name(other.name), relLocation(other.relLocation),
+      relRotation(other.relRotation), relScale(other.relScale)
+{
+}
+
+USceneComponent& USceneComponent::operator=(const USceneComponent& other)
+{
+    if (this == &other) return *this;
+    UActorComponent::operator=(other);
+    name = other.name;
+    relLocation = other.relLocation;
+    relRotation = other.relRotation;
+    relScale = other.relScale;
+    MarkDirty();
+    return *this;
+}
+
 USceneComponent::~USceneComponent()
 {
     // Unhook from the graph so no dangling pointers survive this node.
@@ -31,7 +49,11 @@ USceneComponent::~USceneComponent()
         sib.erase(std::remove(sib.begin(), sib.end(), this), sib.end());
         attachParent = nullptr;
     }
-    for (USceneComponent* c : children) c->attachParent = nullptr;
+    for (USceneComponent* c : children)
+    {
+        c->attachParent = nullptr;
+        c->MarkDirty();
+    }
     children.clear();
 }
 

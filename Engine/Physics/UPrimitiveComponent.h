@@ -1,5 +1,6 @@
 #pragma once
 #include <glm/glm.hpp>
+#include "../World/UActorComponent.h"
 
 class AActor;
 
@@ -17,7 +18,7 @@ enum class EShape { Sphere, Box, Capsule };
 //
 // Principle: collision shape != render mesh. One component = shape + body.
 // ---------------------------------------------------------------------------
-class UPrimitiveComponent
+class UPrimitiveComponent : public UActorComponent
 {
 public:
     // --- rigid-body dynamics (moved verbatim from PhysicalComponent) ---
@@ -36,15 +37,15 @@ public:
     glm::vec3 force      = glm::vec3(0.0f); // accumulated per frame
     bool      isGrounded = false;           // set by UPhysicsWorld on contact
 
-    AActor* owner = nullptr;
 
     // Collider's local position offset from the owning actor (its own transform;
     // shape "size" is halfExtents / radius). World center = actor loc + localOffset.
     glm::vec3 localOffset = glm::vec3(0.0f);
 
     UPrimitiveComponent() = default;
-    explicit UPrimitiveComponent(AActor* owner) : owner(owner) {}
+    explicit UPrimitiveComponent(AActor* owner) : UActorComponent(owner) {}
     virtual ~UPrimitiveComponent() = default;
+    std::string_view TypeName() const override { return "Primitive"; }
 
     // Static when physics simulation is off or mass is zero: collides but never moves.
     bool IsStatic() const { return !bSimulate || mass <= 0.0f; }

@@ -14,18 +14,17 @@ ALight::ALight()
 }
 
 ALight::ALight(LightComponent* comp)
-    : lightComp(comp)
+    : lightComp(nullptr)
 {
-    if (comp)
-    {
-        comp->owner = this;
-        comp->AttachTo(&rootComponent);
-    }
+    SetLightComponent(comp);
 }
 
-ALight::~ALight()
+void ALight::SetLightComponent(LightComponent* comp)
 {
-    delete lightComp;
+    AdoptComponent(comp);
+    if (lightComp != comp) RemoveOwnedComponent(lightComp);
+    lightComp = comp;
+    if (comp) comp->AttachTo(&rootComponent);
 }
 
 void ALight::Serialize(FArchive& ar)

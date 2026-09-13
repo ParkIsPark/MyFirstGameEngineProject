@@ -10,6 +10,6 @@ public:
     PointLightComponent();
     PointLightComponent(glm::vec3 color, glm::vec3 intensity);
 
-    const char* TypeName() const override { return "PointLight"; }
+    std::string_view TypeName() const override { return "PointLight"; }
     void        Serialize(FArchive& ar) override;
 };

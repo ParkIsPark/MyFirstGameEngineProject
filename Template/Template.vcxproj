@@ -118,6 +118,7 @@
     <!-- Engine: World -->
     <ClCompile Include="$(EngineRootDir)Engine\World\AActor.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\World\USceneComponent.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\World\UActorComponent.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Serialization\FArchive.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Serialization\FWorldSerializer.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Serialization\FIniFile.cpp" />
@@ -215,6 +216,7 @@
     <!-- Engine: World headers -->
     <ClInclude Include="$(EngineRootDir)Engine\World\AActor.h" />
     <ClInclude Include="$(EngineRootDir)Engine\World\USceneComponent.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\World\UActorComponent.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Serialization\FArchive.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Serialization\FWorldSerializer.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Serialization\FIniFile.h" />

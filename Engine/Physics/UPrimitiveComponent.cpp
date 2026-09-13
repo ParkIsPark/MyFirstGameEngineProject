@@ -3,6 +3,7 @@
 
 glm::vec3 UPrimitiveComponent::WorldCenter() const
 {
+    AActor* owner = GetOwner();
     return owner ? owner->GetActorLocation() + localOffset : localOffset;
 }
 
@@ -16,6 +17,7 @@ void UPrimitiveComponent::AddForce(const glm::vec3& f)
 
 void UPrimitiveComponent::Integrate(float dt)
 {
+    AActor* owner = GetOwner();
     if (IsStatic() || !owner) return;
 
     glm::vec3 acceleration = force / mass;

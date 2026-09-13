@@ -76,6 +76,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Core\UPostProcessFilter.cpp"><Filter>Engine\Core</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\World\AActor.cpp"><Filter>Engine\World</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\World\USceneComponent.cpp"><Filter>Engine\World</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\World\UActorComponent.cpp"><Filter>Engine\World</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Serialization\FArchive.cpp"><Filter>Engine\Serialization</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Serialization\FWorldSerializer.cpp"><Filter>Engine\Serialization</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Serialization\FIniFile.cpp"><Filter>Engine\Serialization</Filter></ClCompile>
@@ -161,6 +162,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\Core\UPostProcessFilter.h"><Filter>Engine\Core</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\World\AActor.h"><Filter>Engine\World</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\World\USceneComponent.h"><Filter>Engine\World</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\World\UActorComponent.h"><Filter>Engine\World</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Serialization\FArchive.h"><Filter>Engine\Serialization</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Serialization\FWorldSerializer.h"><Filter>Engine\Serialization</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Serialization\FIniFile.h"><Filter>Engine\Serialization</Filter></ClInclude>

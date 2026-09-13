@@ -5,11 +5,12 @@
 class ALight : public AActor
 {
 public:
-    LightComponent* lightComp;
+    LightComponent* lightComp;   // non-owning alias into AActor::Components()
 
     ALight();
     explicit ALight(LightComponent* comp);
-    virtual ~ALight();
+    virtual ~ALight() = default;
+    void SetLightComponent(LightComponent* comp);
 
     const char* TypeName() const override { return "Light"; }
     void        Serialize(FArchive& ar) override;   // actor name/transform (light comp = child)

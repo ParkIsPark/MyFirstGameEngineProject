@@ -108,6 +108,7 @@
     <!-- Engine: World -->
     <ClCompile Include="Engine\World\AActor.cpp" />
     <ClCompile Include="Engine\World\USceneComponent.cpp" />
+    <ClCompile Include="Engine\World\UActorComponent.cpp" />
     <ClCompile Include="Engine\Serialization\FArchive.cpp" />
     <ClCompile Include="Engine\Serialization\FWorldSerializer.cpp" />
     <ClCompile Include="Engine\Serialization\FIniFile.cpp" />
@@ -206,6 +207,7 @@
     <!-- Engine: World headers -->
     <ClInclude Include="Engine\World\AActor.h" />
     <ClInclude Include="Engine\World\USceneComponent.h" />
+    <ClInclude Include="Engine\World\UActorComponent.h" />
     <ClInclude Include="Engine\Serialization\FArchive.h" />
     <ClInclude Include="Engine\Serialization\FWorldSerializer.h" />
     <ClInclude Include="Engine\Serialization\FIniFile.h" />

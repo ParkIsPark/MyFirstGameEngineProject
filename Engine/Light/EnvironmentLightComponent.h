@@ -20,7 +20,7 @@ public:
     EnvironmentLightComponent();
     EnvironmentLightComponent(glm::vec3 color, glm::vec3 intensity);
 
-    const char* TypeName() const override { return "EnvLight"; }
+    std::string_view TypeName() const override { return "EnvLight"; }
     void        Serialize(FArchive& ar) override;
 
     // Sun position over the day: hour in [0,24] drives sky gradient + light

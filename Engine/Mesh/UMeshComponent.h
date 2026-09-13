@@ -46,6 +46,6 @@ public:
     bool intersect(const URay& worldRay,
                    float& outT, int& outTri, float& outU, float& outV) const;
 
-    const char* TypeName() const override { return "Mesh"; }
+    std::string_view TypeName() const override { return "Mesh"; }
     void        Serialize(FArchive& ar) override;   // base + material override
 };

@@ -521,9 +521,9 @@ UWorld* EditorEngine::CopyWorld(UWorld& src, bool resetPhysics)
     for (size_t i = 0; i < srcActors.size(); ++i)       // re-link parents by position
     {
         USceneComponent* sp = srcActors[i]->rootComponent.attachParent;
-        if (!sp || !sp->owner) continue;
+        if (!sp || !sp->GetOwner()) continue;
         for (size_t j = 0; j < srcActors.size(); ++j)
-            if (srcActors[j] == sp->owner)
+            if (srcActors[j] == sp->GetOwner())
             { dstActors[i]->rootComponent.AttachTo(&dstActors[j]->rootComponent); break; }
     }
     return dst;
