@@ -1,5 +1,6 @@
 #include "URenderer.h"
 #include "FTransform.h"
+#include "FRenderScene.h"
 #include "UMesh.h"
 #include "UMeshComponent.h"
 #include "AActor.h"
@@ -28,6 +29,22 @@ namespace
         xf.proj     = FTransform::MakeProjFCG(cam.l, cam.r, cam.b, cam.t, -cam.d, -1000.0f);
         xf.viewport = FTransform::MakeViewport(nx, ny);
         return xf;
+    }
+
+    ACamera LegacyCameraFrom(const FRenderCamera& source)
+    {
+        ACamera camera;
+        camera.eye = source.eye;
+        camera.u = source.right;
+        camera.v = source.up;
+        camera.w = source.backward;
+        camera.l = source.left;
+        camera.r = source.rightPlane;
+        camera.b = source.bottom;
+        camera.t = source.top;
+        camera.d = source.nearDistance;
+        camera.fov = source.fovDegrees;
+        return camera;
     }
 }
 
@@ -144,11 +161,14 @@ void URenderer::GBufferWorld(UScene& scene, const ACamera& cam, int nx, int ny)
         UMeshComponent* comp = actor ? actor->mesh : nullptr;
         if (!comp || !comp->mesh) continue;
 
-        const glm::vec3 albedo = comp->hasMaterialOverride
-            ? comp->materialOverride.kd : comp->mesh->material.kd;
+        const Material* materialOverride = comp->EffectiveOverride();
+        const glm::vec3 albedo = materialOverride
+            ? materialOverride->kd : comp->mesh->material.kd;
 
         const FTransform xf = ActorTransform(comp->GetWorldMatrix(), cam, nx, ny);
-        raster_.DrawMeshGBuffer(*comp->mesh, xf, albedo, gbuffer_);
+        raster_.DrawMeshGBuffer(*comp->mesh, xf, albedo, gbuffer_,
+                                0, 0, 0x7fffffff, 0x7fffffff, true,
+                                materialOverride, comp->uvTiling);
     }
 }
 
@@ -157,9 +177,18 @@ void URenderer::GBufferWorld(UScene& scene, const ACamera& cam, int nx, int ny)
 // ---------------------------------------------------------------------------
 void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag, const USkyHDRI* sky)
 {
-    UScene&        scene = world.GetScene();
-    const ACamera& cam   = world.GetCamera();
-    const int nx = scene.width, ny = scene.height;
+    FRenderScene renderScene = ExtractRenderScene(world, world.GetCamera());
+    UScene& scene = world.GetScene();
+    scene.outputImage = RasterShadedLegacyOutput(
+        renderScene, scene.width, scene.height, flag, sky);
+}
+
+const std::vector<float>& URenderer::RasterShadedLegacyOutput(
+    const FRenderScene& renderScene, int width, int height,
+    const FRenderShowFlag& flag, const USkyHDRI* sky)
+{
+    const int nx = width, ny = height;
+    const ACamera cam = LegacyCameraFrom(renderScene.camera);
 
     // Gather every point light in the scene. HW6 uses one; the editor may place
     // several -- all contribute (extras beyond the first go to extraLight*).
@@ -168,17 +197,13 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag, const U
     sp.eye     = cam.eye;
     sp.envAmbient = true;                                  // sky-gradient ambient (GPU-consistent)
     sp.ambientMul = flag.ambientStrength;
-    std::vector<std::pair<glm::vec3, glm::vec3>> lights;   // (pos, color*intensity)
-    for (AActor* a : scene.Actors)
-    {
-        if (ALight* L = dynamic_cast<ALight*>(a))
-        {
-            if (PointLightComponent* pl = dynamic_cast<PointLightComponent*>(L->lightComp))
-                lights.emplace_back(pl->GetWorldLocation(), pl->LightColor * pl->LightIntensity);
-            else if (auto* el = dynamic_cast<EnvironmentLightComponent*>(L->lightComp))
-            { sp.skyHorizon = el->horizonColor; sp.skyZenith = el->zenithColor; sp.skyExp = el->skyExp; }
-        }
-    }
+    std::vector<std::pair<glm::vec3, glm::vec3>> lights;   // (pos, final radiance)
+    if (!renderScene.usesDefaultPointLight)
+        for (const FRenderPointLight& light : renderScene.pointLights)
+            lights.emplace_back(light.worldPosition, light.radiance);
+    sp.skyHorizon = renderScene.environment.horizon;
+    sp.skyZenith = renderScene.environment.zenith;
+    sp.skyExp = renderScene.environment.exponent;
 
     if (lights.empty())                                   // fallback: assignment light
     {
@@ -200,18 +225,17 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag, const U
     struct Draw { const UMesh* mesh; FTransform xf; const Material* ov; glm::vec2 uv; int triBase; };
     std::vector<Draw> draws;
     int totalTris = 0;
-    for (AActor* actor : scene.Actors)
+    for (const FRenderMeshInstance& instance : renderScene.meshes)
     {
-        UMeshComponent* comp = actor ? actor->mesh : nullptr;
-        if (!comp || !comp->mesh) continue;
         Draw d;
-        d.mesh    = comp->mesh;
-        d.ov      = comp->EffectiveOverride();   // shared material asset > override > mesh slots
-        d.uv      = comp->uvTiling;               // per-instance texture repeat
-        d.xf      = ActorTransform(comp->GetWorldMatrix(), cam, nx, ny);
+        d.mesh    = instance.mesh;
+        d.ov      = instance.materialOverride
+            ? instance.materialOverride->source : nullptr;
+        d.uv      = instance.uvTiling;
+        d.xf      = ActorTransform(instance.modelTransform, cam, nx, ny);
         d.triBase = totalTris;
         draws.push_back(d);
-        totalTris += comp->mesh->triangleCount();
+        totalTris += instance.mesh->triangleCount();
     }
 
     // Thread count: bounded by the pool, a small cap, and a memory budget (each
@@ -272,7 +296,11 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag, const U
             raster_.DrawMeshShaded(*d.mesh, d.xf, d.ov, sp, flag.shading, fb_, 0, 0x7fffffff, d.uv);
     }
 
-    if (flag.depthView) { fb_.ToDepthImage(scene.outputImage); return; }
+    if (flag.depthView)
+    {
+        fb_.ToDepthImage(legacyOutputImage_);
+        return legacyOutputImage_;
+    }
 
     // Sky background (matches GPU modes): fill un-covered pixels with the HDRI or
     // the env-light gradient (gamma-corrected to match the lit pixels).
@@ -291,5 +319,6 @@ void URenderer::RasterShaded(UWorld& world, const FRenderShowFlag& flag, const U
             fb_.color[idx] = glm::pow(glm::clamp(c, 0.0f, 1.0f), invG);
         }
 
-    fb_.ToOutputImage(scene.outputImage);
+    fb_.ToOutputImage(legacyOutputImage_);
+    return legacyOutputImage_;
 }

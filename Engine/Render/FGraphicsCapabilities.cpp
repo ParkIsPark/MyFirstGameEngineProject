@@ -129,3 +129,11 @@ FBackendSelection SelectRayTracingBackend(
     result.fallbackReason = unavailable + "; using the Compatible OpenGL 3.3 backend.";
     return result;
 }
+
+bool FBackendWarningDeduplicator::ShouldEmit(const FBackendSelection& selection)
+{
+    if (selection.fallbackReason.empty()) return false;
+    const std::string key = std::to_string(static_cast<int>(selection.requested))
+        + ":" + selection.fallbackReason;
+    return emittedKeys_.insert(key).second;
+}

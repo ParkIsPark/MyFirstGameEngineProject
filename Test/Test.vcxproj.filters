@@ -76,6 +76,8 @@
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\FTransform.cpp"><Filter>Engine\Rasterizer</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.cpp"><Filter>Engine\Rasterizer</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\FGraphicsCapabilities.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Render\FRenderScene.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Render\FRenderTarget.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\FRenderPipelinePlan.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\UGPUMeshCache.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\URenderer.cpp"><Filter>Engine\Render</Filter></ClCompile>
@@ -187,6 +189,9 @@
     <ClInclude Include="$(EngineRootDir)Engine\Player\UPlayerCharacter.h"><Filter>Engine\Player</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Player\UPlayerController.h"><Filter>Engine\Player</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FGraphicsCapabilities.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderOutputs.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderScene.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderTarget.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FGPUMeshResource.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderFeatures.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderPipelinePlan.h"><Filter>Engine\Render</Filter></ClInclude>

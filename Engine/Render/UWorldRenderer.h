@@ -1,57 +1,63 @@
 #pragma once
-#include "URenderer.h"
-#include "URasterizer.h"
-#include "UMeshRayTracer.h"
-#include "UHybridPass.h"
-#include "UGBuffer.h"
-#include "ThreadPool.h"
-#include "USkyHDRI.h"
-#include "FRenderQuality.h"
-#include "FRenderFeatures.h"
 
+#include "FGraphicsCapabilities.h"
+#include "FRenderFeatures.h"
+#include "FRenderPipelinePlan.h"
+#include "FRenderQuality.h"
+#include "FRenderScene.h"
+#include "FRenderTarget.h"
+
+#include <cstdint>
+#include <memory>
+#include <vector>
+
+class ACamera;
 class UWorld;
 
-// Temporary bridge while the legacy render implementations remain underneath
-// named settings. Normal settings can select only RasterOnly (0) or Hybrid (2).
-namespace RenderCompatibility
+struct FWorldRenderRequest
 {
-    inline int LegacyModeForNamedFeatures(const FRenderFeatures& features)
-    {
-        return features.rayTracing ? 2 : 0;
-    }
-}
+    const FRenderScene& scene;
+    FRenderTarget& target;
+    FRenderFeatures features;
+    FRenderQuality quality;
+    FBackendSelection backendSelection;
+    std::vector<ERenderPass> passPlan;
+};
 
-// ---------------------------------------------------------------------------
-// UWorldRenderer (P9) — renders named world features into the currently bound
-// framebuffer. During migration it owns the legacy passes and routes RT-off to
-// Rasterizer and RT-on to Hybrid; Pure GPU RT is not reachable from normal settings.
-//
-// Raster mode shades to scene.outputImage (URenderer::RasterShaded) then blits
-// with glDrawPixels; the GPU modes draw a fullscreen pass. The caller sets up the
-// world camera (orientation + FOV/aspect) before calling Render().
-// ---------------------------------------------------------------------------
+// Narrow dispatch seam: tests observe one immutable scene extraction and one
+// execution request without OpenGL. The default implementation is the clearly
+// named transitional legacy executor replaced by Tasks 7-10.
+class IWorldRenderExecutor
+{
+public:
+    virtual ~IWorldRenderExecutor() = default;
+    virtual void Init() {}
+    virtual void Shutdown() noexcept {}
+    virtual bool RequiresOpenGLTargetBinding() const { return false; }
+    virtual bool Execute(const FWorldRenderRequest& request) = 0;
+};
+
 class UWorldRenderer
 {
 public:
-    void Init();                                       // compile GPU passes (GL ready)
-    void Render(UWorld& world, const FRenderFeatures& features, int w, int h);
+    UWorldRenderer();
+    explicit UWorldRenderer(std::unique_ptr<IWorldRenderExecutor> executor);
+    ~UWorldRenderer();
+    UWorldRenderer(const UWorldRenderer&) = delete;
+    UWorldRenderer& operator=(const UWorldRenderer&) = delete;
+
+    void Init();
+    void Shutdown() noexcept;
+
+    bool Render(UWorld& world,
+                const ACamera& camera,
+                FRenderTarget& target,
+                const FRenderFeatures& features,
+                const FRenderQuality& quality,
+                const FBackendSelection& backendSelection,
+                std::uint64_t expectedContextGeneration = 0);
 
 private:
-    void renderRaster(UWorld& world, int w, int h);
-    void renderGPU(UWorld& world, int mode, int w, int h);
-
-    URenderer      raster_;       // RasterShaded (mode 0)
-    URasterizer    rast_;         // G-buffer fill (hybrid)
-    UMeshRayTracer worldRT_;      // GPU ray trace (mode 1)
-    UHybridPass    hybrid_;       // hybrid shadow pass (mode 2)
-    UGBuffer       gbuf_;
-    ThreadPool     pool_;
-    USkyHDRI       sky_;
-
-    size_t rtSig_ = 0, hySig_ = 0;
-    bool   rtUp_ = false, hyUp_ = false;
-    bool   ready_ = false;
-
-    FRenderQuality quality_;          // Game render profile (Config/GameSettings.ini)
-    bool   qualityLoaded_ = false;
+    std::unique_ptr<IWorldRenderExecutor> executor_;
+    bool initialized_ = false;
 };

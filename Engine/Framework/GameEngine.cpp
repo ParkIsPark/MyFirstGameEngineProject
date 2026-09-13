@@ -8,10 +8,29 @@
 #include "ACamera.h"
 #include "UPhysicsWorld.h"
 #include "FWorldSerializer.h"
+#include "FIniFile.h"
 
 void GameEngine::OnStartup()
 {
     worldRenderer_.Init();   // compile GPU passes now that GL is ready
+    backbufferTarget_ = FRenderTarget::DefaultFramebuffer(Width(), Height(), ContextGeneration());
+    FIniFile ini;
+    if (ini.LoadFromFile("Config/GameSettings.ini"))
+    {
+        renderQuality_.giSamples      = ini.GetInt  ("Render", "GISamples", renderQuality_.giSamples);
+        renderQuality_.giBounces      = ini.GetInt  ("Render", "GIBounces", renderQuality_.giBounces);
+        renderQuality_.giStrength     = ini.GetFloat("Render", "GIStrength", renderQuality_.giStrength);
+        renderQuality_.reflStrength   = ini.GetFloat("Render", "ReflectionStrength", renderQuality_.reflStrength);
+        renderQuality_.shininess      = ini.GetFloat("Render", "Shininess", renderQuality_.shininess);
+        renderQuality_.shadowSamples  = ini.GetInt  ("Render", "ShadowSamples", renderQuality_.shadowSamples);
+        renderQuality_.shadowSoftness = ini.GetFloat("Render", "ShadowSoftness", renderQuality_.shadowSoftness);
+    }
+}
+
+void GameEngine::OnShutdown()
+{
+    worldRenderer_.Shutdown();
+    backbufferTarget_.Release();
 }
 
 UWorld* GameEngine::WorldSetting()
@@ -50,5 +69,9 @@ void GameEngine::Render()
     cam.SetOrientation(cam.yaw, cam.pitch);
     cam.SetFOV(cam.fov, (float)Width() / (float)Height());
 
-    worldRenderer_.Render(*w, scene.renderFeatures, Width(), Height());
+    if (!backbufferTarget_.Resize(Width(), Height(), ContextGeneration())) return;
+    const FBackendSelection& backend =
+        ResolveRayTracingBackend(scene.renderFeatures.rayTracingBackend);
+    worldRenderer_.Render(*w, cam, backbufferTarget_, scene.renderFeatures,
+                          renderQuality_, backend, ContextGeneration());
 }

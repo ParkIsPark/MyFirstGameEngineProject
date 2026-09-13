@@ -17,4 +17,5 @@ struct FRenderQuality
     float shininess       = 32.0f; // RT specular Phong exponent
     int   shadowSamples   = 1;     // soft-shadow rays per light (1 = hard)
     float shadowSoftness  = 0.05f; // penumbra radius
+    bool  depthView       = false; // editor-only visualization, explicit per request
 };

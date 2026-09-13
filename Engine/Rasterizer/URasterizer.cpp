@@ -142,7 +142,9 @@ void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
 {
     const glm::mat3 nrmM = glm::inverseTranspose(glm::mat3(xf.model));
     const int nTri = mesh.triangleCount();
-    const bool textured = mat && !mat->texData.empty();
+    const Material* currentMaterial = mat;
+    glm::vec3 currentAlbedo = albedo;
+    bool textured = false;
 
     // Tile bounds (clamped to the G-buffer). A multithreaded fill gives each tile
     // a disjoint pixel rect so TestAndSet never races.
@@ -189,11 +191,11 @@ void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
             const glm::vec3 wp = (al * A.wp * iw0 + be * B.wp * iw1 + ga * C.wp * iw2) / pw;
             const glm::vec3 wn = glm::normalize(
                                  (al * A.wn * iw0 + be * B.wn * iw1 + ga * C.wn * iw2) / pw);
-            glm::vec3 alb = albedo;
+            glm::vec3 alb = currentAlbedo;
             if (textured)
             {
                 const glm::vec2 uv = (al * A.uv * iw0 + be * B.uv * iw1 + ga * C.uv * iw2) / pw;
-                alb = mat->SampleDiffuse(uv * uvScale);
+                alb = currentMaterial->SampleDiffuse(uv * uvScale);
             }
             gb.TestAndSet(x, y, z, wp, wn, alb);
         }
@@ -202,6 +204,9 @@ void URasterizer::DrawMeshGBuffer(const UMesh& mesh, const FTransform& xf,
     for (int tri = 0; tri < nTri; ++tri)
     {
         if (countStats) ++stats.trianglesIn;
+        currentMaterial = mat ? mat : &mesh.materialForTri(tri);
+        currentAlbedo = mat ? albedo : currentMaterial->kd;
+        textured = !currentMaterial->texData.empty();
         const Vertex& a = mesh.vertices[mesh.indices[3 * tri + 0]];
         const Vertex& b = mesh.vertices[mesh.indices[3 * tri + 1]];
         const Vertex& c = mesh.vertices[mesh.indices[3 * tri + 2]];

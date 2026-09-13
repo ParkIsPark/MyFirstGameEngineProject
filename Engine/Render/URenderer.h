@@ -11,6 +11,7 @@ class UWorld;
 class UScene;
 class ACamera;
 class USkyHDRI;
+struct FRenderScene;
 
 // Top-level render mode. CPU-only ray tracing was removed (page 1), so the
 // modes are: rasterizer (CPU primary visibility), pure GPU ray trace, and the
@@ -39,6 +40,11 @@ public:
     // flag's shading model (Flat/Gouraud/Phong) + Blinn-Phong + gamma, writing
     // scene.outputImage. depthView -> grayscale depth instead.
     void RasterShaded(UWorld& world, const FRenderShowFlag& flag, const USkyHDRI* sky = nullptr);
+    // Narrow compatibility sink used only by FLegacyWorldRenderExecutor. The
+    // common request remains a value snapshot and never exposes UScene/world.
+    const std::vector<float>& RasterShadedLegacyOutput(
+        const FRenderScene& renderScene, int width, int height,
+        const FRenderShowFlag& flag, const USkyHDRI* sky = nullptr);
 
     // Last executed plan, for logging / dispatch tests.
     const std::vector<ERenderStage>& LastPlan() const { return lastPlan_; }
@@ -57,6 +63,7 @@ private:
     UGBuffer     gbuffer_;
     ThreadPool   pool_;                       // worker pool for the lit shading pass
     std::vector<UFrameBuffer> rasterParts_;   // per-thread targets for parallel RasterShaded
+    std::vector<float> legacyOutputImage_;
     std::vector<ERenderStage> lastPlan_;
 
 public:

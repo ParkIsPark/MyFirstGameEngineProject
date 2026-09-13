@@ -80,6 +80,8 @@
     <ClCompile Include="Engine\Rasterizer\URasterizer.cpp" />
     <!-- Engine: Render -->
     <ClCompile Include="Engine\Render\FGraphicsCapabilities.cpp" />
+    <ClCompile Include="Engine\Render\FRenderScene.cpp" />
+    <ClCompile Include="Engine\Render\FRenderTarget.cpp" />
     <ClCompile Include="Engine\Render\FRenderPipelinePlan.cpp" />
     <ClCompile Include="Engine\Render\UGPUMeshCache.cpp" />
     <ClCompile Include="Engine\Render\URenderer.cpp" />
@@ -195,6 +197,9 @@
     <ClInclude Include="Engine\Rasterizer\UGBuffer.h" />
     <!-- Engine: Render headers -->
     <ClInclude Include="Engine\Render\FGraphicsCapabilities.h" />
+    <ClInclude Include="Engine\Render\FRenderOutputs.h" />
+    <ClInclude Include="Engine\Render\FRenderScene.h" />
+    <ClInclude Include="Engine\Render\FRenderTarget.h" />
     <ClInclude Include="Engine\Render\FGPUMeshResource.h" />
     <ClInclude Include="Engine\Render\FRenderFeatures.h" />
     <ClInclude Include="Engine\Render\FRenderPipelinePlan.h" />

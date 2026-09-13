@@ -1,15 +1,8 @@
 #pragma once
 #include "Engine.h"
 #include "UWorld.h"
-#include "URenderer.h"
-#include "UMeshRayTracer.h"
-#include "UHybridPass.h"
-#include "UGBuffer.h"
-#include "URasterizer.h"
-#include "USkyHDRI.h"
 #include "FRenderQuality.h"
 #include "UWorldRenderer.h"
-#include "ThreadPool.h"
 #include "BuildManager.h"
 #include "FEditorAssetWorkflow.h"
 
@@ -97,9 +90,6 @@ private:
     // Re-parent an actor in the scene graph (outliner drag-drop). Keeps the child's
     // world position; parent==nullptr detaches to the world root. Rejects cycles.
     void SetActorParent(AActor* child, AActor* parent);
-    void EnsureViewportTex(int w, int h);
-    void EnsureFBO(int w, int h);                 // FBO for the GPU render modes
-    void RenderWorldGPU(int w, int h, int mode);  // mode 1=GPU RT, 2=Hybrid -> fbo_
     void UpdateEditorCamera(int w, int h);   // RMB-fly + WASD (when viewport active)
     void PickActor(int w, int h);            // left-click ray pick
     void FocusActor(int idx);                // frame the editor camera on an actor
@@ -138,7 +128,8 @@ private:
     UWorld*   editorWorld_ = nullptr;   // the live edited world (replaceable: New/Load)
     UWorld*   pieWorld_    = nullptr;    // spawned on Play (deep copy of editorWorld_)
     AActor*   clipboard_   = nullptr;    // Ctrl+C/Ctrl+V actor clipboard (a clone)
-    URenderer renderer_;
+    UWorldRenderer worldRenderer_;
+    FRenderTarget viewportTarget_;
 
     std::vector<UMesh*>      meshAssets_;   // owned shared mesh assets
     std::vector<std::string> actorNames_;   // parallel to scene.Actors
@@ -149,29 +140,6 @@ private:
     int  cbRename_ = -1;                     // content entry index being renamed (-1 none)
     char cbBuf_[128] = {};                   // rename / import-path text buffer
     std::string scriptValidation_;           // most recent Script Details validation
-
-    unsigned int vpTex_  = 0;    // viewport texture (CPU outputImage upload, raster)
-    int          vpTexW_ = 0;
-    int          vpTexH_ = 0;
-
-    // GPU render modes (PIE): render the world into this FBO, then ImGui::Image it
-    UMeshRayTracer worldRT_;     // GPU RT play mode
-    UHybridPass    hybrid_;      // Hybrid play mode (G-buffer + shadow)
-    URasterizer    rast_;        // builds the hybrid G-buffer
-    UGBuffer       gbuf_;
-    ThreadPool     pool_;        // tile-parallel G-buffer fill (hybrid mode)
-    USkyHDRI       sky_;         // equirect HDRI for GPU sky/ambient
-
-    // Geometry-upload cache. The BVH + triangle TBOs depend only on the scene
-    // geometry (mesh identity + world transform + albedo), NOT the camera, so we
-    // rebuild/upload them only when that signature changes -- not every frame.
-    // (The hybrid G-buffer raster + upload is camera-dependent and still runs
-    // each frame; only its shadow-ray BVH is cached here.)
-    size_t rtUploadSig_     = 0;  bool rtUploaded_     = false;  // GPU RT mode
-    size_t hybridUploadSig_ = 0;  bool hybridUploaded_ = false;  // Hybrid mode
-    unsigned int   fbo_ = 0, fboTex_ = 0, fboDepth_ = 0;
-    int            fboW_ = 0, fboH_ = 0;
-    bool           gpuReady_ = false;
 
     // editor fly-camera state (applied to editorWorld_'s camera each frame)
     glm::vec3 camEye_   = glm::vec3(0.0f, 0.0f, 0.0f);

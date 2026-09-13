@@ -19,10 +19,13 @@ public:
 
 protected:
     void    OnStartup() override;     // init the world renderer (GPU passes)
+    void    OnShutdown() override;
     UWorld* WorldSetting() override;  // load worldPath_ (.world) -> UWorld
     void    Render() override;        // render per the world's render mode
 
 private:
     std::string    worldPath_;
     UWorldRenderer worldRenderer_;
+    FRenderTarget  backbufferTarget_;
+    FRenderQuality renderQuality_;
 };

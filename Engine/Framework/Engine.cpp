@@ -2,9 +2,11 @@
 #include "UWorld.h"
 #include "FWorldSerializer.h"
 #include "../Script/UScriptSubsystem.h"
+#include "FRenderTarget.h"
 
 #include <iostream>
 #include <filesystem>
+#include <cstdint>
 #include <GL/glew.h>
 
 #define GLFW_INCLUDE_GLU
@@ -13,6 +15,14 @@
 
 namespace
 {
+std::uint64_t NextContextGeneration()
+{
+    static std::uint64_t generation = 0;
+    ++generation;
+    if (generation == 0) ++generation;
+    return generation;
+}
+
 GLFWwindow* CreateCompatibilityWindow(int major,
                                       int minor,
                                       int width,
@@ -81,7 +91,7 @@ bool Engine::Init(int width, int height, const char* title)
     height_ = height;
 
     cleanupGraphics();
-    backendWarningEmitted_ = false;
+    backendWarnings_.Reset();
 
     if (!glfwInit())
     {
@@ -126,6 +136,8 @@ bool Engine::Init(int width, int height, const char* title)
         cleanupGraphics();
         return false;
     }
+    contextGeneration_ = NextContextGeneration();
+    SetActiveRenderTargetContextGeneration(contextGeneration_);
     backendSelection_ = SelectRayTracingBackend(
         proj_.defaultRenderFeatures.rayTracingBackend, graphicsCapabilities_);
     std::cout << "[Engine] OpenGL " << graphicsCapabilities_.major << "."
@@ -142,6 +154,7 @@ bool Engine::Init(int width, int height, const char* title)
 
 void Engine::cleanupGraphics()
 {
+    SetActiveRenderTargetContextGeneration(0);
     if (window_)
     {
         glfwDestroyWindow(window_);
@@ -154,24 +167,38 @@ void Engine::cleanupGraphics()
     }
     graphicsCapabilities_ = FGraphicsCapabilities{};
     backendSelection_ = FBackendSelection{};
+    contextGeneration_ = 0;
 }
 
 void Engine::resolveRayTracingBackend()
 {
-    backendSelection_ = SelectRayTracingBackend(
-        proj_.defaultRenderFeatures.rayTracingBackend, graphicsCapabilities_);
+    ResolveRayTracingBackend(proj_.defaultRenderFeatures.rayTracingBackend);
+}
 
-    std::cout << "[Engine] ray backend requested="
-              << FProjectDescriptor::RayTracingBackendName(backendSelection_.requested)
-              << " selected="
-              << FProjectDescriptor::RayTracingBackendName(backendSelection_.selected)
-              << " available=" << (backendSelection_.available ? "yes" : "no") << "\n";
+const FBackendSelection& Engine::ResolveRayTracingBackend(ERayTracingBackend requested)
+{
+    const FBackendSelection next = SelectRayTracingBackend(requested, graphicsCapabilities_);
+    const bool changed = next.requested != backendSelection_.requested ||
+        next.selected != backendSelection_.selected ||
+        next.available != backendSelection_.available ||
+        next.rayTracingEnabled != backendSelection_.rayTracingEnabled ||
+        next.fallbackReason != backendSelection_.fallbackReason;
+    backendSelection_ = next;
 
-    if (!backendSelection_.fallbackReason.empty() && !backendWarningEmitted_)
+    if (changed)
+    {
+        std::cout << "[Engine] ray backend requested="
+                  << FProjectDescriptor::RayTracingBackendName(backendSelection_.requested)
+                  << " selected="
+                  << FProjectDescriptor::RayTracingBackendName(backendSelection_.selected)
+                  << " available=" << (backendSelection_.available ? "yes" : "no") << "\n";
+    }
+
+    if (backendWarnings_.ShouldEmit(backendSelection_))
     {
         std::cerr << "[Engine] warning: " << backendSelection_.fallbackReason << "\n";
-        backendWarningEmitted_ = true;
     }
+    return backendSelection_;
 }
 
 bool Engine::KeyDown(int glfwKey) const

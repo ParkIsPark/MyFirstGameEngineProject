@@ -14,7 +14,6 @@
 #include <glm/gtc/type_ptr.hpp>
 #include "UMesh.h"
 #include "UMaterial.h"
-#include "FTransform.h"
 #include "UMeshComponent.h"
 #include "AActor.h"
 #include "ACamera.h"
@@ -29,7 +28,6 @@
 #include "EnvironmentLightComponent.h"
 #include "LightComponent.h"
 #include "FWorldSerializer.h"
-#include "FRenderShowFlag.h"
 #include "UObjImporter.h"
 #include "UFbxImporter.h"
 #include "FFileDialog.h"
@@ -87,6 +85,8 @@ namespace {
 EditorEngine::~EditorEngine()
 {
     OnStop();
+    worldRenderer_.Shutdown();
+    viewportTarget_.Release();
     if (imguiReady_)
     {
         ImGui_ImplOpenGL3_Shutdown();
@@ -99,17 +99,6 @@ EditorEngine::~EditorEngine()
     delete clipboard_;
     delete editorWorld_;
     for (UMesh* m : meshAssets_) delete m;   // UScene dtor deletes the actors
-}
-
-// The sky HDRI actually used: an Environment Light's actor-placed image wins over
-// the global UScene::skyHDRI (empty -> procedural gradient).
-static std::string EffectiveSkyPath(UWorld& w)
-{
-    for (AActor* a : w.GetScene().Actors)
-        if (ALight* L = dynamic_cast<ALight*>(a))
-            if (auto* el = dynamic_cast<EnvironmentLightComponent*>(L->lightComp))
-                if (!el->skyTexPath.empty()) return el->skyTexPath;
-    return w.GetScene().skyHDRI;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,8 +201,6 @@ void EditorEngine::SetEditorWorld(UWorld* w, const std::string& name)
     camYaw_   = cam.yaw;
     camPitch_ = cam.pitch;
 
-    // Geometry changed -> invalidate the GPU upload caches (RT / Hybrid).
-    rtUploaded_ = false; hybridUploaded_ = false;
 }
 
 void EditorEngine::ClearHistory()
@@ -357,7 +344,6 @@ void EditorEngine::PasteClipboard()
     editorWorld_->Spawn(a);
     actorNames_.push_back(a->name.empty() ? "Actor" : a->name);
     selected_ = (int)editorWorld_->GetScene().Actors.size() - 1;
-    rtUploaded_ = false; hybridUploaded_ = false;
 }
 
 void EditorEngine::DeleteSelected()
@@ -369,7 +355,6 @@ void EditorEngine::DeleteSelected()
     actors.erase(actors.begin() + selected_);
     actorNames_.erase(actorNames_.begin() + selected_);
     if (selected_ >= (int)actors.size()) selected_ = (int)actors.size() - 1;
-    rtUploaded_ = false; hybridUploaded_ = false;
 }
 
 void EditorEngine::ImportAsset(const std::string& path)
@@ -556,7 +541,12 @@ void EditorEngine::OnPlay()
     playing_ = true;
 }
 
-void EditorEngine::OnShutdown() { OnStop(); }
+void EditorEngine::OnShutdown()
+{
+    OnStop();
+    worldRenderer_.Shutdown();
+    viewportTarget_.Release();
+}
 
 void EditorEngine::OnStop()
 {
@@ -588,9 +578,7 @@ void EditorEngine::OnStartup()
     ImGui_ImplOpenGL3_Init("#version 330");
     imguiReady_ = true;
 
-    worldRT_.Init();           // GPU ray tracer (PIE: GPU RT mode)
-    hybrid_.Init();            // hybrid shadow pass (PIE: Hybrid mode)
-    gpuReady_ = true;
+    worldRenderer_.Init();
 
     LoadRenderSettings();
     editorWorld_ = new UWorld();
@@ -614,170 +602,6 @@ void EditorEngine::dropTrampoline(GLFWwindow* win, int count, const char** paths
     auto* self = static_cast<EditorEngine*>(glfwGetWindowUserPointer(win));
     if (!self) return;
     for (int i = 0; i < count; ++i) self->ImportAsset(paths[i]);
-}
-
-void EditorEngine::EnsureFBO(int w, int h)
-{
-    if (w == fboW_ && h == fboH_ && fbo_) return;
-    fboW_ = w; fboH_ = h;
-    if (!fbo_)      glGenFramebuffers(1, &fbo_);
-    if (!fboTex_)   glGenTextures(1, &fboTex_);
-    if (!fboDepth_) glGenRenderbuffers(1, &fboDepth_);
-    glBindTexture(GL_TEXTURE_2D, fboTex_);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindRenderbuffer(GL_RENDERBUFFER, fboDepth_);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fboTex_, 0);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, fboDepth_);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-}
-
-void EditorEngine::RenderWorldGPU(int w, int h, int mode)
-{
-    UWorld& world  = ActiveWorld();
-    UScene& scene  = world.GetScene();
-    ACamera& cam   = world.GetCamera();
-
-    // Gather the world's mesh instances (+ per-instance albedo) and every light.
-    std::vector<const UMesh*> meshes;
-    std::vector<glm::mat4>    models;
-    std::vector<glm::vec3>    albedos;
-    std::vector<float>        mirrors;
-    std::vector<const Material*> mats;
-    std::vector<glm::vec2>    uvTilings;
-    std::vector<glm::vec3>    lightPos, lightColor;
-    for (AActor* a : scene.Actors)
-    {
-        if (UMeshComponent* mc = a->mesh)
-            if (mc->mesh)
-            {
-                meshes.push_back(mc->mesh);
-                models.push_back(mc->GetWorldMatrix());
-                const Material& mat = mc->GetMaterial();   // shared asset > override > mesh default
-                albedos.push_back(mat.kd);
-                mirrors.push_back(glm::max(mat.km.x, glm::max(mat.km.y, mat.km.z)));
-                mats.push_back(&mat);
-                uvTilings.push_back(mc->uvTiling);
-            }
-        if (ALight* L = dynamic_cast<ALight*>(a))
-            if (PointLightComponent* pl = dynamic_cast<PointLightComponent*>(L->lightComp))
-            { lightPos.push_back(pl->GetWorldLocation()); lightColor.push_back(pl->LightColor * pl->LightIntensity); }
-    }
-    if (lightPos.empty()) { lightPos = { glm::vec3(6, 8, 2) }; lightColor = { glm::vec3(1.0f) }; }
-
-    // Signature of the scene GEOMETRY (mesh identity + world transform + albedo).
-    // O(numMeshes), independent of resolution/camera. When it is unchanged the
-    // BVH + triangle TBOs from last frame are still valid, so we skip the rebuild.
-    size_t geomSig = 1469598103934665603ull;             // FNV-1a 64
-    {
-        auto mix = [&](const void* p, size_t n) {
-            const unsigned char* b = static_cast<const unsigned char*>(p);
-            for (size_t i = 0; i < n; ++i) { geomSig ^= b[i]; geomSig *= 1099511628211ull; }
-        };
-        for (size_t i = 0; i < meshes.size(); ++i)
-        { mix(&meshes[i], sizeof(meshes[i])); mix(&models[i], sizeof(glm::mat4)); mix(&albedos[i], sizeof(glm::vec3)); mix(&mirrors[i], sizeof(float));
-          size_t ts = mats[i] ? mats[i]->texData.size() : 0; mix(&ts, sizeof(ts)); }
-    }
-
-    const unsigned int skyTex = sky_.GetOrLoad(EffectiveSkyPath(world));   // env-light HDRI or global sky
-
-    // Environment light -> hemisphere GI + sky gradient (drives both GPU passes).
-    const FRenderQuality& rs = activeRS();                 // Editor vs Game profile
-    int giN = 0;
-    glm::vec3 envTint(1.0f), horizon(0.10f, 0.12f, 0.16f), zenith(0.40f, 0.55f, 0.80f);
-    float skyExp = 1.0f;
-    for (AActor* a : scene.Actors)
-        if (ALight* L = dynamic_cast<ALight*>(a))
-            if (auto* el = dynamic_cast<EnvironmentLightComponent*>(L->lightComp))
-            { giN = rs.giSamples; envTint = el->LightColor * el->LightIntensity; horizon = el->horizonColor;
-              zenith = el->zenithColor; skyExp = el->skyExp; break; }
-    envTint *= rs.giStrength;                              // GI brightness (render setting)
-    worldRT_.SetGI(giN, envTint, horizon, zenith, skyExp, rs.giBounces);
-    hybrid_.SetGI(giN, envTint, horizon, zenith, skyExp, rs.giBounces);
-    worldRT_.SetQuality(rs.reflStrength, rs.shininess);    // reflection multiplier + RT shininess
-    hybrid_.SetQuality(rs.shininess);
-    worldRT_.SetShadow(rs.shadowSamples, rs.shadowSoftness);   // soft-shadow quality
-    hybrid_.SetShadow(rs.shadowSamples, rs.shadowSoftness);
-
-    EnsureFBO(w, h);
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
-    glViewport(0, 0, w, h);
-    glClearColor(0.10f, 0.11f, 0.13f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    if (mode == 1)                                   // GPU RT
-    {
-        if (!rtUploaded_ || geomSig != rtUploadSig_)   // skip when geometry static
-        {
-            worldRT_.UploadWorld(meshes, models, albedos, lightPos[0], lightColor[0], mirrors, mats, uvTilings);
-            rtUploadSig_ = geomSig; rtUploaded_ = true;
-        }
-        worldRT_.SetLights(lightPos, lightColor);    // all lights may move without geometry
-        worldRT_.SetSky(skyTex);
-        worldRT_.RenderFrame(cam, w, h);             // camera/light uniforms each frame
-    }
-    else                                             // Hybrid: CPU G-buffer + GPU shadow
-    {
-        gbuf_.Init(w, h); gbuf_.Clear();
-
-        // Per-instance transform (camera-dependent -> rebuilt every frame).
-        std::vector<FTransform> xfs(meshes.size());
-        for (size_t i = 0; i < meshes.size(); ++i)
-        {
-            xfs[i].model    = models[i];
-            xfs[i].view     = FTransform::MakeView(cam);
-            xfs[i].proj     = FTransform::MakeProjFCG(cam.l, cam.r, cam.b, cam.t, -cam.d, -1000.0f);
-            xfs[i].viewport = FTransform::MakeViewport(w, h);
-        }
-
-        // Shadow-ray geometry (world-space tris + BVH) depends only on geometry,
-        // so flatten + upload it only when the signature changes -- not per frame.
-        if (!hybridUploaded_ || geomSig != hybridUploadSig_)
-        {
-            std::vector<glm::vec3> tris;
-            for (size_t i = 0; i < meshes.size(); ++i)
-            {
-                const int nt = meshes[i]->triangleCount();
-                for (int t = 0; t < nt; ++t)
-                    for (int k = 0; k < 3; ++k)
-                        tris.push_back(glm::vec3(models[i] * glm::vec4(meshes[i]->vertices[meshes[i]->indices[3*t+k]].position, 1.0f)));
-            }
-            hybrid_.UploadSceneTriangles(tris);
-            hybridUploadSig_ = geomSig; hybridUploaded_ = true;
-        }
-
-        // RASTER fills the G-buffer (primary visibility), parallelized over screen
-        // tiles. Each tile owns a disjoint pixel rect, so the per-pixel depth test
-        // + write never races -- no locks needed. Triangle setup is redundant per
-        // tile but cheap next to the pixel work.
-        const int TILE = 64;
-        const int ntx  = (w + TILE - 1) / TILE;
-        const int nty  = (h + TILE - 1) / TILE;
-        const int nTiles = ntx * nty;
-        pool_.ParallelForChunks(nTiles, [&](int begin, int end)
-        {
-            for (int tile = begin; tile < end; ++tile)
-            {
-                const int tx = tile % ntx, ty = tile / ntx;
-                const int cx0 = tx * TILE, cy0 = ty * TILE;
-                const int cx1 = std::min(cx0 + TILE - 1, w - 1);
-                const int cy1 = std::min(cy0 + TILE - 1, h - 1);
-                for (size_t i = 0; i < meshes.size(); ++i)
-                    rast_.DrawMeshGBuffer(*meshes[i], xfs[i], albedos[i], gbuf_,
-                                          cx0, cy0, cx1, cy1, /*countStats=*/false, mats[i], uvTilings[i]);
-            }
-        });
-
-        hybrid_.SetSky(skyTex);
-        hybrid_.UploadGBuffer(gbuf_);                // camera-dependent -> every frame
-        hybrid_.Render(cam, lightPos, lightColor, w, h);
-    }
-
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(0, 0, Width(), Height());
 }
 
 void EditorEngine::ScanContent()
@@ -876,7 +700,6 @@ void EditorEngine::SetActorParent(AActor* child, AActor* parent)
     else
         rc.relLocation = worldPos;
     rc.MarkDirty();
-    rtUploaded_ = false; hybridUploaded_ = false;
 }
 
 void EditorEngine::Render()
@@ -1299,7 +1122,6 @@ void EditorEngine::ApplyMaterialToSelected(const std::string& path)
     PushUndo();
     mc->materialRef = path;
     mc->sharedMaterial = UMaterial::Resolve(path);
-    rtUploaded_ = false; hybridUploaded_ = false;
 }
 
 // Shared kd/ks/shininess/mirror/texture widgets (Details + Material Editor).
@@ -1421,7 +1243,7 @@ void EditorEngine::DrawMaterialEditor()
             const bool ch = DrawMaterialFields(*m);
             ImGui::Separator();
             if (ImGui::Button("Save to .material")) matEditPath_ = SaveMaterialAsset(matEditPath_, *m);
-            if (ch) { rtUploaded_ = false; hybridUploaded_ = false; }   // live preview
+            (void)ch; // shared renderer extracts live material values each frame
         }
     }
     ImGui::End();
@@ -1618,7 +1440,6 @@ void EditorEngine::DrawOutliner()
         actors.erase(actors.begin() + toDelete);
         actorNames_.erase(actorNames_.begin() + toDelete);
         if (selected_ >= (int)actors.size()) selected_ = (int)actors.size() - 1;
-        rtUploaded_ = false; hybridUploaded_ = false;   // geometry changed
     }
 }
 
@@ -1716,7 +1537,6 @@ void EditorEngine::DrawDetails()
                     std::snprintf(buf, sizeof(buf), "Sphere %g %d %d", r, sw, sh);
                     mc->meshRef = buf;
                     mc->mesh = UMesh::Resolve(buf);            // cached generate/share
-                    rtUploaded_ = false; hybridUploaded_ = false;
                 }
             }
             else if (kind == "Cube")
@@ -1741,7 +1561,7 @@ void EditorEngine::DrawDetails()
             {
                 std::string p = CopyToContent(std::string((const char*)pl->Data));
                 if (UMesh* nm = LoadMeshFile(p))
-                { PushUndo(); mc->mesh = nm; mc->meshRef = p; content_.clear(); ScanContent(); rtUploaded_ = false; hybridUploaded_ = false; }
+                { PushUndo(); mc->mesh = nm; mc->meshRef = p; content_.clear(); ScanContent(); }
             }
             ImGui::EndDragDropTarget();
         }
@@ -1752,7 +1572,7 @@ void EditorEngine::DrawDetails()
             {
                 p = CopyToContent(p);
                 if (UMesh* nm = LoadMeshFile(p))
-                { PushUndo(); mc->mesh = nm; mc->meshRef = p; content_.clear(); ScanContent(); rtUploaded_ = false; hybridUploaded_ = false; }
+                { PushUndo(); mc->mesh = nm; mc->meshRef = p; content_.clear(); ScanContent(); }
             }
         }
         if (mc->mesh)
@@ -1766,7 +1586,7 @@ void EditorEngine::DrawDetails()
             {
                 if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_MAT"))
                 { PushUndo(); mc->materialRef = std::string((const char*)pl->Data);
-                  mc->sharedMaterial = UMaterial::Resolve(mc->materialRef); rtUploaded_ = false; hybridUploaded_ = false; }
+                  mc->sharedMaterial = UMaterial::Resolve(mc->materialRef); }
                 ImGui::EndDragDropTarget();
             }
             if (ImGui::IsItemClicked()) ImGui::OpenPopup("PickMat");
@@ -1778,7 +1598,7 @@ void EditorEngine::DrawDetails()
                     { const std::string label = e.relativePath.generic_string();
                       any = true; if (ImGui::MenuItem(label.c_str()))
                         { PushUndo(); mc->materialRef = ResolveEditorContentPath(contentDir_, e).string();
-                          mc->sharedMaterial = UMaterial::Resolve(mc->materialRef); rtUploaded_ = false; hybridUploaded_ = false; } }
+                          mc->sharedMaterial = UMaterial::Resolve(mc->materialRef); } }
                 if (!any) ImGui::TextDisabled("(no .material in Content/)");
                 ImGui::EndPopup();
             }
@@ -1786,20 +1606,20 @@ void EditorEngine::DrawDetails()
             {
                 ImGui::SameLine(); if (ImGui::SmallButton("Edit")) { matEditPath_ = mc->materialRef; showMatEditor_ = true; }
                 ImGui::SameLine(); if (ImGui::SmallButton("Clear"))
-                { PushUndo(); mc->materialRef.clear(); mc->sharedMaterial = nullptr; rtUploaded_ = false; hybridUploaded_ = false; }
+                { PushUndo(); mc->materialRef.clear(); mc->sharedMaterial = nullptr; }
             }
 
             // Per-instance texture repeat (this object only, not the shared material).
             glm::vec2 tiling = mc->uvTiling;
             if (ImGui::DragFloat2("Texture Tiling", &tiling.x, 0.05f, 0.01f, 256.0f))
-            { mc->uvTiling = tiling; rtUploaded_ = false; hybridUploaded_ = false; }   // refresh GPU instance/G-buffer
+            { mc->uvTiling = tiling; }
             snap();
             ImGui::Separator();
 
             if (mc->sharedMaterial)   // editing the shared asset -> affects every user
             {
                 ImGui::TextColored(ImVec4(0.7f, 0.8f, 0.9f, 1), "Shared asset -- edits affect all users.");
-                if (DrawMaterialFields(*mc->sharedMaterial)) { rtUploaded_ = false; hybridUploaded_ = false; }
+                DrawMaterialFields(*mc->sharedMaterial);
                 if (ImGui::Button("Save to .material"))
                 { mc->materialRef = SaveMaterialAsset(mc->materialRef, *mc->sharedMaterial);
                   mc->sharedMaterial = UMaterial::Resolve(mc->materialRef); }
@@ -1893,14 +1713,12 @@ void EditorEngine::DrawDetails()
             ImGui::SeparatorText("Time of Day (sun position)");
             float tod = el->timeOfDay;
             if (ImGui::SliderFloat("Hour (0=night 12=noon 24=night)", &tod, 0.0f, 24.0f, "%.1f h"))
-            { el->timeOfDay = tod; EnvironmentLightComponent::applyTimeOfDay(*el, tod);
-              rtUploaded_ = false; hybridUploaded_ = false; }
+            { el->timeOfDay = tod; EnvironmentLightComponent::applyTimeOfDay(*el, tod); }
             snap();
             auto preset = [&](const char* label, float h)
             {
                 if (ImGui::SmallButton(label))
-                { PushUndo(); el->timeOfDay = h; EnvironmentLightComponent::applyTimeOfDay(*el, h);
-                  rtUploaded_ = false; hybridUploaded_ = false; }
+                { PushUndo(); el->timeOfDay = h; EnvironmentLightComponent::applyTimeOfDay(*el, h); }
             };
             preset("Sunrise", 7.0f);  ImGui::SameLine();
             preset("Noon",   12.0f);  ImGui::SameLine();
@@ -2014,18 +1832,6 @@ void EditorEngine::DrawDetails()
     ImGui::EndDisabled();
 }
 
-void EditorEngine::EnsureViewportTex(int w, int h)
-{
-    if (w == vpTexW_ && h == vpTexH_ && vpTex_) return;
-    vpTexW_ = w; vpTexH_ = h;
-    if (!vpTex_) glGenTextures(1, &vpTex_);
-    glBindTexture(GL_TEXTURE_2D, vpTex_);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, w, h, 0, GL_RGB, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindTexture(GL_TEXTURE_2D, 0);
-}
-
 void EditorEngine::DrawViewport()
 {
     const FRenderFeatures& viewportFeatures = ActiveWorld().GetScene().renderFeatures;
@@ -2047,10 +1853,6 @@ void EditorEngine::DrawViewport()
     cam.SetOrientation(camYaw_, camPitch_);
     cam.SetFOV(60.0f, (float)w / (float)h);
 
-    // Named RT-off routes to legacy raster and RT-on to legacy Hybrid until the
-    // shared hardware renderer replaces this compatibility bridge.
-    const int effMode = RenderCompatibility::LegacyModeForNamedFeatures(world.GetScene().renderFeatures);
-
     // Super-sample AA: render at ssaa_x resolution; the LINEAR-filtered Image draws
     // it back at screen size (downscale = antialiasing). UI/picking use screen w/h.
     int rw = w * activeRS().ssaa, rh = h * activeRS().ssaa;
@@ -2062,40 +1864,27 @@ void EditorEngine::DrawViewport()
     // (e.g. to switch worlds) miss its timing while single-click menus still work.
     // The linear-filtered Image upscales the capped buffer back to the viewport.
     // (PIE / standalone game keep full resolution; GPU modes are not pixel-bound.)
-    if (effMode == 0 && !playing_)
+    if (!world.GetScene().renderFeatures.rayTracing && !playing_)
     {
         const int CAP = 960;
         const int m = std::max(rw, rh);
         if (m > CAP) { rw = std::max(1, rw * CAP / m); rh = std::max(1, rh * CAP / m); }
     }
 
-    bool shown = false;
-    if (effMode == 0)                                  // CPU lit rasterizer -> texture
-    {
-        UScene& scene = world.GetScene();
-        scene.width = rw; scene.height = rh;
-        FRenderShowFlag flag;
-        flag.shading         = (EShadingModel)scene.shadingModel;   // Flat/Gouraud/Phong (HW6)
-        flag.depthView       = depthView_;
-        flag.ambientStrength = activeRS().ambientStrength;
-        sky_.GetOrLoad(EffectiveSkyPath(world));        // env-light HDRI or global sky
-        renderer_.RasterShaded(world, flag, &sky_);   // editor sky for the raster background
-        if (!scene.outputImage.empty())
-        {
-            EnsureViewportTex(rw, rh);
-            glBindTexture(GL_TEXTURE_2D, vpTex_);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, rw, rh, GL_RGB, GL_FLOAT, scene.outputImage.data());
-            glBindTexture(GL_TEXTURE_2D, 0);
-            ImGui::Image((ImTextureID)(intptr_t)vpTex_, avail, ImVec2(0, 1), ImVec2(1, 0));
-            shown = true;
-        }
-    }
-    else                                               // GPU RT / Hybrid -> FBO
-    {
-        RenderWorldGPU(rw, rh, effMode);
-        ImGui::Image((ImTextureID)(intptr_t)fboTex_, avail, ImVec2(0, 1), ImVec2(1, 0));
-        shown = true;
-    }
+    if (viewportTarget_.Kind() != ERenderTargetKind::TextureViewport ||
+        !viewportTarget_.Resize(rw, rh, ContextGeneration()))
+        viewportTarget_ = FRenderTarget::TextureViewport(rw, rh, ContextGeneration());
+
+    FRenderQuality frameQuality = activeRS();
+    frameQuality.depthView = depthView_;
+    const FBackendSelection& backend =
+        ResolveRayTracingBackend(world.GetScene().renderFeatures.rayTracingBackend);
+    const bool shown = worldRenderer_.Render(
+        world, cam, viewportTarget_, world.GetScene().renderFeatures,
+        frameQuality, backend, ContextGeneration());
+    if (shown)
+        ImGui::Image((ImTextureID)(intptr_t)viewportTarget_.ColorTexture(),
+                     avail, ImVec2(0, 1), ImVec2(1, 0));
 
     // Content Browser -> viewport drops: a mesh spawns a new actor; a material is
     // applied to the actor under the cursor (ray-picked at the drop point).
@@ -2159,7 +1948,6 @@ void EditorEngine::DrawViewport()
                 a->SetActorLocation(t);
                 a->SetActorRotation(r);
                 a->SetActorScale(s);
-                rtUploaded_ = false; hybridUploaded_ = false;   // geometry moved
             }
             gizmoBusy = ImGuizmo::IsOver() || ImGuizmo::IsUsing();
         }

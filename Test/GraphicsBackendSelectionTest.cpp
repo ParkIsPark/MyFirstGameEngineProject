@@ -224,6 +224,26 @@ void CheckSelectionIsDeterministic()
     assert(first.rayTracingEnabled == second.rayTracingEnabled);
     assert(first.fallbackReason == second.fallbackReason);
 }
+
+void CheckWarningDedupeDistinguishesRequestAndReason()
+{
+    const FGraphicsCapabilities capabilities = Capabilities(3, 3);
+    FBackendWarningDeduplicator warnings;
+
+    const FBackendSelection automatic =
+        SelectRayTracingBackend(ERayTracingBackend::Auto, capabilities);
+    const FBackendSelection forced =
+        SelectRayTracingBackend(ERayTracingBackend::ComputeGL43, capabilities);
+
+    assert(warnings.ShouldEmit(automatic));
+    assert(warnings.ShouldEmit(forced));
+    assert(!warnings.ShouldEmit(forced));
+    assert(warnings.EmittedCount() == 2);
+
+    warnings.Reset();
+    assert(warnings.EmittedCount() == 0);
+    assert(warnings.ShouldEmit(automatic));
+}
 } // namespace
 
 int main()
@@ -236,6 +256,7 @@ int main()
     CheckEveryComputePrerequisite();
     CheckForcedCompute();
     CheckSelectionIsDeterministic();
+    CheckWarningDedupeDistinguishesRequestAndReason();
     std::cout << "GraphicsBackendSelectionTest passed\n";
     return 0;
 }

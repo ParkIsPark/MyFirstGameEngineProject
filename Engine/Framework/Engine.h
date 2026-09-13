@@ -3,6 +3,7 @@
 #include "FProjectDescriptor.h"
 #include "USubsystemManager.h"
 #include "../Render/FGraphicsCapabilities.h"
+#include <cstdint>
 
 struct GLFWwindow;
 class  UWorld;
@@ -39,6 +40,8 @@ public:
 
     const FGraphicsCapabilities& GraphicsCapabilities() const { return graphicsCapabilities_; }
     const FBackendSelection& RayTracingBackendSelection() const { return backendSelection_; }
+    const FBackendSelection& ResolveRayTracingBackend(ERayTracingBackend requested);
+    std::uint64_t ContextGeneration() const { return contextGeneration_; }
 
 protected:
     void BootWorld(const std::string& projectRoot);
@@ -71,7 +74,8 @@ private:
 
     double lastTime_ = 0.0;
     bool glfwInitialized_ = false;
-    bool backendWarningEmitted_ = false;
+    FBackendWarningDeduplicator backendWarnings_;
     FGraphicsCapabilities graphicsCapabilities_;
     FBackendSelection backendSelection_;
+    std::uint64_t contextGeneration_ = 0;
 };

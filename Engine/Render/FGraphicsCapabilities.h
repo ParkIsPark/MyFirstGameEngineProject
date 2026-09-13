@@ -2,7 +2,9 @@
 
 #include "FRenderFeatures.h"
 
+#include <cstddef>
 #include <string>
+#include <unordered_set>
 
 struct FGraphicsCapabilities
 {
@@ -41,3 +43,16 @@ struct FBackendSelection
 FBackendSelection SelectRayTracingBackend(
     ERayTracingBackend requested,
     const FGraphicsCapabilities& capabilities);
+
+// Session-local diagnostic seam. Different authored requests and different
+// failure reasons each earn one warning; identical repeats stay quiet.
+class FBackendWarningDeduplicator
+{
+public:
+    bool ShouldEmit(const FBackendSelection& selection);
+    void Reset() { emittedKeys_.clear(); }
+    std::size_t EmittedCount() const { return emittedKeys_.size(); }
+
+private:
+    std::unordered_set<std::string> emittedKeys_;
+};

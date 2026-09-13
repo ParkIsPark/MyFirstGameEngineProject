@@ -2,205 +2,319 @@
 
 #include <GL/glew.h>
 #include <glm/glm.hpp>
+
+#include "ACamera.h"
+#include "FRenderShowFlag.h"
+#include "FTransform.h"
+#include "Material.h"
+#include "ThreadPool.h"
+#include "UGBuffer.h"
+#include "UHybridPass.h"
+#include "UMesh.h"
+#include "URasterizer.h"
+#include "URenderer.h"
+#include "UScene.h"
+#include "USkyHDRI.h"
+#include "UWorld.h"
+
 #include <algorithm>
+#include <cstddef>
+#include <utility>
 #include <vector>
 
-#include "UWorld.h"
-#include "UScene.h"
-#include "ACamera.h"
-#include "AActor.h"
-#include "UMesh.h"
-#include "UMeshComponent.h"
-#include "ALight.h"
-#include "PointLightComponent.h"
-#include "EnvironmentLightComponent.h"
-#include "FTransform.h"
-#include "FRenderShowFlag.h"
-#include "FIniFile.h"
-
-// Env-Light actor-placed HDRI wins over the global UScene::skyHDRI.
-static std::string EffectiveSkyPath(UScene& scene)
+namespace
 {
-    for (AActor* a : scene.Actors)
-        if (ALight* L = dynamic_cast<ALight*>(a))
-            if (auto* el = dynamic_cast<EnvironmentLightComponent*>(L->lightComp))
-                if (!el->skyTexPath.empty()) return el->skyTexPath;
-    return scene.skyHDRI;
+ACamera LegacyCameraFrom(const FRenderCamera& source)
+{
+    ACamera camera;
+    camera.eye = source.eye;
+    camera.u = source.right;
+    camera.v = source.up;
+    camera.w = source.backward;
+    camera.l = source.left;
+    camera.r = source.rightPlane;
+    camera.b = source.bottom;
+    camera.t = source.top;
+    camera.d = source.nearDistance;
+    camera.fov = source.fovDegrees;
+    return camera;
+}
+
+class FLegacyWorldRenderExecutor final : public IWorldRenderExecutor
+{
+public:
+    void Init() override
+    {
+        hybrid_.Init();
+        ready_ = true;
+    }
+
+    void Shutdown() noexcept override
+    {
+        hybrid_.Cleanup();
+        sky_.Cleanup();
+        ready_ = false;
+        hybridUploaded_ = false;
+        hybridSignature_ = 0;
+    }
+
+    bool RequiresOpenGLTargetBinding() const override { return true; }
+
+    bool Execute(const FWorldRenderRequest& request) override
+    {
+        // Normal named features have exactly two transitional destinations.
+        // Pure GPU RT is deliberately absent from this executor.
+        const bool rayEffects = request.features.rayTracing &&
+            (request.features.rayTracedShadows || request.features.rayTracedGI ||
+             request.features.rayTracedReflections) &&
+            request.backendSelection.rayTracingEnabled;
+        if (!rayEffects || !ready_) RenderSoftwareRaster(request);
+        else                        RenderHybrid(request);
+        return true;
+    }
+
+private:
+    static std::uint64_t GeometrySignature(const FRenderScene& scene)
+    {
+        std::uint64_t signature = 1469598103934665603ull;
+        auto mix = [&](const void* bytes, size_t count)
+        {
+            const auto* data = static_cast<const unsigned char*>(bytes);
+            for (size_t i = 0; i < count; ++i)
+            {
+                signature ^= data[i];
+                signature *= 1099511628211ull;
+            }
+        };
+        for (const FRenderMeshInstance& instance : scene.meshes)
+        {
+            mix(&instance.mesh, sizeof(instance.mesh));
+            const std::uint64_t geometryRevision = instance.mesh
+                ? instance.mesh->GeometryRevision() : 0;
+            mix(&geometryRevision, sizeof(geometryRevision));
+            mix(&instance.modelTransform, sizeof(instance.modelTransform));
+            auto mixMaterial = [&](const FResolvedRenderMaterial& material)
+            {
+                mix(&material.albedo, sizeof(material.albedo));
+                mix(&material.mirrorFactor, sizeof(material.mirrorFactor));
+                const size_t textureBytes = material.source
+                    ? material.source->texData.size() : 0;
+                mix(&textureBytes, sizeof(textureBytes));
+            };
+            if (instance.materialOverride)
+                mixMaterial(*instance.materialOverride);
+            for (const FResolvedRenderMaterial& slot : instance.materialSlots)
+                mixMaterial(slot);
+        }
+        return signature;
+    }
+
+    void RenderSoftwareRaster(const FWorldRenderRequest& request)
+    {
+        FRenderShowFlag flag;
+        flag.shading = static_cast<EShadingModel>(request.scene.shadingModel);
+        flag.depthView = request.quality.depthView;
+        flag.ambientStrength = request.quality.ambientStrength;
+        sky_.GetOrLoad(request.scene.environment.skyPath);
+        const std::vector<float>& output = rasterRenderer_.RasterShadedLegacyOutput(
+            request.scene, request.target.Width(), request.target.Height(), flag, &sky_);
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        if (!output.empty())
+            glDrawPixels(request.target.Width(), request.target.Height(), GL_RGB,
+                         GL_FLOAT, output.data());
+    }
+
+    void RenderHybrid(const FWorldRenderRequest& request)
+    {
+        const FRenderScene& scene = request.scene;
+        const ACamera camera = LegacyCameraFrom(scene.camera);
+        const int width = request.target.Width();
+        const int height = request.target.Height();
+
+        std::vector<const UMesh*> meshes;
+        std::vector<glm::mat4> models;
+        std::vector<glm::vec3> albedos;
+        std::vector<const Material*> materials;
+        std::vector<glm::vec2> uvTilings;
+        meshes.reserve(scene.meshes.size());
+        models.reserve(scene.meshes.size());
+        albedos.reserve(scene.meshes.size());
+        materials.reserve(scene.meshes.size());
+        uvTilings.reserve(scene.meshes.size());
+        for (const FRenderMeshInstance& instance : scene.meshes)
+        {
+            meshes.push_back(instance.mesh);
+            models.push_back(instance.modelTransform);
+            if (instance.materialOverride)
+            {
+                albedos.push_back(instance.materialOverride->albedo);
+                materials.push_back(instance.materialOverride->source);
+            }
+            else
+            {
+                albedos.push_back(instance.materialSlots.empty()
+                    ? glm::vec3(1.0f) : instance.materialSlots.front().albedo);
+                materials.push_back(nullptr);
+            }
+            uvTilings.push_back(instance.uvTiling);
+        }
+
+        std::vector<glm::vec3> lightPositions;
+        std::vector<glm::vec3> lightRadiances;
+        lightPositions.reserve(scene.pointLights.size());
+        lightRadiances.reserve(scene.pointLights.size());
+        for (const FRenderPointLight& light : scene.pointLights)
+        {
+            lightPositions.push_back(light.worldPosition);
+            lightRadiances.push_back(light.radiance);
+        }
+
+        const FRenderQuality& quality = request.quality;
+        const int giSamples = request.features.rayTracedGI ? quality.giSamples : 0;
+        hybrid_.SetGI(giSamples,
+                      scene.environment.tint * quality.giStrength,
+                      scene.environment.horizon,
+                      scene.environment.zenith,
+                      scene.environment.exponent,
+                      quality.giBounces);
+        hybrid_.SetQuality(quality.shininess);
+        hybrid_.SetShadow(request.features.rayTracedShadows ? quality.shadowSamples : 0,
+                          quality.shadowSoftness);
+        hybrid_.SetSky(sky_.GetOrLoad(scene.environment.skyPath));
+
+        glClearColor(0.10f, 0.11f, 0.13f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        gbuffer_.Init(width, height);
+        gbuffer_.Clear();
+
+        std::vector<FTransform> transforms(meshes.size());
+        for (size_t i = 0; i < meshes.size(); ++i)
+        {
+            transforms[i].model = models[i];
+            transforms[i].view = FTransform::MakeView(camera);
+            transforms[i].proj = FTransform::MakeProjFCG(
+                camera.l, camera.r, camera.b, camera.t, -camera.d, -1000.0f);
+            transforms[i].viewport = FTransform::MakeViewport(width, height);
+        }
+
+        const std::uint64_t signature = GeometrySignature(scene);
+        if (!hybridUploaded_ || signature != hybridSignature_)
+        {
+            std::vector<glm::vec3> triangles;
+            for (size_t i = 0; i < meshes.size(); ++i)
+            {
+                const int triangleCount = meshes[i]->triangleCount();
+                for (int triangle = 0; triangle < triangleCount; ++triangle)
+                    for (int corner = 0; corner < 3; ++corner)
+                    {
+                        const uint32_t vertexIndex = meshes[i]->indices[3 * triangle + corner];
+                        triangles.push_back(glm::vec3(models[i] * glm::vec4(
+                            meshes[i]->vertices[vertexIndex].position, 1.0f)));
+                    }
+            }
+            hybrid_.UploadSceneTriangles(triangles);
+            hybridSignature_ = signature;
+            hybridUploaded_ = true;
+        }
+
+        constexpr int tileSize = 64;
+        const int tileColumns = (width + tileSize - 1) / tileSize;
+        const int tileRows = (height + tileSize - 1) / tileSize;
+        pool_.ParallelForChunks(tileColumns * tileRows, [&](int begin, int end)
+        {
+            for (int tile = begin; tile < end; ++tile)
+            {
+                const int tileX = tile % tileColumns;
+                const int tileY = tile / tileColumns;
+                const int minX = tileX * tileSize;
+                const int minY = tileY * tileSize;
+                const int maxX = std::min(minX + tileSize - 1, width - 1);
+                const int maxY = std::min(minY + tileSize - 1, height - 1);
+                for (size_t i = 0; i < meshes.size(); ++i)
+                    rasterizer_.DrawMeshGBuffer(*meshes[i], transforms[i], albedos[i],
+                        gbuffer_, minX, minY, maxX, maxY, false, materials[i], uvTilings[i]);
+            }
+        });
+
+        hybrid_.UploadGBuffer(gbuffer_);
+        hybrid_.Render(camera, lightPositions, lightRadiances, width, height);
+    }
+
+    URenderer rasterRenderer_;
+    URasterizer rasterizer_;
+    UHybridPass hybrid_;
+    UGBuffer gbuffer_;
+    ThreadPool pool_;
+    USkyHDRI sky_;
+    std::uint64_t hybridSignature_ = 0;
+    bool hybridUploaded_ = false;
+    bool ready_ = false;
+};
+
+class FTargetRestoreGuard
+{
+public:
+    explicit FTargetRestoreGuard(FRenderTarget& target) : target_(target) {}
+    ~FTargetRestoreGuard() { target_.End(); }
+private:
+    FRenderTarget& target_;
+};
+} // namespace
+
+UWorldRenderer::UWorldRenderer()
+    : executor_(std::make_unique<FLegacyWorldRenderExecutor>())
+{
+}
+
+UWorldRenderer::UWorldRenderer(std::unique_ptr<IWorldRenderExecutor> executor)
+    : executor_(std::move(executor))
+{
+}
+
+UWorldRenderer::~UWorldRenderer()
+{
+    Shutdown();
 }
 
 void UWorldRenderer::Init()
 {
-    worldRT_.Init();
-    hybrid_.Init();
-    ready_ = true;
+    if (initialized_ || !executor_) return;
+    executor_->Init();
+    initialized_ = true;
 }
 
-void UWorldRenderer::Render(UWorld& world, const FRenderFeatures& features, int w, int h)
+void UWorldRenderer::Shutdown() noexcept
 {
-    const int mode = RenderCompatibility::LegacyModeForNamedFeatures(features);
-    if (mode == 0 || !ready_) renderRaster(world, w, h);
-    else                      renderGPU(world, mode, w, h);
+    if (!executor_) return;
+    executor_->Shutdown();
+    initialized_ = false;
 }
 
-void UWorldRenderer::renderRaster(UWorld& world, int w, int h)
+bool UWorldRenderer::Render(UWorld& world,
+                            const ACamera& camera,
+                            FRenderTarget& target,
+                            const FRenderFeatures& features,
+                            const FRenderQuality& quality,
+                            const FBackendSelection& backendSelection,
+                            std::uint64_t expectedContextGeneration)
 {
-    UScene& scene = world.GetScene();
-    scene.width = w; scene.height = h;
+    const std::uint64_t generation = expectedContextGeneration == 0
+        ? target.ContextGeneration() : expectedContextGeneration;
+    if (!executor_ || !target.IsValidForContext(generation)) return false;
 
-    FRenderShowFlag flag;
-    flag.shading = (EShadingModel)scene.shadingModel;
-    sky_.GetOrLoad(EffectiveSkyPath(scene));
-    raster_.RasterShaded(world, flag, &sky_);
+    FRenderFeatures normalized = features;
+    normalized.hardwareRaster = true;
+    FRenderFeatures effective = normalized;
+    if (!backendSelection.rayTracingEnabled) effective.rayTracing = false;
+    const std::vector<ERenderPass> passPlan = BuildRenderPipelinePlan(effective);
+    const FRenderScene scene = ExtractRenderScene(world, camera);
+    FWorldRenderRequest request{
+        scene, target, normalized, quality, backendSelection, passPlan,
+    };
 
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    if (!scene.outputImage.empty())
-        glDrawPixels(w, h, GL_RGB, GL_FLOAT, scene.outputImage.data());
-}
-
-void UWorldRenderer::renderGPU(UWorld& world, int mode, int w, int h)
-{
-    UScene&  scene = world.GetScene();
-    ACamera& cam   = world.GetCamera();
-
-    std::vector<const UMesh*> meshes;
-    std::vector<glm::mat4>    models;
-    std::vector<glm::vec3>    albedos;
-    std::vector<float>        mirrors;
-    std::vector<const Material*> mats;
-    std::vector<glm::vec2>    uvTilings;
-    std::vector<glm::vec3>    lightPos, lightColor;
-    for (AActor* a : scene.Actors)
-    {
-        if (UMeshComponent* mc = a->mesh)
-            if (mc->mesh)
-            {
-                meshes.push_back(mc->mesh);
-                models.push_back(mc->GetWorldMatrix());
-                const Material& mat = mc->GetMaterial();   // shared asset > override > mesh default
-                albedos.push_back(mat.kd);
-                mirrors.push_back(glm::max(mat.km.x, glm::max(mat.km.y, mat.km.z)));
-                mats.push_back(&mat);
-                uvTilings.push_back(mc->uvTiling);
-            }
-        if (ALight* L = dynamic_cast<ALight*>(a))
-            if (PointLightComponent* pl = dynamic_cast<PointLightComponent*>(L->lightComp))
-            { lightPos.push_back(pl->GetWorldLocation()); lightColor.push_back(pl->LightColor * pl->LightIntensity); }
-    }
-    if (lightPos.empty()) { lightPos = { glm::vec3(6, 8, 2) }; lightColor = { glm::vec3(1.0f) }; }
-
-    // Geometry signature (mesh identity + world transform + albedo) -> skip the
-    // BVH/TBO rebuild while the scene is static.
-    size_t geomSig = 1469598103934665603ull;
-    {
-        auto mix = [&](const void* p, size_t n) {
-            const unsigned char* b = static_cast<const unsigned char*>(p);
-            for (size_t i = 0; i < n; ++i) { geomSig ^= b[i]; geomSig *= 1099511628211ull; }
-        };
-        for (size_t i = 0; i < meshes.size(); ++i)
-        { mix(&meshes[i], sizeof(meshes[i])); mix(&models[i], sizeof(glm::mat4)); mix(&albedos[i], sizeof(glm::vec3)); mix(&mirrors[i], sizeof(float));
-          size_t ts = mats[i] ? mats[i]->texData.size() : 0; mix(&ts, sizeof(ts)); }
-    }
-
-    const unsigned int skyTex = sky_.GetOrLoad(EffectiveSkyPath(scene));
-
-    // Game render profile (GI/shadow/reflection quality) -- loaded once from the
-    // ini the editor wrote, so a packaged build honors the Game settings tab.
-    if (!qualityLoaded_)
-    {
-        FIniFile ini;
-        if (ini.LoadFromFile("Config/GameSettings.ini"))
-        {
-            quality_.giSamples      = ini.GetInt  ("Render", "GISamples", quality_.giSamples);
-            quality_.giBounces      = ini.GetInt  ("Render", "GIBounces", quality_.giBounces);
-            quality_.giStrength     = ini.GetFloat("Render", "GIStrength", quality_.giStrength);
-            quality_.reflStrength   = ini.GetFloat("Render", "ReflectionStrength", quality_.reflStrength);
-            quality_.shininess      = ini.GetFloat("Render", "Shininess", quality_.shininess);
-            quality_.shadowSamples  = ini.GetInt  ("Render", "ShadowSamples", quality_.shadowSamples);
-            quality_.shadowSoftness = ini.GetFloat("Render", "ShadowSoftness", quality_.shadowSoftness);
-        }
-        qualityLoaded_ = true;
-    }
-    const FRenderQuality& q = quality_;
-
-    // Environment light -> hemisphere GI + sky gradient (both GPU passes).
-    int giN = 0;
-    glm::vec3 envTint(1.0f), horizon(0.10f, 0.12f, 0.16f), zenith(0.40f, 0.55f, 0.80f);
-    float skyExp = 1.0f;
-    for (AActor* a : scene.Actors)
-        if (ALight* L = dynamic_cast<ALight*>(a))
-            if (auto* el = dynamic_cast<EnvironmentLightComponent*>(L->lightComp))
-            { giN = q.giSamples; envTint = el->LightColor * el->LightIntensity; horizon = el->horizonColor;
-              zenith = el->zenithColor; skyExp = el->skyExp; break; }
-    envTint *= q.giStrength;
-    worldRT_.SetGI(giN, envTint, horizon, zenith, skyExp, q.giBounces);
-    hybrid_.SetGI(giN, envTint, horizon, zenith, skyExp, q.giBounces);
-    worldRT_.SetQuality(q.reflStrength, q.shininess);
-    hybrid_.SetQuality(q.shininess);
-    worldRT_.SetShadow(q.shadowSamples, q.shadowSoftness);
-    hybrid_.SetShadow(q.shadowSamples, q.shadowSoftness);
-
-    glViewport(0, 0, w, h);
-    glClearColor(0.10f, 0.11f, 0.13f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    if (mode == 1)                                   // GPU RT
-    {
-        if (!rtUp_ || geomSig != rtSig_)
-        {
-            worldRT_.UploadWorld(meshes, models, albedos, lightPos[0], lightColor[0], mirrors, mats, uvTilings);
-            rtSig_ = geomSig; rtUp_ = true;
-        }
-        worldRT_.SetLights(lightPos, lightColor);
-        worldRT_.SetSky(skyTex);
-        worldRT_.RenderFrame(cam, w, h);
-    }
-    else                                             // Hybrid: CPU G-buffer + GPU shadow
-    {
-        gbuf_.Init(w, h); gbuf_.Clear();
-
-        std::vector<FTransform> xfs(meshes.size());
-        for (size_t i = 0; i < meshes.size(); ++i)
-        {
-            xfs[i].model    = models[i];
-            xfs[i].view     = FTransform::MakeView(cam);
-            xfs[i].proj     = FTransform::MakeProjFCG(cam.l, cam.r, cam.b, cam.t, -cam.d, -1000.0f);
-            xfs[i].viewport = FTransform::MakeViewport(w, h);
-        }
-
-        if (!hyUp_ || geomSig != hySig_)
-        {
-            std::vector<glm::vec3> tris;
-            for (size_t i = 0; i < meshes.size(); ++i)
-            {
-                const int nt = meshes[i]->triangleCount();
-                for (int t = 0; t < nt; ++t)
-                    for (int k = 0; k < 3; ++k)
-                        tris.push_back(glm::vec3(models[i] * glm::vec4(meshes[i]->vertices[meshes[i]->indices[3*t+k]].position, 1.0f)));
-            }
-            hybrid_.UploadSceneTriangles(tris);
-            hySig_ = geomSig; hyUp_ = true;
-        }
-
-        const int TILE = 64;
-        const int ntx  = (w + TILE - 1) / TILE;
-        const int nty  = (h + TILE - 1) / TILE;
-        const int nTiles = ntx * nty;
-        pool_.ParallelForChunks(nTiles, [&](int begin, int end)
-        {
-            for (int tile = begin; tile < end; ++tile)
-            {
-                const int tx = tile % ntx, ty = tile / ntx;
-                const int cx0 = tx * TILE, cy0 = ty * TILE;
-                const int cx1 = std::min(cx0 + TILE - 1, w - 1);
-                const int cy1 = std::min(cy0 + TILE - 1, h - 1);
-                for (size_t i = 0; i < meshes.size(); ++i)
-                    rast_.DrawMeshGBuffer(*meshes[i], xfs[i], albedos[i], gbuf_,
-                                          cx0, cy0, cx1, cy1, /*countStats=*/false, mats[i], uvTilings[i]);
-            }
-        });
-
-        hybrid_.SetSky(skyTex);
-        hybrid_.UploadGBuffer(gbuf_);
-        hybrid_.Render(cam, lightPos, lightColor, w, h);
-    }
+    if (!executor_->RequiresOpenGLTargetBinding()) return executor_->Execute(request);
+    if (!target.Begin()) return false;
+    FTargetRestoreGuard restore(target);
+    return executor_->Execute(request);
 }

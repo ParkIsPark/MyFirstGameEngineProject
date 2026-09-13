@@ -30,7 +30,9 @@ public:
     void EndPlay() noexcept;   // dispatch EndPlay() to every actor
 
     UScene&        GetScene()   { return scene_; }
+    const UScene&  GetScene() const { return scene_; }
     ACamera&       GetCamera()  { return camera_; }
+    const ACamera& GetCamera() const { return camera_; }
     UPhysicsWorld& GetPhysics() { return physics_; }
 
 private:
