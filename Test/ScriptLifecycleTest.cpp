@@ -149,6 +149,20 @@ int main() {
     }
     logs.clear();
     {
+        UWorld world; auto* actor = new NativeTickActor(); actor->name = "Multiple failures";
+        auto& component = actor->AddComponent<NativeFailure>();
+        actor->AddComponent<UScriptComponent>().SetScriptPath("Content/Scripts/Lifecycle.lua");
+        world.Spawn(actor); world.SetScriptSubsystem(&scripts);
+        std::ostringstream diagnostics; auto* previous = std::cerr.rdbuf(diagnostics.rdbuf());
+        world.BeginPlay(); world.Tick(.25f); world.Tick(.5f); world.EndPlay();
+        std::cerr.rdbuf(previous);
+        const std::string text = diagnostics.str();
+        const auto actorError = text.find("native actor tick failure");
+        const auto componentError = text.find("native component tick failure");
+        Check(actor->ticks == 1 && component.ticks == 1 && actorError != std::string::npos && componentError != std::string::npos && text.find("native actor tick failure", actorError + 1) == std::string::npos && text.find("native component tick failure", componentError + 1) == std::string::npos && logs == std::vector<std::string>{"begin:0","tick:1:0.25","tick:2:0.5","end:2"}, "every same-actor same-phase native failure is reported once while healthy scripts continue");
+    }
+    logs.clear();
+    {
         UWorld world; auto* actor = new OrderedEndActor(); actor->events = &logs;
         auto& script = actor->AddComponent<UScriptComponent>(); script.SetScriptPath("Content/Scripts/Lifecycle.lua");
         world.Spawn(actor); world.SetScriptSubsystem(&scripts); world.BeginPlay(); script.SetEnabled(false);

@@ -5,11 +5,28 @@
 #include <algorithm>
 #include <stdexcept>
 #include <exception>
+#include <iostream>
 
 REGISTER_ACTOR("Actor", AActor)
 
 namespace
 {
+    // Called inside each individual catch, before another callback can fail.
+    // No allocating aggregate is needed, and reporting cannot abort dispatch.
+    void ReportNativeFailure(const AActor& actor, const UActorComponent* component, const char* phase) noexcept
+    {
+        try
+        {
+            std::cerr << "Native [" << actor.name << "] [";
+            if (component) std::cerr << component->TypeName();
+            else std::cerr << "Actor";
+            std::cerr << "] " << phase << ": ";
+            try { throw; }
+            catch (const std::exception& error) { std::cerr << error.what() << '\n'; }
+            catch (...) { std::cerr << "unknown exception\n"; }
+        }
+        catch (...) {} // Diagnostic failure cannot interrupt healthy callbacks.
+    }
     // Restore the prior state on normal return and exception unwinding, including
     // nested dispatches that must leave the outer dispatch protected.
     class ComponentDispatchScope
@@ -91,47 +108,47 @@ void AActor::SetPhysics(UPrimitiveComponent* p)
     physics = p;
 }
 
-void AActor::DispatchBeginPlay()
+void AActor::DispatchBeginPlay(bool propagateFailure)
 {
     ComponentDispatchScope dispatchScope(dispatchingComponents_);
     std::exception_ptr failure;
     nativeTickFailed_ = false;
     try { BeginPlay(); }
-    catch (...) { nativeTickFailed_ = true; failure = std::current_exception(); }
+    catch (...) { nativeTickFailed_ = true; ReportNativeFailure(*this, nullptr, "BeginPlay"); failure = std::current_exception(); }
     for (const auto& component : components_)
     {
         component->nativeTickFailed_ = false;
         if (component->IsEnabled())
             try { component->BeginPlay(); }
-            catch (...) { component->nativeTickFailed_ = true; if (!failure) failure = std::current_exception(); }
+            catch (...) { component->nativeTickFailed_ = true; ReportNativeFailure(*this, component.get(), "BeginPlay"); if (!failure) failure = std::current_exception(); }
     }
-    if (failure) std::rethrow_exception(failure);
+    if (failure && propagateFailure) std::rethrow_exception(failure);
 }
 
-void AActor::DispatchTick(float deltaSeconds)
+void AActor::DispatchTick(float deltaSeconds, bool propagateFailure)
 {
     ComponentDispatchScope dispatchScope(dispatchingComponents_);
     std::exception_ptr failure;
     if (!nativeTickFailed_)
         try { Tick(deltaSeconds); }
-        catch (...) { nativeTickFailed_ = true; failure = std::current_exception(); }
+        catch (...) { nativeTickFailed_ = true; ReportNativeFailure(*this, nullptr, "Tick"); failure = std::current_exception(); }
     for (const auto& component : components_)
         if (component->IsEnabled() && !component->nativeTickFailed_)
             try { component->Tick(deltaSeconds); }
-            catch (...) { component->nativeTickFailed_ = true; if (!failure) failure = std::current_exception(); }
-    if (failure) std::rethrow_exception(failure);
+            catch (...) { component->nativeTickFailed_ = true; ReportNativeFailure(*this, component.get(), "Tick"); if (!failure) failure = std::current_exception(); }
+    if (failure && propagateFailure) std::rethrow_exception(failure);
 }
 
-void AActor::DispatchEndPlay()
+void AActor::DispatchEndPlay(bool propagateFailure)
 {
     ComponentDispatchScope dispatchScope(dispatchingComponents_);
     std::exception_ptr failure;
     for (const auto& component : components_)
         if (component->IsEnabled() || component->RequiresEndPlay())
             try { component->EndPlay(); }
-            catch (...) { if (!failure) failure = std::current_exception(); }
-    try { EndPlay(); } catch (...) { if (!failure) failure = std::current_exception(); }
-    if (failure) std::rethrow_exception(failure);
+            catch (...) { ReportNativeFailure(*this, component.get(), "EndPlay"); if (!failure) failure = std::current_exception(); }
+    try { EndPlay(); } catch (...) { ReportNativeFailure(*this, nullptr, "EndPlay"); if (!failure) failure = std::current_exception(); }
+    if (failure && propagateFailure) std::rethrow_exception(failure);
 }
 
 void AActor::RequireComponentMutationAllowed() const

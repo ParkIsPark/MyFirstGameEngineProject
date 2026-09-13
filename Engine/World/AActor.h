@@ -65,10 +65,12 @@ public:
 
     virtual void Tick(float DeltaTime);
 
-    // Public lifecycle drivers so UWorld can dispatch the protected hooks.
-    void DispatchBeginPlay();
-    void DispatchTick(float deltaSeconds);
-    void DispatchEndPlay();
+    // Every native failure is reported individually and later callbacks run.
+    // Direct callers retain first-exception propagation; UWorld opts out after
+    // reporting so a failed actor cannot interrupt its healthy neighbors.
+    void DispatchBeginPlay(bool propagateFailure = true);
+    void DispatchTick(float deltaSeconds, bool propagateFailure = true);
+    void DispatchEndPlay(bool propagateFailure = true);
 
 protected:
     void RemoveOwnedComponent(UActorComponent* component);
