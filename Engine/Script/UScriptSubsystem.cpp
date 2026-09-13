@@ -9,6 +9,16 @@
 
 namespace
 {
+    int CreateRegistryThread(lua_State* state)
+    {
+        lua_State* registry = lua_newthread(state);
+        if (!lua_checkstack(registry, 2)) return luaL_error(state, "cannot reserve Lua registry cleanup stack");
+        const int reference = luaL_ref(state, LUA_REGISTRYINDEX);
+        lua_pushinteger(state, reference);
+        lua_pushlightuserdata(state, registry);
+        return 2;
+    }
+
     int InstanceGetMetatable(lua_State* state)
     {
         luaL_checkany(state, 1);
@@ -99,14 +109,23 @@ void UScriptSubsystem::Init()
         lua_pushcfunction(state_, OpenLibraries);
         if (lua_pcall(state_, 0, 0, 0) != LUA_OK)
         {
-            const char* error = lua_tostring(state_, -1);
+            const char* error = lua_type(state_, -1) == LUA_TSTRING ? lua_tostring(state_, -1) : nullptr;
             throw std::runtime_error(error ? error : "library initialization failed");
         }
         bindings_.InstallAll(state_);
+        lua_pushcfunction(state_, CreateRegistryThread);
+        if (lua_pcall(state_, 0, 2, 0) != LUA_OK)
+        {
+            const char* error = lua_type(state_, -1) == LUA_TSTRING ? lua_tostring(state_, -1) : nullptr;
+            throw std::runtime_error(error ? error : "registry cleanup initialization failed");
+        }
+        registryThread_ = static_cast<int>(lua_tointeger(state_, -2));
+        registryState_ = static_cast<lua_State*>(lua_touserdata(state_, -1));
+        lua_pop(state_, 2);
         lua_pushcfunction(state_, BuildSafeGlobals);
         if (lua_pcall(state_, 0, 1, 0) != LUA_OK)
         {
-            const char* error = lua_tostring(state_, -1);
+            const char* error = lua_type(state_, -1) == LUA_TSTRING ? lua_tostring(state_, -1) : nullptr;
             throw std::runtime_error(error ? error : "safe-global initialization failed");
         }
         safeGlobals_ = static_cast<int>(lua_tointeger(state_, -1));
@@ -132,8 +151,16 @@ void UScriptSubsystem::Shutdown()
     // handles and release their references before closing the borrowed VM.
     while (!instances_.empty()) (*instances_.begin())->Release();
     cache_.reset();
-    luaL_unref(state_, LUA_REGISTRYINDEX, safeGlobals_);
+    // Only an early Init failure can lack this private stack; in that case no
+    // subsystem registry references have been created yet.
+    if (registryState_)
+    {
+        luaL_unref(registryState_, LUA_REGISTRYINDEX, safeGlobals_);
+        luaL_unref(registryState_, LUA_REGISTRYINDEX, registryThread_);
+    }
     safeGlobals_ = LUA_NOREF;
+    registryThread_ = LUA_NOREF;
+    registryState_ = nullptr;
     lua_State* closing = state_;
     state_ = nullptr;
     lua_close(closing);

@@ -48,6 +48,11 @@ FLuaScriptInstance::~FLuaScriptInstance() { Release(); }
 bool FLuaScriptInstance::Initialize(int safeGlobals)
 {
     const int top = lua_gettop(state_);
+    if (!lua_checkstack(state_, 3))
+    {
+        Report("top-level", "cannot grow Lua stack for instance initialization");
+        return false;
+    }
     lua_pushcfunction(state_, InitializeProtected);
     lua_pushlightuserdata(state_, this);
     lua_rawgeti(state_, LUA_REGISTRYINDEX, safeGlobals);
@@ -123,12 +128,16 @@ void FLuaScriptInstance::Release() noexcept
 {
     if (state_)
     {
+        // A private subsystem thread shares this VM's registry and always has
+        // scratch space. Cleanup must not depend on growing an occupied caller
+        // stack, because destructors must also work under allocation failure.
+        lua_State* registry = owner_->registryState_;
         for (int& callback : callbacks_)
         {
-            luaL_unref(state_, LUA_REGISTRYINDEX, callback);
+            luaL_unref(registry, LUA_REGISTRYINDEX, callback);
             callback = LUA_NOREF;
         }
-        luaL_unref(state_, LUA_REGISTRYINDEX, environment_);
+        luaL_unref(registry, LUA_REGISTRYINDEX, environment_);
         environment_ = LUA_NOREF;
         state_ = nullptr;
     }

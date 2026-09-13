@@ -41,4 +41,8 @@ private:
     std::unique_ptr<FLuaScriptCache> cache_;
     std::set<FLuaScriptInstance*> instances_;
     int safeGlobals_ = -2;
+    // Private, never executed or exposed: one scratch stack for allocation-free
+    // registry cleanup. This is a thread of state_'s VM, not another Lua VM.
+    lua_State* registryState_ = nullptr;
+    int registryThread_ = -2;
 };

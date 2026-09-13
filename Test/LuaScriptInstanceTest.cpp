@@ -1,12 +1,15 @@
 // Standalone real-Lua test, deliberately outside Test.vcxproj.
 // From the worktree root in MSYS2 UCRT64; compile Lua as C before C++ linking:
-// gcc -std=c17 -I./ThirdParty/Lua/5.4.9/src -c ThirdParty/Lua/5.4.9/src/lapi.c ThirdParty/Lua/5.4.9/src/lauxlib.c ThirdParty/Lua/5.4.9/src/lbaselib.c ThirdParty/Lua/5.4.9/src/lcode.c ThirdParty/Lua/5.4.9/src/lcorolib.c ThirdParty/Lua/5.4.9/src/lctype.c ThirdParty/Lua/5.4.9/src/ldebug.c ThirdParty/Lua/5.4.9/src/ldo.c ThirdParty/Lua/5.4.9/src/ldump.c ThirdParty/Lua/5.4.9/src/lfunc.c ThirdParty/Lua/5.4.9/src/lgc.c ThirdParty/Lua/5.4.9/src/llex.c ThirdParty/Lua/5.4.9/src/lmathlib.c ThirdParty/Lua/5.4.9/src/lmem.c ThirdParty/Lua/5.4.9/src/lobject.c ThirdParty/Lua/5.4.9/src/lopcodes.c ThirdParty/Lua/5.4.9/src/lparser.c ThirdParty/Lua/5.4.9/src/lstate.c ThirdParty/Lua/5.4.9/src/lstring.c ThirdParty/Lua/5.4.9/src/lstrlib.c ThirdParty/Lua/5.4.9/src/ltable.c ThirdParty/Lua/5.4.9/src/ltablib.c ThirdParty/Lua/5.4.9/src/ltm.c ThirdParty/Lua/5.4.9/src/lundump.c ThirdParty/Lua/5.4.9/src/lutf8lib.c ThirdParty/Lua/5.4.9/src/lvm.c ThirdParty/Lua/5.4.9/src/lzio.c && g++ -std=c++17 -Wall -Wextra -I./Engine/Script -I./ThirdParty/Lua/5.4.9/src Test/LuaScriptInstanceTest.cpp Engine/Script/FLuaBindingRegistry.cpp Engine/Script/UScriptSubsystem.cpp Engine/Script/FLuaScriptCache.cpp Engine/Script/FLuaScriptInstance.cpp lapi.o lauxlib.o lbaselib.o lcode.o lcorolib.o lctype.o ldebug.o ldo.o ldump.o lfunc.o lgc.o llex.o lmathlib.o lmem.o lobject.o lopcodes.o lparser.o lstate.o lstring.o lstrlib.o ltable.o ltablib.o ltm.o lundump.o lutf8lib.o lvm.o lzio.o -o LuaScriptInstanceTest.exe && ./LuaScriptInstanceTest.exe
+// gcc -std=c17 -DLUA_USE_APICHECK -I./ThirdParty/Lua/5.4.9/src -c ThirdParty/Lua/5.4.9/src/lapi.c ThirdParty/Lua/5.4.9/src/lauxlib.c ThirdParty/Lua/5.4.9/src/lbaselib.c ThirdParty/Lua/5.4.9/src/lcode.c ThirdParty/Lua/5.4.9/src/lcorolib.c ThirdParty/Lua/5.4.9/src/lctype.c ThirdParty/Lua/5.4.9/src/ldebug.c ThirdParty/Lua/5.4.9/src/ldo.c ThirdParty/Lua/5.4.9/src/ldump.c ThirdParty/Lua/5.4.9/src/lfunc.c ThirdParty/Lua/5.4.9/src/lgc.c ThirdParty/Lua/5.4.9/src/llex.c ThirdParty/Lua/5.4.9/src/lmathlib.c ThirdParty/Lua/5.4.9/src/lmem.c ThirdParty/Lua/5.4.9/src/lobject.c ThirdParty/Lua/5.4.9/src/lopcodes.c ThirdParty/Lua/5.4.9/src/lparser.c ThirdParty/Lua/5.4.9/src/lstate.c ThirdParty/Lua/5.4.9/src/lstring.c ThirdParty/Lua/5.4.9/src/lstrlib.c ThirdParty/Lua/5.4.9/src/ltable.c ThirdParty/Lua/5.4.9/src/ltablib.c ThirdParty/Lua/5.4.9/src/ltm.c ThirdParty/Lua/5.4.9/src/lundump.c ThirdParty/Lua/5.4.9/src/lutf8lib.c ThirdParty/Lua/5.4.9/src/lvm.c ThirdParty/Lua/5.4.9/src/lzio.c && g++ -std=c++17 -Wall -Wextra -I./Engine/Script -I./ThirdParty/Lua/5.4.9/src Test/LuaScriptInstanceTest.cpp Engine/Script/FLuaBindingRegistry.cpp Engine/Script/UScriptSubsystem.cpp Engine/Script/FLuaScriptCache.cpp Engine/Script/FLuaScriptInstance.cpp lapi.o lauxlib.o lbaselib.o lcode.o lcorolib.o lctype.o ldebug.o ldo.o ldump.o lfunc.o lgc.o llex.o lmathlib.o lmem.o lobject.o lopcodes.o lparser.o lstate.o lstring.o lstrlib.o ltable.o ltablib.o ltm.o lundump.o lutf8lib.o lvm.o lzio.o -Wl,--wrap=__imp_GetFinalPathNameByHandleW -o LuaScriptInstanceTest.exe && ./LuaScriptInstanceTest.exe
 
 #include "UScriptSubsystem.h"
 #include "FLuaScriptAsset.h"
 #include "FLuaScriptCache.h"
 #include "FLuaScriptInstance.h"
 #include "LuaInclude.h"
+extern "C" {
+#include "lstate.h" // Test-only: fill a valid current API frame to its capacity.
+}
 #include <cassert>
 #include <chrono>
 #include <filesystem>
@@ -25,6 +28,31 @@
 
 namespace fs = std::filesystem;
 
+#ifdef __MINGW32__
+// Link-time observation seam: execute the real Win32 resolution API, then
+// deterministically substitute a real file before production continues.
+// No fake files/bytes/handles and no test hook in the engine implementation.
+static std::function<void()> afterSourceResolution;
+extern "C" {
+extern decltype(&GetFinalPathNameByHandleW) __real___imp_GetFinalPathNameByHandleW;
+}
+static DWORD WINAPI ObserveFinalPath(HANDLE handle, LPWSTR output, DWORD size, DWORD flags)
+{
+    const DWORD result = __real___imp_GetFinalPathNameByHandleW(handle, output, size, flags);
+    if (result && result < size && output && afterSourceResolution &&
+        std::wstring_view(output, result).find(L"Race.lua") != std::wstring_view::npos)
+    {
+        auto action = std::move(afterSourceResolution);
+        afterSourceResolution = {};
+        action();
+    }
+    return result;
+}
+extern "C" {
+decltype(&GetFinalPathNameByHandleW) __wrap___imp_GetFinalPathNameByHandleW = ObserveFinalPath;
+}
+#endif
+
 // Windows junctions need no symlink privilege. Exercise the actual filesystem
 // containment boundary even with MinGW's unsupported create_directory_symlink.
 static bool CreateDirectoryLink(const fs::path& target, const fs::path& link)
@@ -34,8 +62,9 @@ static bool CreateDirectoryLink(const fs::path& target, const fs::path& link)
     const HANDLE handle = CreateFileW(link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
         FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
     if (handle == INVALID_HANDLE_VALUE) return false;
-    const std::wstring substitute = L"\\??\\" + target.native();
-    const std::wstring printable = target.native();
+    // A reparse target is an NT path: it does not normalize Win32 '/' separators.
+    const std::wstring printable = fs::path(target).make_preferred().native();
+    const std::wstring substitute = L"\\??\\" + printable;
     struct Junction
     {
         DWORD tag;
@@ -361,8 +390,201 @@ static void CheckNonStringErrorUnderMemoryPressure()
     Run(state, "assert(6 * 7 == 42)");
 }
 
-int main()
+// Catches validation through one handle followed by reading a substituted path.
+// Exact expected bytes are observed by executing the asset on the real Lua VM.
+static void CheckValidatedHandleSurvivesSubstitution()
 {
+#ifdef __MINGW32__
+    Project project;
+    fs::create_directories(project.root / "Content/Scripts/Swap");
+    fs::create_directories(project.root / "Outside");
+    { std::ofstream file(project.root / "Content/Scripts/Swap/Race.lua"); file << "Engine.Log('validated bytes')"; }
+    { std::ofstream file(project.root / "Outside/Race.lua"); file << "Engine.Log('unvalidated bytes')"; }
+    std::vector<std::string> logs;
+    UScriptSubsystem scripts([&](std::string_view message) { logs.emplace_back(message); });
+    scripts.SetProjectRoot(project.root);
+    scripts.Init();
+    bool attempted = false, substituted = false;
+    afterSourceResolution = [&] {
+        attempted = true;
+        const auto source = project.root / "Content/Scripts/Swap/Race.lua";
+        if (!MoveFileExW(source.c_str(), (project.root / "Content/Scripts/Swap/Saved.lua").c_str(), 0))
+        {
+            // Denying replacement while a validated handle is live is safe too.
+            const DWORD error = GetLastError();
+            assert(error == ERROR_SHARING_VIOLATION || error == ERROR_ACCESS_DENIED);
+            return;
+        }
+        assert(CopyFileW((project.root / "Outside/Race.lua").c_str(), source.c_str(), TRUE));
+        substituted = true;
+    };
+    auto instance = scripts.CreateScriptInstance("Content/Scripts/Swap/Race.lua", "race-owner");
+    assert(attempted && substituted && !afterSourceResolution);
+    assert(instance && (logs == std::vector<std::string>{"validated bytes"}) &&
+        "loader read bytes from the substituted path, not the validated handle");
+#endif
+}
+
+// Catches unconditional case folding. Exact spelling is a conservative contract
+// even on ordinary case-insensitive Windows directories.
+static void CheckCaseSensitiveContainment()
+{
+    Project project;
+    std::vector<std::string> errors;
+    UScriptSubsystem scripts([&](std::string_view message) { errors.emplace_back(message); });
+    scripts.SetProjectRoot(project.root);
+    scripts.Init();
+    assert(!scripts.LoadScriptAsset("Content/scripts/StateIsolation.lua") &&
+        "case-folded prefix admitted a different Scripts directory");
+#ifdef _WIN32
+    // Windows requires the directory to be empty when enabling this flag.
+    const auto caseRoot = project.root / "CaseProject";
+    fs::create_directories(caseRoot / "Content");
+    const HANDLE directory = CreateFileW((caseRoot / "Content").c_str(), GENERIC_READ | GENERIC_WRITE | DELETE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    assert(directory != INVALID_HANDLE_VALUE);
+    FILE_CASE_SENSITIVE_INFO info{FILE_CS_FLAG_CASE_SENSITIVE_DIR};
+    // SDK enum FileCaseSensitiveInfo (23) is hidden by older NTDDI defaults.
+    const auto caseInfoClass = static_cast<FILE_INFO_BY_HANDLE_CLASS>(23);
+    const bool enabled = SetFileInformationByHandle(directory, caseInfoClass, &info, sizeof(info)) != 0;
+    const DWORD reason = enabled ? ERROR_SUCCESS : GetLastError();
+    CloseHandle(directory);
+    if (enabled)
+    {
+        assert(CreateDirectoryW((caseRoot / "Content/Scripts").c_str(), nullptr));
+        assert(CreateDirectoryW((caseRoot / "Content/scripts").c_str(), nullptr));
+        { std::ofstream file(caseRoot / "Content/scripts/Escape.lua"); file << "Engine.Log('case sibling escaped')"; }
+        scripts.SetProjectRoot(caseRoot);
+        assert(CreateDirectoryLink(caseRoot / "Content/scripts", caseRoot / "Content/Scripts/CaseLink"));
+        assert(!scripts.CreateScriptInstance("Content/Scripts/CaseLink/Escape.lua", "case-owner"));
+        Context(errors.back(), "Content/Scripts/CaseLink/Escape.lua", "case-owner", "load");
+        if (errors.back().find("canonical") == std::string::npos) std::cerr << errors.back() << '\n';
+        assert(errors.back().find("canonical") != std::string::npos);
+        assert(fs::remove(caseRoot / "Content/Scripts/CaseLink"));
+    }
+    else std::cout << "case-sensitive Windows directory unavailable (error " << reason << ")\n";
+#endif
+}
+
+struct StackAllocationFault
+{
+    lua_Alloc delegate = nullptr;
+    void* data = nullptr;
+    bool reject = false;
+    int rejected = 0;
+};
+
+static void InstallStackAllocator(lua_State* state, StackAllocationFault& fault)
+{
+    fault.delegate = lua_getallocf(state, &fault.data);
+    lua_setallocf(state, [](void* data, void* pointer, size_t oldSize, size_t newSize) -> void* {
+        auto* fault = static_cast<StackAllocationFault*>(data);
+        if (fault->reject && newSize > oldSize) { ++fault->rejected; return nullptr; }
+        return fault->delegate(fault->data, pointer, oldSize, newSize);
+    }, &fault);
+}
+
+static int FillApiFrame(lua_State* state, bool fillAllocation)
+{
+    if (fillAllocation)
+    {
+        // checkstack adds one spare slot when growing: reserve every currently
+        // allocated usable slot except that spare, then occupy the whole frame.
+        const int available = static_cast<int>(state->stack_last.p - state->top.p) - 1;
+        assert(lua_checkstack(state, available));
+    }
+    while (state->top.p < state->ci->top.p) lua_pushinteger(state, 17);
+    return lua_gettop(state);
+}
+
+static void CheckFilledFrame(lua_State* state, int top)
+{
+    assert(lua_gettop(state) == top);
+    for (int index = 1; index <= top; ++index) assert(lua_tointeger(state, index) == 17);
+}
+
+// Catches Initialize pushes outside the valid current Lua API frame and failed
+// growth that must return contextually without pushing any unreserved values.
+static void CheckOccupiedStackInitialization(bool failGrowth)
+{
+    Project project;
+    project.Write("Stack.lua", "function Tick(dt) end");
+    StackAllocationFault fault;
+    std::vector<std::string> errors;
+    UScriptSubsystem scripts([&](std::string_view message) { errors.emplace_back(message); });
+    scripts.SetProjectRoot(project.root);
+    scripts.Init();
+    assert(scripts.LoadScriptAsset("Content/Scripts/Stack.lua")); // isolate initialization from compilation
+    lua_State* state = scripts.State();
+    InstallStackAllocator(state, fault);
+    const int top = FillApiFrame(state, failGrowth);
+    fault.reject = failGrowth;
+    auto instance = scripts.CreateScriptInstance("Content/Scripts/Stack.lua", "stack-owner");
+    fault.reject = false;
+    if (failGrowth)
+    {
+        assert(!instance && fault.rejected > 0);
+        Context(errors.back(), "Content/Scripts/Stack.lua", "stack-owner", "top-level");
+    }
+    else assert(instance);
+    CheckFilledFrame(state, top);
+    lua_settop(state, 0);
+}
+
+// Catches registry unref scratch pushes on a caller's full stack. Cleanup must
+// complete even when stack growth is unavailable, and must release real roots.
+static void CheckOccupiedStackRelease()
+{
+    Project project;
+    project.Write("Cleanup.lua", "local log = Engine.Log; local witness = setmetatable({}, "
+        "{__gc = function() log('released') end}); function Tick(dt) assert(witness) end");
+    StackAllocationFault fault;
+    std::vector<std::string> logs;
+    UScriptSubsystem scripts([&](std::string_view message) { logs.emplace_back(message); });
+    scripts.SetProjectRoot(project.root);
+    scripts.Init();
+    auto instance = scripts.CreateScriptInstance("Content/Scripts/Cleanup.lua", "cleanup-owner");
+    assert(instance);
+    lua_State* state = scripts.State();
+    InstallStackAllocator(state, fault);
+    const int top = FillApiFrame(state, true);
+    fault.reject = true;
+    instance.reset();
+    assert(fault.rejected == 0 && "registry cleanup attempted fallible stack growth");
+    fault.reject = false;
+    CheckFilledFrame(state, top);
+    lua_settop(state, 0);
+    lua_gc(state, LUA_GCCOLLECT);
+    assert((logs == std::vector<std::string>{"released"}));
+    // Shutdown must release subsystem references without using the caller's
+    // occupied frame either. Closing Lua may free memory but need not grow it.
+    FillApiFrame(state, true);
+    fault.reject = true;
+    scripts.Shutdown();
+    fault.reject = false;
+    assert(!scripts.State() && fault.rejected == 0);
+}
+
+int main(int argc, char** argv)
+{
+    if (argc == 2)
+    {
+        const std::string test = argv[1];
+        if (test == "race") CheckValidatedHandleSurvivesSubstitution();
+        else if (test == "case") CheckCaseSensitiveContainment();
+        else if (test == "stack-init") CheckOccupiedStackInitialization(false);
+        else if (test == "stack-failure") CheckOccupiedStackInitialization(true);
+        else if (test == "stack-release") CheckOccupiedStackRelease();
+        else assert(false && "unknown focused test");
+        std::cout << test << ": PASS\n";
+        return 0;
+    }
+    CheckValidatedHandleSurvivesSubstitution();
+    CheckCaseSensitiveContainment();
+    CheckOccupiedStackInitialization(false);
+    CheckOccupiedStackInitialization(true);
+    CheckOccupiedStackRelease();
     CheckAssetsAndIsolation();
     CheckCacheAndLifetime();
     CheckPathRejections();
