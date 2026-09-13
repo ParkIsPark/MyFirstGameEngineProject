@@ -6,10 +6,39 @@
 #include "UScriptSubsystem.h"
 #include "LuaInclude.h"
 #include <cassert>
+#include <cstdlib>
 #include <iostream>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+// Test-only allocation fault injection. Lua continues to use its real C
+// allocator; only C++ allocation during the selected catch scope is rejected.
+static bool rejectCppAllocation = false;
+
+void* operator new(std::size_t size)
+{
+    if (rejectCppAllocation) throw std::bad_alloc();
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc();
+}
+void* operator new[](std::size_t size) { return ::operator new(size); }
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete[](void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
+void operator delete[](void* memory, std::size_t) noexcept { std::free(memory); }
+
+struct InstallerAllocationFailure final : std::bad_alloc
+{
+    const char* what() const noexcept override
+    {
+        rejectCppAllocation = true;
+        // Longer than small-string storage: allocating conversion must fail.
+        return "allocation failure during installer diagnostics";
+    }
+    ~InstallerAllocationFailure() override { rejectCppAllocation = false; }
+};
 
 static void Run(lua_State* state, const char* code)
 {
@@ -110,11 +139,13 @@ static void CheckLogging()
 // binding-name context, leaked error stack, and partially initialized VM exposure.
 static void CheckInstallationFailures()
 {
-    for (bool nativeFailure : {false, true})
+    for (int failureKind : {0, 1, 2})
     {
+        const char* expected[] = {"Lua failure", "native failure", "unknown native exception"};
         FLuaBindingRegistry registry;
-        registry.Register("broken-binding", [nativeFailure](lua_State* state) {
-            if (nativeFailure) throw std::runtime_error("native failure");
+        registry.Register("broken-binding", [failureKind](lua_State* state) {
+            if (failureKind == 1) throw std::runtime_error("native failure");
+            if (failureKind == 2) throw 42;
             luaL_error(state, "Lua failure");
         });
         lua_State* state = luaL_newstate();
@@ -125,15 +156,16 @@ static void CheckInstallationFailures()
         catch (const std::runtime_error& error) {
             const std::string message = error.what();
             contextual = message.find("broken-binding") != std::string::npos &&
-                message.find(nativeFailure ? "native failure" : "Lua failure") != std::string::npos;
+                message.find(expected[failureKind]) != std::string::npos;
         }
         assert(contextual && lua_gettop(state) == 1 && lua_tointeger(state, -1) == 17);
         lua_close(state);
 
         std::vector<std::string> messages;
         UScriptSubsystem scripts([&](std::string_view message) { messages.emplace_back(message); });
-        scripts.Bindings().Register("broken-binding", [nativeFailure](lua_State* vm) {
-            if (nativeFailure) throw std::runtime_error("native failure");
+        scripts.Bindings().Register("broken-binding", [failureKind](lua_State* vm) {
+            if (failureKind == 1) throw std::runtime_error("native failure");
+            if (failureKind == 2) throw 42;
             luaL_error(vm, "Lua failure");
         });
         scripts.Init();
@@ -142,6 +174,35 @@ static void CheckInstallationFailures()
         assert(messages[0].find("broken-binding") != std::string::npos);
         scripts.Shutdown();
     }
+}
+
+// Catches a second allocation exception escaping from an installer catch
+// handler through C-compiled Lua, bypassing pcall's stack/frame restoration.
+static void CheckAllocationFailureConversion()
+{
+    FLuaBindingRegistry registry;
+    registry.Register("allocation-binding", [](lua_State*) { throw InstallerAllocationFailure{}; });
+    lua_State* state = luaL_newstate();
+    assert(state);
+    lua_pushinteger(state, 17);
+    bool contextual = false;
+    bool escapedAllocation = false;
+    try { registry.InstallAll(state); }
+    catch (const std::runtime_error& error)
+    {
+        const std::string message = error.what();
+        contextual = message.find("allocation-binding") != std::string::npos &&
+            message.find("allocation failure during installer diagnostics") != std::string::npos;
+    }
+    catch (const std::bad_alloc&) { escapedAllocation = true; }
+    assert(!escapedAllocation && "allocation exception escaped the Lua protected installer");
+    assert(contextual && !rejectCppAllocation);
+    assert(lua_gettop(state) == 1 && lua_tointeger(state, -1) == 17);
+    Run(state, "return 6 * 7");
+    assert(lua_gettop(state) == 2 && lua_tointeger(state, -1) == 42);
+    lua_pop(state, 1);
+    assert(lua_gettop(state) == 1 && lua_tointeger(state, -1) == 17);
+    lua_close(state);
 }
 
 // Catches a C++ sink exception escaping through Lua instead of a protected error.
@@ -159,6 +220,7 @@ int main()
     CheckRegistryInstallation();
     CheckLogging();
     CheckInstallationFailures();
+    CheckAllocationFailureConversion();
     CheckSinkFailure();
     std::cout << "script subsystem: PASS\n";
 }

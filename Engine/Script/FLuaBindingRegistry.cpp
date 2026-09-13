@@ -1,6 +1,7 @@
 #include "FLuaBindingRegistry.h"
 #include "LuaInclude.h"
 
+#include <cstdio>
 #include <stdexcept>
 #include <utility>
 
@@ -9,7 +10,7 @@ namespace
     struct InstallContext
     {
         const FLuaBindingInstaller& installer;
-        std::string nativeError;
+        char nativeError[1024] = {};
     };
 
     int InstallProtected(lua_State* state)
@@ -21,10 +22,17 @@ namespace
             context->installer(state);
             return 0;
         }
-        catch (const std::exception& error) { context->nativeError = error.what(); }
-        catch (...) { context->nativeError = "unknown native exception"; }
-        // All C++ exception scopes have ended before Lua can longjmp.
-        lua_pushlstring(state, context->nativeError.data(), context->nativeError.size());
+        catch (const std::exception& error)
+        {
+            std::snprintf(context->nativeError, sizeof(context->nativeError), "%s", error.what());
+        }
+        catch (...)
+        {
+            std::snprintf(context->nativeError, sizeof(context->nativeError), "unknown native exception");
+        }
+        // Conversion cannot allocate/throw inside a catch handler. All C++
+        // exception scopes have ended before Lua allocation can longjmp.
+        lua_pushstring(state, context->nativeError);
         return lua_error(state);
     }
 }
