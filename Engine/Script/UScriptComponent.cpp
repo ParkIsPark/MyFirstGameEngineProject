@@ -31,7 +31,8 @@ void UScriptComponent::BeginPlay() noexcept
                 ++index;
             }
         instance_ = subsystem_->CreateScriptInstance(scriptPath_,
-            (actor ? actor->name : "(unowned)") + " ScriptComponent[" + std::to_string(index) + "]");
+            "Actor=\"" + (actor ? actor->name : "(unowned)") +
+            "\" Component=ScriptComponent[" + std::to_string(index) + "]");
         if (instance_ && !stopRequested_ && instance_->BeginPlay()) begun_ = true;
         else instance_.reset();
     }

@@ -34,7 +34,11 @@ int main() {
     namespace fs = std::filesystem;
     const auto root = fs::temp_directory_path() / ("Lua editor boot " + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(root / "Content/Scripts");
-    std::ofstream(root / "Content/Scripts/Boot.lua") << "function BeginPlay() Engine.Log('boot begin') end";
+    std::ofstream(root / "Content/Scripts/Boot.lua") <<
+        "local count = 0\n"
+        "function BeginPlay() Engine.Log('boot begin:' .. count) end\n"
+        "function Tick() count = count + 1; Engine.Log('boot tick:' .. count) end\n"
+        "function EndPlay() Engine.Log('boot end:' .. count) end\n";
     UWorld source; auto* actor = new ALight(); actor->name = "Ordered clone";
     actor->AddComponent<UScriptComponent>().SetScriptPath("Content/Scripts/Boot.lua");
     actor->SetMesh(new UMeshComponent());
@@ -59,7 +63,30 @@ int main() {
         for (size_t i = 0; ordered && i < actor->Components().size(); ++i) ordered = actor->Components()[i]->TypeName() == cloned->Components()[i]->TypeName();
         check(ordered && cloned->mesh && cloned->lightComp && cloned->physics && cloned->physics->velocity == glm::vec3(0), "production CopyWorld preserves mixed component order typed aliases and resets physics");
         check(ordered && dynamic_cast<UScriptComponent*>(cloned->Components()[2].get())->ScriptPath() == second.ScriptPath() && !cloned->Components()[2]->IsEnabled(), "multiple script clone configuration stays at original indices");
-        copy->SetScriptSubsystem(editor.Scripts()); copy->BeginPlay(); copy->EndPlay(); editor.Scripts()->ClearScriptCache();
+        const std::string authoredBeforePIE = FWorldSerializer::Save(source);
+        for (int cycle = 0; cycle != 2; ++cycle)
+        {
+            std::unique_ptr<UWorld> pie(editor.CopyWorld(source, true));
+            std::ostringstream lifecycle;
+            prior = std::cout.rdbuf(lifecycle.rdbuf());
+            pie->SetScriptSubsystem(editor.Scripts());
+            pie->BeginPlay();
+            pie->Tick(0.25f);
+            pie->EndPlay();
+            std::cout.rdbuf(prior);
+            const std::string callbacks = lifecycle.str();
+            check(callbacks.find("boot begin:0") != std::string::npos &&
+                  callbacks.find("boot tick:1") != std::string::npos &&
+                  callbacks.find("boot end:1") != std::string::npos,
+                cycle == 0 ? "first production PIE helper cycle runs fresh lifecycle" :
+                             "second production PIE helper cycle runs fresh lifecycle");
+            bool released = true;
+            try { editor.Scripts()->ClearScriptCache(); }
+            catch (const std::logic_error&) { released = false; }
+            check(released && FWorldSerializer::Save(source) == authoredBeforePIE,
+                cycle == 0 ? "first PIE Stop releases runtime and preserves edit world" :
+                             "second PIE Stop releases runtime and preserves edit world");
+        }
     }
     {
         BootAdapter<Engine> game; game.StartupName("Startup");

@@ -84,6 +84,27 @@ Pick the mode from the toolbar; it is saved into the world and used by the stand
 - **Play** runs the world in the same window (physics + actor ticks); **Stop** reverts.
 - **Play (Window)** saves the world and launches it as a **separate game process** (`Test.exe --game`).
 
+### Lua Actor Scripting
+
+This project implements the engine-side Lua integration: component ownership, script loading and isolation, Play lifecycle, world serialization, editor assignment, and project packaging. Lua 5.4.9 itself is unmodified vendored upstream source, not coursework-authored code; its origin, license, checksum, and build notes are recorded in [`ThirdParty/Lua/README.md`](ThirdParty/Lua/README.md).
+
+To attach a script, select an Actor, choose **Details → + Add Component → Script Component**, then drop/choose a `.lua` asset or use **Import External .lua...**. Each Actor can have multiple Script Components. Select an attachment to toggle **Enabled**, **Clear** its assignment, or **Remove Component**. Save/reopen the world normally, then use **Play/Stop**; Lua never executes merely because the editor world is open. Put project scripts beneath `Content/Scripts`; packaging includes every in-root `.lua` file as data at the same relative path.
+
+The implementation is organized as follows:
+
+| Responsibility | Project code |
+|---|---|
+| VM lifetime and public binding seam | `Engine/Script/UScriptSubsystem.*`, `FLuaBindingRegistry.*` |
+| validated source/bytecode cache and isolated instances | `Engine/Script/FScriptPath.*`, `FLuaScriptCache.*`, `FLuaScriptInstance.*` |
+| Actor attachment and saved configuration | `Engine/Script/UScriptComponent.*`, `Engine/World/AActor.*`, `Engine/World/UWorld.*`, `Engine/Serialization/FWorldSerializer.*` |
+| editor assignment and PIE | `Engine/Editor/FEditorScriptWorkflow.cpp`, `FEditorAssetWorkflow.*`, `EditorEngine.cpp` |
+| generated projects and packaging | `Scripts/GenerateProject.ps1`, `Template/Package.ps1`, template project files |
+| acceptance examples/tests | `Content/Scripts/ExampleActor.lua`, `Test/*Script*Test*`, `Test/Fixtures/Scripts/` |
+
+Editor PIE enters the callback path as `Engine::Run → USubsystemManager::InitAll → EditorEngine::OnPlay → CopyWorld → UWorld::BeginPlay/Tick/EndPlay → AActor::Dispatch* → UScriptComponent → FLuaScriptInstance → Lua callback`. Standalone Game uses `Engine::Run → Engine::BootWorld → FWorldSerializer → UScriptSubsystem::Init → UWorld::BeginPlay/Tick/EndPlay → AActor → UScriptComponent → FLuaScriptInstance → Lua`. Stop unwinds in reverse: Lua `EndPlay` (only after a successful Begin), instance registry unrefs, component release, PIE/game world destruction, then subsystem cache/VM shutdown.
+
+The public milestone API is deliberately only `Engine.Log("message")`; callback signatures and limitations are in [`docs/scripting/lua-actor-scripting.md`](docs/scripting/lua-actor-scripting.md). In particular, the assignment cube still rotates in C++ through `AActor::Tick`: Lua has no Actor/transform API yet, and this milestone does not implement click-to-place.
+
 ---
 
 ## Worlds & assets

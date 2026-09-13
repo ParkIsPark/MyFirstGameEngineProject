@@ -181,8 +181,8 @@ void FLuaScriptInstance::Report(const char* phase, const char* detail) noexcept
 {
     try
     {
-        errorSink_("Lua [" + asset_->projectRelativePath.generic_string() + "] [" +
-            diagnosticOwner_ + "] " + phase + ": " + detail);
+        errorSink_("Lua " + diagnosticOwner_ + " Path=\"" +
+            asset_->projectRelativePath.generic_string() + "\" Phase=" + phase + ": " + detail);
     }
     catch (...) {} // Diagnostic sinks cannot escape a lifecycle boundary.
 }

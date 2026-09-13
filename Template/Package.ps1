@@ -111,7 +111,7 @@ Write-Host ''
 # ── Copy engine sources ───────────────────────────────────────────────────────
 Write-Host '  Copying engine sources...' -ForegroundColor Yellow
 
-$folders = @('Engine', 'include', 'lib')
+$folders = @('Engine', 'ThirdParty', 'include', 'lib')
 foreach ($folder in $folders) {
     $src = Join-Path $EngineRoot $folder
     if (-not (Test-Path -LiteralPath $src)) {

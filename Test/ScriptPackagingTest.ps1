@@ -63,10 +63,11 @@ Script = Content/Scripts/Referenced.lua
                  (Get-Content -LiteralPath (Join-Path $projectDir 'Content\Scripts\Nested\Unreferenced.lua') -Raw) -ceq 'unreferenced body') `
         'manifest discovery preserves original script contents and relative locations'
 
-    foreach ($folder in @('Engine', 'include', 'lib', 'bin')) {
+    foreach ($folder in @('Engine', 'include', 'lib', 'bin', 'ThirdParty\Lua\5.4.9\src')) {
         New-Item -ItemType Directory -Path (Join-Path $fakeEngine $folder) | Out-Null
     }
     Write-Utf8 (Join-Path $fakeEngine 'Engine\Marker.h') 'engine marker'
+    Write-Utf8 (Join-Path $fakeEngine 'ThirdParty\Lua\5.4.9\src\lua.h') 'vendored lua marker'
     Write-Utf8 (Join-Path $fakeEngine 'OpenglViewer.props') '<Project />'
     $engineForProps = $fakeEngine
     if (-not $engineForProps.EndsWith('\')) { $engineForProps += '\' }
@@ -78,6 +79,9 @@ Script = Content/Scripts/Referenced.lua
 "@
     $regularOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $packageScript -ProjectDir $projectDir)
     Assert-True ($LASTEXITCODE -eq 0) 'regular package freeze succeeds against a minimal engine root with spaces'
+    Assert-True ((Get-Content -LiteralPath (Join-Path $projectDir 'ThirdParty\Lua\5.4.9\src\lua.h') -Raw) -ceq
+                 'vendored lua marker') `
+        'regular package copies the vendored Lua build dependency into the self-contained project'
     $writtenManifest = @(Get-Content -LiteralPath (Join-Path $projectDir 'ScriptManifest.txt'))
     Assert-True (($writtenManifest -join "`n") -ceq ($manifest -join "`n")) `
         'regular package writes the same reparse-safe deterministic manifest as dry-run'

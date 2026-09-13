@@ -209,12 +209,14 @@ std::unique_ptr<FLuaScriptInstance> UScriptSubsystem::CreateScriptInstance(
     }
     catch (const std::exception& error)
     {
-        try { logSink_("Lua load [" + path.generic_string() + "] [" + diagnosticOwner + "]: " + error.what()); }
+        try { logSink_("Lua " + diagnosticOwner + " Path=\"" + path.generic_string() +
+            "\" Phase=load: " + error.what()); }
         catch (...) {}
     }
     catch (...)
     {
-        try { logSink_("Lua load [" + path.generic_string() + "] [" + diagnosticOwner + "]: unknown native exception"); }
+        try { logSink_("Lua " + diagnosticOwner + " Path=\"" + path.generic_string() +
+            "\" Phase=load: unknown native exception"); }
         catch (...) {}
     }
     return {};
