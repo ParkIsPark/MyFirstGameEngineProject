@@ -22,11 +22,13 @@ UWorld* GameEngine::WorldSetting()
         std::printf("[Game] no explicit world -- using project StartupWorld.\n");
         return nullptr;
     }
-    UWorld* w = FWorldSerializer::LoadFromFile(worldPath_.c_str());
+    UWorld* w = FWorldSerializer::LoadFromFile(worldPath_.c_str(), proj_.defaultRenderFeatures);
     if (!w)
     {
         std::printf("[Game] could not load '%s' -- starting empty.\n", worldPath_.c_str());
-        return new UWorld();
+        w = new UWorld();
+        w->GetScene().renderFeatures = proj_.defaultRenderFeatures;
+        return w;
     }
     std::printf("[Game] loaded '%s' (%d actors)\n",
                 worldPath_.c_str(), (int)w->GetScene().Actors.size());
@@ -48,5 +50,5 @@ void GameEngine::Render()
     cam.SetOrientation(cam.yaw, cam.pitch);
     cam.SetFOV(cam.fov, (float)Width() / (float)Height());
 
-    worldRenderer_.Render(*w, scene.renderMode, Width(), Height());   // render-mode honored
+    worldRenderer_.Render(*w, scene.renderFeatures, Width(), Height());
 }

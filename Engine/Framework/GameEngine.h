@@ -6,8 +6,7 @@
 // ---------------------------------------------------------------------------
 // GameEngine (P9) — the standalone GAME runtime: an Engine with NO editor/ImGui.
 // It loads a .world, runs the world lifecycle (BeginPlay -> physics + actor tick),
-// and renders it with the world's stored render mode (Rasterizer / GPU RT /
-// Hybrid) via UWorldRenderer.
+// and renders it with the world's named render features via UWorldRenderer.
 //
 // This is what `Test.exe --game <world>` launches, what the editor's
 // "Play (Window)" spawns as a separate process, and what a packaged game

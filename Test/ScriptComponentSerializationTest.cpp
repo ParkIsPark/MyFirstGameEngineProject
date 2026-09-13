@@ -162,8 +162,8 @@ int main()
         AActor* loaded = loadedWorld && !loadedWorld->GetScene().Actors.empty()
             ? loadedWorld->GetScene().Actors.front() : nullptr;
         const auto scripts = loaded ? ScriptComponents(*loaded) : std::vector<UScriptComponent*>{};
-        Check("format 2 world preserves script component order, state, and spatial attachment",
-            saved.find("WorldFormat = 2") != std::string::npos && loaded &&
+        Check("format 3 world preserves script component order, state, and spatial attachment",
+            saved.find("WorldFormat = 3") != std::string::npos && loaded &&
             loaded->Components().size() == 3 && scripts.size() == 2 &&
             scripts[0]->ScriptPath() == std::filesystem::path("Content/Scripts/First.lua") && !scripts[0]->IsEnabled() &&
             scripts[1]->ScriptPath() == std::filesystem::path("Content/Scripts/Second.lua") && scripts[1]->IsEnabled() &&
@@ -230,19 +230,25 @@ int main()
         delete loaded;
     }
 
-    // Mutation caught: dropping format-1 component defaults or making a format-2 fixture unstable.
+    // Mutation caught: dropping format-1/2 component defaults or making a format-3 fixture unstable.
     {
         UWorld* old = FWorldSerializer::Load(
             "WorldFormat = 1\n\n[Actor]\nType = Actor\nName = Legacy\nLoc = 1 2 3\n\n"
             "[Collision]\nShape = Box\n");
+        UWorld* old2 = FWorldSerializer::Load(
+            "WorldFormat = 2\n\n[Actor]\nType = Actor\nName = LegacyTwo\n\n"
+            "[Component]\nType = ScriptComponent\nEnabled = 0\nScript = Content/Scripts/Old.lua\n");
         const std::string fixture = ReadFixture();
         UWorld* fixtureLoaded = FWorldSerializer::Load(fixture);
         const std::string resaved = fixtureLoaded ? FWorldSerializer::Save(*fixtureLoaded) : "";
-        Check("format 1 preserves existing component defaults and format 2 fixture is save-load-save stable",
+        Check("format 1/2 preserve component defaults and format 3 fixture is save-load-save stable",
             old && old->GetScene().Actors.size() == 1 && old->GetScene().Actors.front()->name == "Legacy" &&
             old->GetScene().Actors.front()->physics && old->GetScene().Actors.front()->physics->IsEnabled() &&
+            old2 && old2->GetScene().Actors.size() == 1 && ScriptComponents(*old2->GetScene().Actors.front()).size() == 1 &&
+            !ScriptComponents(*old2->GetScene().Actors.front()).front()->IsEnabled() &&
             fixtureLoaded && fixture == resaved);
         delete old;
+        delete old2;
         delete fixtureLoaded;
     }
 

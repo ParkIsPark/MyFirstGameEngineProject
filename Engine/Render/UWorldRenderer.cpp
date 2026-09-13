@@ -35,8 +35,9 @@ void UWorldRenderer::Init()
     ready_ = true;
 }
 
-void UWorldRenderer::Render(UWorld& world, int mode, int w, int h)
+void UWorldRenderer::Render(UWorld& world, const FRenderFeatures& features, int w, int h)
 {
+    const int mode = RenderCompatibility::LegacyModeForNamedFeatures(features);
     if (mode == 0 || !ready_) renderRaster(world, w, h);
     else                      renderGPU(world, mode, w, h);
 }

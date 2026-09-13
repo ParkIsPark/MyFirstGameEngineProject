@@ -7,15 +7,24 @@
 #include "ThreadPool.h"
 #include "USkyHDRI.h"
 #include "FRenderQuality.h"
+#include "FRenderFeatures.h"
 
 class UWorld;
 
+// Temporary bridge while the legacy render implementations remain underneath
+// named settings. Normal settings can select only RasterOnly (0) or Hybrid (2).
+namespace RenderCompatibility
+{
+    inline int LegacyModeForNamedFeatures(const FRenderFeatures& features)
+    {
+        return features.rayTracing ? 2 : 0;
+    }
+}
+
 // ---------------------------------------------------------------------------
-// UWorldRenderer (P9) — renders a UWorld in any mode (0 Rasterizer / 1 GPU RT /
-// 2 Hybrid) into the CURRENTLY BOUND framebuffer at viewport (0,0,w,h). Owns the
-// GPU passes + the camera-independent geometry-upload cache. Used by GameEngine
-// (default framebuffer) so the standalone game honors the world's render mode;
-// reusable by the editor.
+// UWorldRenderer (P9) — renders named world features into the currently bound
+// framebuffer. During migration it owns the legacy passes and routes RT-off to
+// Rasterizer and RT-on to Hybrid; Pure GPU RT is not reachable from normal settings.
 //
 // Raster mode shades to scene.outputImage (URenderer::RasterShaded) then blits
 // with glDrawPixels; the GPU modes draw a fullscreen pass. The caller sets up the
@@ -25,7 +34,7 @@ class UWorldRenderer
 {
 public:
     void Init();                                       // compile GPU passes (GL ready)
-    void Render(UWorld& world, int mode, int w, int h);
+    void Render(UWorld& world, const FRenderFeatures& features, int w, int h);
 
 private:
     void renderRaster(UWorld& world, int w, int h);

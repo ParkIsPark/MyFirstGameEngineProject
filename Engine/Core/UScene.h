@@ -4,6 +4,7 @@
 #include "AActor.h"
 #include "../Light/ALight.h"
 #include "UPostProcessFilter.h"
+#include "../Render/FRenderFeatures.h"
 
 class UScene
 {
@@ -20,10 +21,9 @@ public:
     // Stored as int to avoid a Core->Rasterizer dependency; serialized in [World].
     int shadingModel = 2;
 
-    // Render mode the world is authored for (0 Rasterizer, 1 GPU RT, 2 Hybrid).
-    // The editor toolbar drives it; the standalone game honors it. Serialized in
-    // [World] so a saved/played world renders the same way it did in the editor.
-    int renderMode = 0;
+    // Authoritative per-world renderer configuration. Hardware raster primary
+    // visibility is mandatory; optional ray effects are independently authored.
+    FRenderFeatures renderFeatures;
 
     // Equirectangular .hdr environment map path (empty = procedural gradient).
     // Sampled by the GPU paths' skyColor() for background + ambient. [World].

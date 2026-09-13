@@ -51,12 +51,15 @@ int main()
     {
         writeFile("ini_test.engine.tmp",
             "[Display]\nTitle = Game X\nWidth = 800\nHeight = 600\n"
-            "[Render]\nMode = Hybrid\n[Startup]\nDefaultWorld = Level1\n");
+            "[Render]\nMode = Hybrid\nRayTracing = 0\nRayTracingBackend = Compute\n"
+            "[Startup]\nDefaultWorld = Level1\n");
         FProjectDescriptor d;
         bool ok = d.LoadSettings("ini_test.engine.tmp");
         ck("T8", "LoadSettings Display/Render/Startup",
            ok && d.windowTitle == "Game X" && d.width == 800 && d.height == 600 &&
-           d.renderMode == EProjectRenderMode::Hybrid && d.startupWorld == "Level1");
+           !d.defaultRenderFeatures.rayTracing &&
+           d.defaultRenderFeatures.rayTracingBackend == ERayTracingBackend::ComputeGL43 &&
+           d.startupWorld == "Level1");
         std::remove("ini_test.engine.tmp");
     }
     // FProjectDescriptor.LoadProject (.proj manifest)

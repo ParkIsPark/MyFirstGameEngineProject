@@ -2,6 +2,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include "../Render/FRenderFeatures.h"
 
 class UWorld;
 
@@ -21,8 +22,8 @@ namespace FWorldSerializer
 
     std::string Save(UWorld& world);
     bool        SaveToFile(UWorld& world, const char* path);
-    UWorld*     Load(const std::string& text);     // caller owns the world
-    UWorld*     LoadFromFile(const char* path);
+    UWorld*     Load(const std::string& text, const FRenderFeatures& defaults = FRenderFeatures{}); // caller owns
+    UWorld*     LoadFromFile(const char* path, const FRenderFeatures& defaults = FRenderFeatures{});
     // Empty restores the default stderr diagnostic behavior.
     void        SetWarningSink(FWarningSink sink);
 }

@@ -146,14 +146,21 @@ Copy-Item (Join-Path $TemplateDir 'Package.ps1') (Join-Path $dest 'Package.ps1')
 
 # Content\DefaultWorld.world (starter: a sphere + a point light)
 $world = @'
-WorldFormat = 1
+WorldFormat = 3
 
 [World]
 ShadingModel = 2
-RenderMode = 0
 FloorEnabled = 0
 FloorY = -2.5
 Gravity = 0 -9.8 0
+
+[RenderFeatures]
+HardwareRaster = 1
+RayTracing = 0
+RayTracedShadows = 1
+RayTracedGI = 1
+RayTracedReflections = 1
+RayTracingBackend = Auto
 
 [Camera]
 Position = 0 1 6

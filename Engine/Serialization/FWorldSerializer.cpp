@@ -22,6 +22,8 @@
 #include <utility>
 #include <iostream>
 #include <memory>
+#include <algorithm>
+#include <cctype>
 
 namespace
 {
@@ -40,6 +42,71 @@ namespace
         size_t b = s.find_last_not_of(" \t\r\n");
         return s.substr(a, b - a + 1);
     }
+
+    std::string lower(std::string value)
+    {
+        std::transform(value.begin(), value.end(), value.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return value;
+    }
+
+    bool ParseBool(const std::string& text, bool& value)
+    {
+        const std::string v = lower(trim(text));
+        if (v == "1" || v == "true" || v == "yes" || v == "on") { value = true; return true; }
+        if (v == "0" || v == "false" || v == "no" || v == "off") { value = false; return true; }
+        return false;
+    }
+
+    const char* BackendName(ERayTracingBackend backend)
+    {
+        switch (backend)
+        {
+            case ERayTracingBackend::Auto:           return "Auto";
+            case ERayTracingBackend::CompatibleGL33: return "Compatible";
+            case ERayTracingBackend::ComputeGL43:    return "Compute";
+        }
+        return "Auto";
+    }
+
+    bool ParseBackend(const std::string& text, ERayTracingBackend& backend)
+    {
+        const std::string v = lower(trim(text));
+        if (v == "auto")       { backend = ERayTracingBackend::Auto; return true; }
+        if (v == "compatible") { backend = ERayTracingBackend::CompatibleGL33; return true; }
+        if (v == "compute")    { backend = ERayTracingBackend::ComputeGL43; return true; }
+        return false;
+    }
+
+    bool ApplyLegacyMode(int mode, FRenderFeatures& features)
+    {
+        if (mode < 0 || mode > 2) return false;
+        features.hardwareRaster = true;
+        features.rayTracing = mode == 1 || mode == 2;
+        features.rayTracedShadows = true;
+        features.rayTracedGI = true;
+        features.rayTracedReflections = true;
+        features.rayTracingBackend = ERayTracingBackend::Auto;
+        return true;
+    }
+
+    bool ParseLegacyMode(const std::string& text, int& mode)
+    {
+        const std::string token = trim(text);
+        if (token.empty()) return false;
+        try
+        {
+            size_t consumed = 0;
+            const int parsed = std::stoi(token, &consumed);
+            if (consumed != token.size() || parsed < 0 || parsed > 2) return false;
+            mode = parsed;
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
 }
 
 std::string FWorldSerializer::Save(UWorld& world)
@@ -47,18 +114,31 @@ std::string FWorldSerializer::Save(UWorld& world)
     UScene&  sc  = world.GetScene();
     ACamera& cam = world.GetCamera();
 
-    std::string out = "WorldFormat = 2\n\n";
+    sc.renderFeatures.hardwareRaster = true;
+    std::string out = "WorldFormat = 3\n\n";
 
     out += "[World]\n";
     {
         FSaveArchive a;
         int sm = sc.shadingModel; a.Field("ShadingModel", sm);
-        int rm = sc.renderMode;   a.Field("RenderMode", rm);
         std::string sky = sc.skyHDRI; a.Field("SkyHDRI", sky);
         UPhysicsWorld& phys = world.GetPhysics();
         int gravEnabled = phys.enableFloor ? 1 : 0; a.Field("FloorEnabled", gravEnabled);
         float fy = phys.floorY; a.Field("FloorY", fy);
         glm::vec3 g = phys.gravity; a.Field("Gravity", g);
+        out += a.str();
+    }
+    out += "\n";
+
+    out += "[RenderFeatures]\n";
+    {
+        FSaveArchive a;
+        bool hardware = true; a.Field("HardwareRaster", hardware);
+        bool rayTracing = sc.renderFeatures.rayTracing; a.Field("RayTracing", rayTracing);
+        bool shadows = sc.renderFeatures.rayTracedShadows; a.Field("RayTracedShadows", shadows);
+        bool gi = sc.renderFeatures.rayTracedGI; a.Field("RayTracedGI", gi);
+        bool reflections = sc.renderFeatures.rayTracedReflections; a.Field("RayTracedReflections", reflections);
+        std::string backend = BackendName(sc.renderFeatures.rayTracingBackend); a.Field("RayTracingBackend", backend);
         out += a.str();
     }
     out += "\n";
@@ -125,15 +205,22 @@ bool FWorldSerializer::SaveToFile(UWorld& world, const char* path)
     return (bool)f;
 }
 
-UWorld* FWorldSerializer::Load(const std::string& text)
+UWorld* FWorldSerializer::Load(const std::string& text, const FRenderFeatures& defaults)
 {
     // A direct symbol reference forces the concrete script component TU from a
     // static Engine.lib before factory lookup.
     RegisterScriptComponentType();
     UWorld* world = new UWorld();
     UScene& sc = world->GetScene();
+    sc.renderFeatures = defaults;
     AActor* curActor = nullptr;
     std::vector<std::pair<AActor*, std::string>> pendingParents;   // (child, parent name)
+
+    int worldFormat = 1;
+    const size_t firstSection = text.find('[');
+    FLoadArchive top(text.substr(0, firstSection));
+    top.Field("WorldFormat", worldFormat);
+    bool migratedLegacy = false;
 
     auto flush = [&](const std::string& hdr, const std::string& body)
     {
@@ -143,12 +230,49 @@ UWorld* FWorldSerializer::Load(const std::string& text)
         if (hdr == "World")
         {
             int sm = sc.shadingModel; a.Field("ShadingModel", sm); sc.shadingModel = sm;
-            int rm = sc.renderMode;   a.Field("RenderMode", rm);   sc.renderMode = rm;
+            if (worldFormat <= 2 && a.HasField("RenderMode"))
+            {
+                std::string token; a.Field("RenderMode", token);
+                int mode = 0;
+                if (ParseLegacyMode(token, mode))
+                    migratedLegacy = ApplyLegacyMode(mode, sc.renderFeatures) || migratedLegacy;
+            }
             std::string sky = sc.skyHDRI; a.Field("SkyHDRI", sky); sc.skyHDRI = sky;
             UPhysicsWorld& phys = world->GetPhysics();
             int fe = phys.enableFloor ? 1 : 0; a.Field("FloorEnabled", fe); phys.enableFloor = (fe != 0);
             float fy = phys.floorY; a.Field("FloorY", fy); phys.floorY = fy;
             glm::vec3 g = phys.gravity; a.Field("Gravity", g); phys.gravity = g;
+        }
+        else if (hdr == "RenderFeatures" && worldFormat >= 3)
+        {
+            auto readBool = [&](const char* key, bool& destination)
+            {
+                if (!a.HasField(key)) return;
+                std::string value; a.Field(key, value);
+                bool parsed = false;
+                if (ParseBool(value, parsed)) destination = parsed;
+            };
+            readBool("HardwareRaster", sc.renderFeatures.hardwareRaster);
+            readBool("RayTracing", sc.renderFeatures.rayTracing);
+            readBool("RayTracedShadows", sc.renderFeatures.rayTracedShadows);
+            readBool("RayTracedGI", sc.renderFeatures.rayTracedGI);
+            readBool("RayTracedReflections", sc.renderFeatures.rayTracedReflections);
+            if (a.HasField("RayTracingBackend"))
+            {
+                std::string value; a.Field("RayTracingBackend", value);
+                ERayTracingBackend backend;
+                if (ParseBackend(value, backend)) sc.renderFeatures.rayTracingBackend = backend;
+                else
+                {
+                    sc.renderFeatures.rayTracingBackend = ERayTracingBackend::Auto;
+                    Warn("unknown RayTracingBackend '" + value + "'; using Auto");
+                }
+            }
+            if (!sc.renderFeatures.hardwareRaster)
+            {
+                sc.renderFeatures.hardwareRaster = true;
+                Warn("HardwareRaster=0 is unsupported; normalized to 1");
+            }
         }
         else if (hdr == "Camera")
         {
@@ -261,6 +385,8 @@ UWorld* FWorldSerializer::Load(const std::string& text)
     }
     flush(header, body);
 
+    if (migratedLegacy)
+        Warn("legacy RenderMode migrated to named render features");
     // Wire scene-graph parents by name (relative transforms were saved as-is, so
     // attaching reproduces the original world transforms).
     for (auto& pp : pendingParents)
@@ -280,10 +406,10 @@ void FWorldSerializer::SetWarningSink(FWarningSink sink)
     g_warningSink = std::move(sink);
 }
 
-UWorld* FWorldSerializer::LoadFromFile(const char* path)
+UWorld* FWorldSerializer::LoadFromFile(const char* path, const FRenderFeatures& defaults)
 {
     std::ifstream f(path);
     if (!f) return nullptr;
     std::stringstream ss; ss << f.rdbuf();
-    return Load(ss.str());
+    return Load(ss.str(), defaults);
 }

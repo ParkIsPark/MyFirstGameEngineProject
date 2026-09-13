@@ -50,8 +50,22 @@
 #include "stb_image.h"          // declaration only; impl lives in USkyHDRI.cpp
 
 namespace {
-    const char* kModes[]   = { "Rasterizer", "GPU RT", "Hybrid" };
     const char* kShading[] = { "Flat", "Gouraud", "Phong" };
+    const char* kBackends[] = { "Auto", "Compatible", "Compute" };
+
+    int BackendIndex(ERayTracingBackend backend)
+    {
+        if (backend == ERayTracingBackend::CompatibleGL33) return 1;
+        if (backend == ERayTracingBackend::ComputeGL43) return 2;
+        return 0;
+    }
+
+    ERayTracingBackend BackendFromIndex(int index)
+    {
+        if (index == 1) return ERayTracingBackend::CompatibleGL33;
+        if (index == 2) return ERayTracingBackend::ComputeGL43;
+        return ERayTracingBackend::Auto;
+    }
 
     // Load an image file into a Material's CPU diffuse texture (used by the CPU
     // raster's SampleDiffuse). stb impl is in USkyHDRI.cpp.
@@ -191,7 +205,6 @@ void EditorEngine::SetEditorWorld(UWorld* w, const std::string& name)
     worldName_   = name;
     RebuildActorNames();
     selected_    = editorWorld_->GetScene().Actors.empty() ? -1 : 0;
-    renderMode_  = editorWorld_->GetScene().renderMode;     // adopt the world's render mode
 
     // Adopt the loaded world's camera into the editor fly-cam state.
     ACamera& cam = editorWorld_->GetCamera();
@@ -220,20 +233,21 @@ void EditorEngine::PushUndo()
     redoStack_.clear();                                 // a new edit forks the timeline
 }
 
-// View settings (camera + render/shading mode) are NOT part of the undo history:
-// moving the camera or switching render mode must not be reverted by Ctrl+Z, and
+// View settings (camera + render features/shading) are NOT part of undo history:
+// moving the camera or changing render features must not be reverted by Ctrl+Z, and
 // undoing an edit must not jump the camera. Capture them before a snapshot swap
 // and restore after.
 void EditorEngine::Undo()
 {
     if (undoStack_.empty() || !editorWorld_) return;
     const glm::vec3 eye = camEye_; const float yaw = camYaw_, pit = camPitch_;
-    const int rm = renderMode_, sm = editorWorld_->GetScene().shadingModel;
+    const FRenderFeatures features = editorWorld_->GetScene().renderFeatures;
+    const int sm = editorWorld_->GetScene().shadingModel;
     redoStack_.push_back(CopyWorld(*editorWorld_));     // current -> redo
     UWorld* prev = undoStack_.back(); undoStack_.pop_back();
     SetEditorWorld(prev, worldName_);                   // adopts prev (takes ownership)
     camEye_ = eye; camYaw_ = yaw; camPitch_ = pit;
-    renderMode_ = rm; editorWorld_->GetScene().renderMode = rm;
+    editorWorld_->GetScene().renderFeatures = features;
     editorWorld_->GetScene().shadingModel = sm;
 }
 
@@ -241,24 +255,27 @@ void EditorEngine::Redo()
 {
     if (redoStack_.empty() || !editorWorld_) return;
     const glm::vec3 eye = camEye_; const float yaw = camYaw_, pit = camPitch_;
-    const int rm = renderMode_, sm = editorWorld_->GetScene().shadingModel;
+    const FRenderFeatures features = editorWorld_->GetScene().renderFeatures;
+    const int sm = editorWorld_->GetScene().shadingModel;
     undoStack_.push_back(CopyWorld(*editorWorld_));     // current -> undo
     UWorld* next = redoStack_.back(); redoStack_.pop_back();
     SetEditorWorld(next, worldName_);                   // adopts next (takes ownership)
     camEye_ = eye; camYaw_ = yaw; camPitch_ = pit;
-    renderMode_ = rm; editorWorld_->GetScene().renderMode = rm;
+    editorWorld_->GetScene().renderFeatures = features;
     editorWorld_->GetScene().shadingModel = sm;
 }
 
 void EditorEngine::NewWorld()
 {
-    SetEditorWorld(new UWorld(), "Untitled");
+    UWorld* world = new UWorld();
+    world->GetScene().renderFeatures = proj_.defaultRenderFeatures;
+    SetEditorWorld(world, "Untitled");
     ClearHistory();
 }
 
 void EditorEngine::LoadWorld(const std::string& path)
 {
-    UWorld* w = FWorldSerializer::LoadFromFile(path.c_str());
+    UWorld* w = FWorldSerializer::LoadFromFile(path.c_str(), proj_.defaultRenderFeatures);
     if (!w) { std::printf("[Editor] Load failed: %s\n", path.c_str()); return; }
     const std::string worldName = EditorWorldNameFromPath(contentDir_, path).generic_string();
     SetEditorWorld(w, worldName);
@@ -501,7 +518,7 @@ UWorld* EditorEngine::CopyWorld(UWorld& src, bool resetPhysics)
     auto destination = std::make_unique<UWorld>();
     UWorld* dst = destination.get();
     dst->GetScene().shadingModel = src.GetScene().shadingModel;
-    dst->GetScene().renderMode   = src.GetScene().renderMode;
+    dst->GetScene().renderFeatures = src.GetScene().renderFeatures;
     dst->GetScene().skyHDRI      = src.GetScene().skyHDRI;
     dst->GetCamera() = src.GetCamera();                 // value copy of all camera fields
     dst->GetPhysics() = src.GetPhysics();               // floor/gravity settings
@@ -577,6 +594,7 @@ void EditorEngine::OnStartup()
 
     LoadRenderSettings();
     editorWorld_ = new UWorld();
+    editorWorld_->GetScene().renderFeatures = proj_.defaultRenderFeatures;
     ScanContent();
 
     // Boot into the configured DefaultWorld (Project Settings) if it exists,
@@ -1322,13 +1340,17 @@ void EditorEngine::DrawProjectSettings()
 {
     namespace fs = std::filesystem;
     static char buf[128];
-    ImGui::SetNextWindowSize(ImVec2(440, 190), ImGuiCond_FirstUseEver);
+    static FRenderFeatures projectFeatures;
+    ImGui::SetNextWindowSize(ImVec2(520, 330), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Project Settings", &showProjectSettings_))
     {
         if (ImGui::IsWindowAppearing())
         {
             FIniFile ini; std::string def;
             if (ini.LoadFromFile("Setting/DefaultEngine.ini")) def = ini.GetString("Startup", "DefaultWorld", "");
+            FProjectDescriptor descriptor;
+            descriptor.LoadSettings("Setting/DefaultEngine.ini");
+            projectFeatures = descriptor.defaultRenderFeatures;
             std::snprintf(buf, sizeof(buf), "%s", def.c_str());
         }
         ImGui::TextDisabled("DefaultWorld: loaded on editor startup (and by a packaged game).");
@@ -1345,18 +1367,35 @@ void EditorEngine::DrawProjectSettings()
         }
         if (ImGui::SmallButton("Use Current World")) std::snprintf(buf, sizeof(buf), "%s", worldName_.c_str());
         ImGui::Separator();
+        bool hardwareRaster = true;
+        ImGui::BeginDisabled(); ImGui::Checkbox("Hardware Raster (required)", &hardwareRaster); ImGui::EndDisabled();
+        ImGui::Checkbox("Ray Tracing", &projectFeatures.rayTracing);
+        ImGui::BeginDisabled(!projectFeatures.rayTracing);
+        ImGui::Checkbox("Ray-Traced Shadows", &projectFeatures.rayTracedShadows);
+        ImGui::Checkbox("Ray-Traced GI", &projectFeatures.rayTracedGI);
+        ImGui::Checkbox("Ray-Traced Reflections", &projectFeatures.rayTracedReflections);
+        int backend = BackendIndex(projectFeatures.rayTracingBackend);
+        if (ImGui::Combo("Ray Tracing Backend", &backend, kBackends, 3))
+            projectFeatures.rayTracingBackend = BackendFromIndex(backend);
+        ImGui::EndDisabled();
+        ImGui::Separator();
         if (ImGui::Button("Save"))
         {
             FIniFile ini; ini.LoadFromFile("Setting/DefaultEngine.ini");   // preserve existing keys
             const std::string title = ini.GetString("Display", "Title", "MyEngine Editor");
             const int dw = ini.GetInt("Display", "Width", 1280), dh = ini.GetInt("Display", "Height", 800);
-            const std::string mode = ini.GetString("Render", "Mode", "Rasterizer");
             std::error_code ec; fs::create_directories("Setting", ec);
             std::ofstream f("Setting/DefaultEngine.ini");
             if (f) f << "# Engine boot settings (edited via Project Settings).\n"
                      << "[Display]\nTitle = " << title << "\nWidth = " << dw << "\nHeight = " << dh << "\n\n"
-                     << "[Render]\nMode = " << mode << "\n\n"
+                     << "[Render]\nHardwareRaster = 1\n"
+                     << "RayTracing = " << (projectFeatures.rayTracing ? 1 : 0) << "\n"
+                     << "RayTracedShadows = " << (projectFeatures.rayTracedShadows ? 1 : 0) << "\n"
+                     << "RayTracedGI = " << (projectFeatures.rayTracedGI ? 1 : 0) << "\n"
+                     << "RayTracedReflections = " << (projectFeatures.rayTracedReflections ? 1 : 0) << "\n"
+                     << "RayTracingBackend = " << FProjectDescriptor::RayTracingBackendName(projectFeatures.rayTracingBackend) << "\n\n"
                      << "[Startup]\nDefaultWorld = " << buf << "\n";
+            proj_.defaultRenderFeatures = projectFeatures;
             std::printf("[Editor] DefaultWorld = %s\n", buf);
         }
         ImGui::SameLine(); ImGui::TextDisabled("-> Setting/DefaultEngine.ini");
@@ -1400,7 +1439,9 @@ void EditorEngine::DrawStatusBar(float x, float y, float w, float h)
                            playing_ ? "Play-In-Editor" : "Editor Mode");
         ImGui::SameLine(); ImGui::TextDisabled("|  Selected: %s",
             (selected_ >= 0 && selected_ < (int)actorNames_.size()) ? actorNames_[selected_].c_str() : "(none)");
-        ImGui::SameLine(); ImGui::TextDisabled("|  Mode: %s", kModes[renderMode_]);
+        const FRenderFeatures& features = ActiveWorld().GetScene().renderFeatures;
+        ImGui::SameLine(); ImGui::TextDisabled("|  Hardware Raster | RT %s (%s)",
+            features.rayTracing ? "On" : "Off", FProjectDescriptor::RayTracingBackendName(features.rayTracingBackend));
         ImGui::SameLine(ImGui::GetWindowWidth() - 150);
         ImGui::TextDisabled("Alt+P Play  *  %.0f FPS", ImGui::GetIO().Framerate);
     }
@@ -1426,10 +1467,22 @@ void EditorEngine::DrawToolbar()
     if (ImGui::Button("Redo")) Redo();
     ImGui::EndDisabled();
 
+    FRenderFeatures& features = ActiveWorld().GetScene().renderFeatures;
+    features.hardwareRaster = true;
     ImGui::SameLine(0, 16);
-    ImGui::TextDisabled("Render Mode"); ImGui::SameLine();
-    for (int i = 0; i < 3; ++i) { if (i) ImGui::SameLine(); if (ImGui::RadioButton(kModes[i], renderMode_ == i)) renderMode_ = i; }
-    ActiveWorld().GetScene().renderMode = renderMode_;   // persist into the world (.world save)
+    bool hardwareRaster = true;
+    ImGui::BeginDisabled(); ImGui::Checkbox("Hardware Raster", &hardwareRaster); ImGui::EndDisabled();
+    ImGui::SameLine(); ImGui::Checkbox("Ray Tracing", &features.rayTracing);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!features.rayTracing);
+    ImGui::Checkbox("Shadows", &features.rayTracedShadows); ImGui::SameLine();
+    ImGui::Checkbox("GI", &features.rayTracedGI); ImGui::SameLine();
+    ImGui::Checkbox("Reflections", &features.rayTracedReflections);
+    ImGui::SameLine();
+    int backend = BackendIndex(features.rayTracingBackend);
+    ImGui::SetNextItemWidth(110.0f);
+    if (ImGui::Combo("##RTBackend", &backend, kBackends, 3)) features.rayTracingBackend = BackendFromIndex(backend);
+    ImGui::EndDisabled();
 
     // Shading model (HW6 Q1-Q3) drives the CPU raster preview (editor + PIE raster).
     ImGui::SameLine(0, 16);
@@ -1975,10 +2028,11 @@ void EditorEngine::EnsureViewportTex(int w, int h)
 
 void EditorEngine::DrawViewport()
 {
-    const int hintMode = renderMode_;
-    ImGui::TextDisabled("[%s%s%s] %s   (RMB-drag + WASD/QE to fly, LMB to pick)",
-                        kModes[hintMode],
-                        hintMode == 0 ? " / " : "", hintMode == 0 ? kShading[ActiveWorld().GetScene().shadingModel] : "",
+    const FRenderFeatures& viewportFeatures = ActiveWorld().GetScene().renderFeatures;
+    ImGui::TextDisabled("[Hardware Raster%s%s%s] %s   (RMB-drag + WASD/QE to fly, LMB to pick)",
+                        viewportFeatures.rayTracing ? " + RT (" : " / ",
+                        viewportFeatures.rayTracing ? FProjectDescriptor::RayTracingBackendName(viewportFeatures.rayTracingBackend) : kShading[ActiveWorld().GetScene().shadingModel],
+                        viewportFeatures.rayTracing ? ")" : "",
                         playing_ ? "Playing (PIE)" : "Editor World");
     ImGui::Separator();
 
@@ -1993,9 +2047,9 @@ void EditorEngine::DrawViewport()
     cam.SetOrientation(camYaw_, camPitch_);
     cam.SetFOV(60.0f, (float)w / (float)h);
 
-    // Render per the toolbar Render Mode (Rasterizer / GPU RT / Hybrid) in both
-    // editor and PIE. Rasterizer is the lit shaded preview (Flat/Gouraud/Phong).
-    const int effMode = renderMode_;
+    // Named RT-off routes to legacy raster and RT-on to legacy Hybrid until the
+    // shared hardware renderer replaces this compatibility bridge.
+    const int effMode = RenderCompatibility::LegacyModeForNamedFeatures(world.GetScene().renderFeatures);
 
     // Super-sample AA: render at ssaa_x resolution; the LINEAR-filtered Image draws
     // it back at screen size (downscale = antialiasing). UI/picking use screen w/h.

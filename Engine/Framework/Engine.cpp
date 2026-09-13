@@ -107,7 +107,12 @@ int Engine::Run(const char* projPath)
             handleResize(proj_.width, proj_.height);
             std::cout << "[Engine] project '" << proj_.projectName << "' / '"
                       << proj_.windowTitle << "' " << proj_.width << "x" << proj_.height
-                      << " mode=" << FProjectDescriptor::RenderModeName(proj_.renderMode)
+                      << " hardwareRaster=on"
+                      << " rayTracing=" << (proj_.defaultRenderFeatures.rayTracing ? "on" : "off")
+                      << " shadows=" << (proj_.defaultRenderFeatures.rayTracedShadows ? "on" : "off")
+                      << " gi=" << (proj_.defaultRenderFeatures.rayTracedGI ? "on" : "off")
+                      << " reflections=" << (proj_.defaultRenderFeatures.rayTracedReflections ? "on" : "off")
+                      << " backend=" << FProjectDescriptor::RayTracingBackendName(proj_.defaultRenderFeatures.rayTracingBackend)
                       << " startup=" << (proj_.startupWorld.empty() ? "(none)" : proj_.startupWorld)
                       << "\n";
         }
@@ -157,7 +162,7 @@ void Engine::BootWorld(const std::string& projectRoot)
         namespace fs = std::filesystem;
         const std::string wp =
             (fs::path(projectRoot) / "Content" / (proj_.startupWorld + ".world")).string();
-        world_ = FWorldSerializer::LoadFromFile(wp.c_str());
+        world_ = FWorldSerializer::LoadFromFile(wp.c_str(), proj_.defaultRenderFeatures);
         std::cout << "[Engine] startup world '" << wp << "' "
                   << (world_ ? "loaded" : "not found") << "\n";
     }

@@ -23,27 +23,72 @@ namespace
         return s;
     }
 
-    EProjectRenderMode parseMode(const std::string& v)
+    bool parseBool(const std::string& value, bool& result)
     {
-        const std::string m = lower(v);
-        if (m == "gpu_rt")     return EProjectRenderMode::GPU_RT;
-        if (m == "rasterizer") return EProjectRenderMode::Rasterizer;
-        if (m == "hybrid")     return EProjectRenderMode::Hybrid;
-        if (m == "cpu_rt")     return EProjectRenderMode::GPU_RT;   // CPU RT removed -> GPU
-        return EProjectRenderMode::GPU_RT;                          // unknown -> default
+        const std::string v = lower(trim(value));
+        if (v == "1" || v == "true" || v == "yes" || v == "on") { result = true; return true; }
+        if (v == "0" || v == "false" || v == "no" || v == "off") { result = false; return true; }
+        return false;
+    }
+
+    bool parseBackend(const std::string& value, ERayTracingBackend& result)
+    {
+        const std::string v = lower(trim(value));
+        if (v == "auto")       { result = ERayTracingBackend::Auto; return true; }
+        if (v == "compatible") { result = ERayTracingBackend::CompatibleGL33; return true; }
+        if (v == "compute")    { result = ERayTracingBackend::ComputeGL43; return true; }
+        return false;
+    }
+
+    bool applyLegacyMode(const std::string& value, FRenderFeatures& features)
+    {
+        const std::string mode = lower(trim(value));
+        bool rayTracing = false;
+        if (mode == "rasterizer") rayTracing = false;
+        else if (mode == "gpu_rt" || mode == "hybrid" || mode == "cpu_rt") rayTracing = true;
+        else return false;
+
+        features.hardwareRaster = true;
+        features.rayTracing = rayTracing;
+        features.rayTracedShadows = true;
+        features.rayTracedGI = true;
+        features.rayTracedReflections = true;
+        features.rayTracingBackend = ERayTracingBackend::Auto;
+        return true;
+    }
+
+    void applyNamedFeatures(const FIniFile& ini, const std::string& section, FRenderFeatures& features)
+    {
+        bool value = false;
+        if (ini.Has(section, "HardwareRaster") && parseBool(ini.GetString(section, "HardwareRaster"), value))
+            features.hardwareRaster = true; // mandatory, even when a project writes 0
+        if (ini.Has(section, "RayTracing") && parseBool(ini.GetString(section, "RayTracing"), value))
+            features.rayTracing = value;
+        if (ini.Has(section, "RayTracedShadows") && parseBool(ini.GetString(section, "RayTracedShadows"), value))
+            features.rayTracedShadows = value;
+        if (ini.Has(section, "RayTracedGI") && parseBool(ini.GetString(section, "RayTracedGI"), value))
+            features.rayTracedGI = value;
+        if (ini.Has(section, "RayTracedReflections") && parseBool(ini.GetString(section, "RayTracedReflections"), value))
+            features.rayTracedReflections = value;
+        if (ini.Has(section, "RayTracingBackend"))
+        {
+            ERayTracingBackend backend;
+            if (parseBackend(ini.GetString(section, "RayTracingBackend"), backend))
+                features.rayTracingBackend = backend;
+        }
+        features.hardwareRaster = true;
     }
 }
 
-const char* FProjectDescriptor::RenderModeName(EProjectRenderMode m)
+const char* FProjectDescriptor::RayTracingBackendName(ERayTracingBackend backend)
 {
-    switch (m)
+    switch (backend)
     {
-        case EProjectRenderMode::CPU_RT:     return "CPU_RT";
-        case EProjectRenderMode::GPU_RT:     return "GPU_RT";
-        case EProjectRenderMode::Rasterizer: return "Rasterizer";
-        case EProjectRenderMode::Hybrid:     return "Hybrid";
+        case ERayTracingBackend::Auto:           return "Auto";
+        case ERayTracingBackend::CompatibleGL33: return "Compatible";
+        case ERayTracingBackend::ComputeGL43:    return "Compute";
     }
-    return "GPU_RT";
+    return "Auto";
 }
 
 bool FProjectDescriptor::LoadFromFile(const char* path)
@@ -54,8 +99,10 @@ bool FProjectDescriptor::LoadFromFile(const char* path)
     if (!file.is_open()) return false;        // missing -> defaults
 
     std::string line;
+    std::string contents;
     while (std::getline(file, line))
     {
+        contents += line + "\n";
         // Strip comments (# ...) and blank lines.
         const size_t hash = line.find('#');
         if (hash != std::string::npos) line.erase(hash);
@@ -70,12 +117,15 @@ bool FProjectDescriptor::LoadFromFile(const char* path)
         if      (key == "windowtitle")  { if (!val.empty()) windowTitle = val; }
         else if (key == "width")        { try { int w = std::stoi(val); if (w > 0) width  = w; } catch (...) {} }
         else if (key == "height")       { try { int h = std::stoi(val); if (h > 0) height = h; } catch (...) {} }
-        else if (key == "rendermode")   { if (!val.empty()) renderMode = parseMode(val); }
+        else if (key == "rendermode")   { if (!val.empty()) applyLegacyMode(val, defaultRenderFeatures); }
         else if (key == "startupworld") { startupWorld = val; }
         else if (key == "projectname")  { if (!val.empty()) projectName = val; }
         else if (key == "engineversion"){ if (!val.empty()) engineVersion = val; }
         // unknown keys silently ignored
     }
+    FIniFile named;
+    named.Parse(contents);
+    applyNamedFeatures(named, "", defaultRenderFeatures);
     return true;
 }
 
@@ -97,7 +147,8 @@ bool FProjectDescriptor::LoadSettings(const char* iniPath)
     windowTitle  = ini.GetString("Display", "Title",  windowTitle);
     width        = ini.GetInt   ("Display", "Width",  width);
     height       = ini.GetInt   ("Display", "Height", height);
-    if (ini.Has("Render", "Mode"))      renderMode   = parseMode(ini.GetString("Render", "Mode"));
+    if (ini.Has("Render", "Mode")) applyLegacyMode(ini.GetString("Render", "Mode"), defaultRenderFeatures);
+    applyNamedFeatures(ini, "Render", defaultRenderFeatures); // named fields win over Mode
     if (ini.Has("Startup", "DefaultWorld")) startupWorld = ini.GetString("Startup", "DefaultWorld");
     return true;
 }

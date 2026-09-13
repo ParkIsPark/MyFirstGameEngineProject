@@ -8,6 +8,7 @@
 #include "URasterizer.h"
 #include "USkyHDRI.h"
 #include "FRenderQuality.h"
+#include "UWorldRenderer.h"
 #include "ThreadPool.h"
 #include "BuildManager.h"
 #include "FEditorAssetWorkflow.h"
@@ -123,7 +124,6 @@ private:
     int            rsTab_ = 0;    // Render Settings window: 0 = Editor, 1 = Game
     FRenderQuality& activeRS() { return playing_ ? gameRS_ : editorRS_; }
     BuildManager buildMgr_;
-    int  renderMode_ = 0;        // 0=Rasterizer 1=GPU RT 2=Hybrid
     bool depthView_  = false;    // CPU raster preview: grayscale depth instead of shade
     int  gizmoOp_    = 0;        // ImGuizmo op: 0=Translate 1=Rotate 2=Scale
     bool gizmoLocal_ = false;    // gizmo space: false=World, true=Local

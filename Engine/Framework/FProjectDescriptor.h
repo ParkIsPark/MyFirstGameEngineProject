@@ -1,9 +1,6 @@
 #pragma once
 #include <string>
-
-// Render mode requested by a project. CPU_RT is kept for plan compatibility
-// even though the CPU ray tracer was removed -- it falls back to GPU_RT.
-enum class EProjectRenderMode { CPU_RT, GPU_RT, Rasterizer, Hybrid };
+#include "../Render/FRenderFeatures.h"
 
 // ---------------------------------------------------------------------------
 // FProjectDescriptor (E3) — minimal ".proj" descriptor.
@@ -13,7 +10,7 @@ enum class EProjectRenderMode { CPU_RT, GPU_RT, Rasterizer, Hybrid };
 //     WindowTitle  = My Project
 //     Width        = 1280
 //     Height       = 720
-//     RenderMode   = GPU_RT        # CPU_RT | GPU_RT | Rasterizer | Hybrid
+// Legacy flat RenderMode and [Render] Mode remain accepted during migration.
 //     StartupWorld =               # empty -> WorldSetting() code hook
 //
 // Robustness is a hard requirement: a missing file, unreadable file, or
@@ -29,7 +26,7 @@ struct FProjectDescriptor
     std::string windowTitle  = "Engine";
     int         width        = 1280;
     int         height       = 720;
-    EProjectRenderMode renderMode   = EProjectRenderMode::GPU_RT;
+    FRenderFeatures defaultRenderFeatures;
     std::string startupWorld;            // empty -> code-hook scene (WorldSetting)
 
     // Parses `path`. Returns true if the file was opened and read (even if some
@@ -42,5 +39,5 @@ struct FProjectDescriptor
     bool LoadProject(const char* projPath);
     bool LoadSettings(const char* iniPath);
 
-    static const char* RenderModeName(EProjectRenderMode m);
+    static const char* RayTracingBackendName(ERayTracingBackend backend);
 };

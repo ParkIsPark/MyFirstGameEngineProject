@@ -1,0 +1,5 @@
+WorldFormat = 1
+
+[World]
+ShadingModel = 2
+RenderMode = 2
