@@ -29,6 +29,7 @@ public:
     void BeginPlay() noexcept override;
     void Tick(float deltaSeconds) noexcept override;
     void EndPlay() noexcept override;
+    bool RequiresEndPlay() const noexcept override { return subsystem_ != nullptr || begun_; }
 
 private:
     friend class UWorld;
@@ -38,4 +39,6 @@ private:
     std::unique_ptr<FLuaScriptInstance> instance_;
     bool attempted_ = false;
     bool begun_ = false;
+    bool callbackActive_ = false;
+    bool stopRequested_ = false;
 };

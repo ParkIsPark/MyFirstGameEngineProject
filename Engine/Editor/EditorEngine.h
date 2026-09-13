@@ -29,6 +29,7 @@ class AActor;
 class EditorEngine : public Engine
 {
 public:
+    EditorEngine() : Engine(Role::Editor) {}
     ~EditorEngine() override;
 
 protected:
@@ -66,8 +67,10 @@ private:
     void LaunchGameProcess();            // save world -> spawn argv0 --game (new window)
     // Lossless deep copy (name + transform + mesh[shared] + material + physics +
     // lights + camera + shadingModel). resetPhysics zeroes velocity (for PIE).
+protected:
     UWorld* CopyWorld(UWorld& src, bool resetPhysics = false);
     AActor* CloneActor(AActor* src, bool resetPhysics = false);  // deep copy one actor
+private:
     UWorld& ActiveWorld() { return (playing_ && pieWorld_) ? *pieWorld_ : *editorWorld_; }
     void DrawUI();
     void DrawMenuBar();

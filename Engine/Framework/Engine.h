@@ -29,13 +29,15 @@ class  UWorld;
 class Engine
 {
 public:
-    Engine();
+    enum class Role { Game, Editor };
+    explicit Engine(Role role = Role::Game);
     virtual ~Engine();
 
     bool Init(int width = 1024, int height = 1024, const char* title = "Engine");
     int  Run(const char* projPath = nullptr);   // nullptr -> defaults, no world
 
 protected:
+    void BootWorld(const std::string& projectRoot);
     // ---- hooks (override in the app) ----
     virtual void    OnStartup() {}              // once, after GL is ready
     virtual void    OnShutdown() {}             // finish derived worlds before subsystem shutdown
@@ -57,6 +59,7 @@ protected:
     USubsystemManager  subsystems_;
 
 private:
+    const Role role_;
     void handleResize(int w, int h);
     static void resizeTrampoline(GLFWwindow* win, int w, int h);
 

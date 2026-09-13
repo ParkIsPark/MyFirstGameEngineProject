@@ -11,7 +11,7 @@
 #define GLFW_DLL
 #include <GLFW/glfw3.h>
 
-Engine::Engine()
+Engine::Engine(Role role) : role_(role)
 {
     subsystems_.Register(new UScriptSubsystem());
 }
@@ -77,7 +77,7 @@ void Engine::handleResize(int w, int h)
 
 void Engine::Tick(float dt)
 {
-    if (world_) world_->Tick(dt);
+    if (role_ == Role::Game && world_) world_->Tick(dt);
     Render();
 }
 
@@ -117,24 +117,8 @@ int Engine::Run(const char* projPath)
     OnStartup();
     handleResize(width_, height_);          // initial viewport / ortho
 
-    world_ = WorldSetting();                 // project builds the world (or null)
-
-    // Data-driven startup world: if the app didn't build one in code and the
-    // settings name a StartupWorld, load Content/<StartupWorld>.world.
-    if (!world_ && !proj_.startupWorld.empty())
-    {
-        namespace fs = std::filesystem;
-        const std::string wp =
-            (fs::path(projDir) / "Content" / (proj_.startupWorld + ".world")).string();
-        world_ = FWorldSerializer::LoadFromFile(wp.c_str());
-        std::cout << "[Engine] startup world '" << wp << "' "
-                  << (world_ ? "loaded" : "not found") << "\n";
-    }
-    auto* scripts = subsystems_.Get<UScriptSubsystem>();
-    scripts->SetProjectRoot(projPath ? std::filesystem::absolute(projPath).parent_path()
-                                    : std::filesystem::current_path());
-    subsystems_.InitAll();
-    if (world_) { world_->SetScriptSubsystem(scripts); world_->BeginPlay(); }
+    BootWorld(projPath ? std::filesystem::absolute(projPath).parent_path().string()
+                      : std::filesystem::current_path().string());
 
     lastTime_ = glfwGetTime();
     while (!glfwWindowShouldClose(window_))
@@ -145,7 +129,7 @@ int Engine::Run(const char* projPath)
 
         glClear(GL_COLOR_BUFFER_BIT);
         subsystems_.TickAll(dt);
-        Tick(dt);                            // world sim + draw
+        Tick(dt);
         glfwSwapBuffers(window_);
         glfwPollEvents();
 
@@ -160,4 +144,26 @@ int Engine::Run(const char* projPath)
     delete world_;
     world_ = nullptr;
     return 0;
+}
+
+void Engine::BootWorld(const std::string& projectRoot)
+{
+    if (role_ == Role::Game) world_ = WorldSetting();
+
+    // Data-driven startup world: if the app didn't build one in code and the
+    // settings name a StartupWorld, load Content/<StartupWorld>.world.
+    if (role_ == Role::Game && !world_ && !proj_.startupWorld.empty())
+    {
+        namespace fs = std::filesystem;
+        const std::string wp =
+            (fs::path(projectRoot) / "Content" / (proj_.startupWorld + ".world")).string();
+        world_ = FWorldSerializer::LoadFromFile(wp.c_str());
+        std::cout << "[Engine] startup world '" << wp << "' "
+                  << (world_ ? "loaded" : "not found") << "\n";
+    }
+    auto* scripts = subsystems_.Get<UScriptSubsystem>();
+    scripts->SetProjectRoot(projectRoot);
+    subsystems_.InitAll();
+    if (role_ == Role::Game && world_) { world_->SetScriptSubsystem(scripts); world_->BeginPlay(); }
+
 }

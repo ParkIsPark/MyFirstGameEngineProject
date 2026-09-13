@@ -17,8 +17,9 @@ void UScriptComponent::ConfigureRuntime(UScriptSubsystem* subsystem) noexcept
 
 void UScriptComponent::BeginPlay() noexcept
 {
-    if (!subsystem_ || attempted_ || !IsEnabled() || scriptPath_.empty()) return;
+    if (!subsystem_ || attempted_ || callbackActive_ || !IsEnabled() || scriptPath_.empty()) return;
     attempted_ = true;
+    callbackActive_ = true;
     try
     {
         const auto* actor = GetOwner();
@@ -31,30 +32,40 @@ void UScriptComponent::BeginPlay() noexcept
             }
         instance_ = subsystem_->CreateScriptInstance(scriptPath_,
             (actor ? actor->name : "(unowned)") + " ScriptComponent[" + std::to_string(index) + "]");
-        if (instance_ && instance_->BeginPlay()) begun_ = true;
+        if (instance_ && !stopRequested_ && instance_->BeginPlay()) begun_ = true;
         else instance_.reset();
     }
     catch (...) { instance_.reset(); }
+    callbackActive_ = false;
+    if (stopRequested_) EndPlay();
 }
 
 void UScriptComponent::Tick(float deltaSeconds) noexcept
 {
-    if (begun_ && instance_ && !instance_->Tick(deltaSeconds))
+    if (!begun_ || !instance_ || callbackActive_) return;
+    callbackActive_ = true;
+    const bool success = instance_->Tick(deltaSeconds);
+    callbackActive_ = false;
+    if (!success)
     {
         begun_ = false;
-        instance_.reset();
     }
+    if (!success || stopRequested_) EndPlay();
 }
 
 void UScriptComponent::EndPlay() noexcept
 {
-    // Clear the flag before invoking user code, including diagnostic sinks.
+    if (callbackActive_) { stopRequested_ = true; return; }
+    // The handle must survive reentrant Stop from a callback's native sink.
     const bool end = begun_;
     begun_ = false;
+    callbackActive_ = true;
     if (end && instance_) instance_->EndPlay();
+    callbackActive_ = false;
     instance_.reset();
     attempted_ = false;
     subsystem_ = nullptr;
+    stopRequested_ = false;
 }
 
 // Preserve registration for consumers that directly link this concrete type

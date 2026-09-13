@@ -14,6 +14,8 @@ public:
     virtual void BeginPlay() {}
     virtual void Tick(float) {}
     virtual void EndPlay() {}
+    // Runtime resources may need End even after the serialized toggle is off.
+    virtual bool RequiresEndPlay() const noexcept { return false; }
 
     AActor* GetOwner() const noexcept;
     bool IsEnabled() const noexcept;
@@ -35,4 +37,5 @@ private:
     friend class AActor;
     AActor* owner_ = nullptr;
     bool enabled_ = true;
+    bool nativeTickFailed_ = false;
 };

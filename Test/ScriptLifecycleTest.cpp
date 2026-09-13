@@ -17,6 +17,31 @@
 #include <iostream>
 #include <memory>
 #include <vector>
+#include <sstream>
+#include <functional>
+
+struct NativeFailure : UActorComponent {
+    std::string_view TypeName() const override { return "NativeFailure"; }
+    int ticks = 0;
+    void Tick(float) override { ++ticks; throw std::runtime_error("native component tick failure"); }
+};
+struct NativeActorFailure : AActor {
+    int ticks = 0;
+    void BeginPlay() override { throw std::runtime_error("native actor begin failure"); }
+    void Tick(float) override { ++ticks; throw std::runtime_error("native actor tick failure"); }
+};
+struct NativeBeginFailure : UActorComponent {
+    std::string_view TypeName() const override { return "NativeBeginFailure"; }
+    void BeginPlay() override { throw std::runtime_error("native component begin failure"); }
+};
+struct NativeTickActor : AActor {
+    int ticks = 0;
+    void Tick(float) override { ++ticks; throw std::runtime_error("native actor tick failure"); }
+};
+struct OrderedEndActor : AActor {
+    std::vector<std::string>* events = nullptr;
+    void EndPlay() override { events->push_back("actor end"); }
+};
 
 namespace fs = std::filesystem;
 int failures = 0;
@@ -34,7 +59,8 @@ int main() {
     write("BeginError.lua", "function BeginPlay() error('begin failure') end; function EndPlay() Engine.Log('bad end') end");
     write("TickError.lua", "function Tick() error('tick failure') end");
     std::vector<std::string> logs;
-    UScriptSubsystem scripts([&](std::string_view s) { logs.emplace_back(s); });
+    std::function<void(std::string_view)> logCallback;
+    UScriptSubsystem scripts([&](std::string_view s) { logs.emplace_back(s); if (logCallback) logCallback(s); });
     scripts.SetProjectRoot(root); scripts.Init();
     auto add = [](UWorld& w, const char* name, const char* path = "Lifecycle.lua") {
         auto actor = std::make_unique<AActor>(); actor->name = name;
@@ -96,6 +122,67 @@ int main() {
         copy.Tick(1); source.Tick(.5f); source.EndPlay();
         copy.SetScriptSubsystem(&scripts); copy.BeginPlay(); copy.EndPlay();
         Check(logs == std::vector<std::string>{"begin:0","tick:1:0.25","tick:2:0.5","end:2","begin:0","end:0"}, "copying a live attachment copies configuration only");
+    }
+    logs.clear();
+    {
+        UWorld world;
+        auto* actor = new NativeActorFailure(); actor->name = "Native actor";
+        auto& native = actor->AddComponent<NativeFailure>();
+        actor->AddComponent<UScriptComponent>().SetScriptPath("Content/Scripts/Lifecycle.lua"); world.Spawn(actor);
+        add(world, "Neighbor"); world.SetScriptSubsystem(&scripts);
+        std::ostringstream diagnostics; auto* previous = std::cerr.rdbuf(diagnostics.rdbuf());
+        world.BeginPlay(); world.Tick(.25f); world.Tick(.5f); world.EndPlay();
+        std::cerr.rdbuf(previous);
+        Check(logs == std::vector<std::string>{"begin:0","begin:0","tick:1:0.25","tick:1:0.25","tick:2:0.5","tick:2:0.5","end:2","end:2"}, "native failures do not skip healthy later components or actors");
+        Check(native.ticks == 1 && actor->ticks <= 1 && diagnostics.str().find("native actor begin failure") != std::string::npos && diagnostics.str().find("native component tick failure") != std::string::npos, "native failures observable and failing native ticks suppressed");
+    }
+    logs.clear();
+    {
+        UWorld world; auto* actor = new NativeTickActor();
+        actor->AddComponent<NativeBeginFailure>();
+        actor->AddComponent<UScriptComponent>().SetScriptPath("Content/Scripts/Lifecycle.lua");
+        world.Spawn(actor); world.SetScriptSubsystem(&scripts);
+        std::ostringstream diagnostics; auto* previous = std::cerr.rdbuf(diagnostics.rdbuf());
+        world.BeginPlay(); world.Tick(.25f); world.Tick(.5f); world.EndPlay();
+        std::cerr.rdbuf(previous);
+        Check(actor->ticks == 1 && logs == std::vector<std::string>{"begin:0","tick:1:0.25","tick:2:0.5","end:2"} && diagnostics.str().find("native component begin failure") != std::string::npos && diagnostics.str().find("native actor tick failure") != std::string::npos, "native component Begin and actor Tick failures retain healthy script lifecycle");
+    }
+    logs.clear();
+    {
+        UWorld world; auto* actor = new OrderedEndActor(); actor->events = &logs;
+        auto& script = actor->AddComponent<UScriptComponent>(); script.SetScriptPath("Content/Scripts/Lifecycle.lua");
+        world.Spawn(actor); world.SetScriptSubsystem(&scripts); world.BeginPlay(); script.SetEnabled(false);
+        bool rejected = false;
+        logCallback = [&](std::string_view message) {
+            if (message == "end:0") {
+                try { actor->AddComponent<NativeFailure>(); } catch (const std::logic_error&) { rejected = true; }
+            }
+        };
+        world.EndPlay(); logCallback = {};
+        Check(logs == std::vector<std::string>{"begin:0","end:0","actor end"} && rejected, "disabled begun scripts End before Actor under mutation guard");
+    }
+    logs.clear();
+    {
+        UWorld world; auto* actor = add(world, "Reentrant"); auto* script = actor->FindComponent<UScriptComponent>();
+        world.SetScriptSubsystem(&scripts); world.BeginPlay();
+        bool retained = false;
+        logCallback = [&](std::string_view message) {
+            if (message == "end:0") {
+                script->EndPlay();
+                try { scripts.ClearScriptCache(); } catch (const std::logic_error&) { retained = true; }
+            }
+        };
+        world.EndPlay(); logCallback = {};
+        Check(retained && logs == std::vector<std::string>{"begin:0","end:0"}, "reentrant End retains live call until outer End returns");
+        scripts.ClearScriptCache(); logs.clear(); world.BeginPlay(); retained = false;
+        logCallback = [&](std::string_view message) {
+            if (message == "tick:1:0.25") {
+                script->EndPlay(); script->Tick(.5f);
+                try { scripts.ClearScriptCache(); } catch (const std::logic_error&) { retained = true; }
+            }
+        };
+        world.Tick(.25f); logCallback = {}; world.Tick(.5f); world.EndPlay(); scripts.ClearScriptCache();
+        Check(retained && logs == std::vector<std::string>{"begin:0","tick:1:0.25","end:1"}, "stop requested inside Tick defers End and release until callback returns");
     }
     logs.clear();
     {

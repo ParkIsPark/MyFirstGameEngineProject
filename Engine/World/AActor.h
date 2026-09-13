@@ -78,6 +78,7 @@ protected:
 private:
     void RequireComponentMutationAllowed() const;
     bool dispatchingComponents_ = false;
+    bool nativeTickFailed_ = false;
     // Declared after rootComponent so heap scene nodes are destroyed before root.
     std::vector<std::unique_ptr<UActorComponent>> components_;
 };

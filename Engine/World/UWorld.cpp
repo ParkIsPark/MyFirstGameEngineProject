@@ -4,9 +4,20 @@
 #include "../Script/UScriptSubsystem.h"
 #include <algorithm>
 #include <stdexcept>
+#include <iostream>
 
 namespace
 {
+    void ReportNativeFailure(const AActor& actor, const char* phase) noexcept
+    {
+        try
+        {
+            try { throw; }
+            catch (const std::exception& error) { std::cerr << "Native [" << actor.name << "] " << phase << ": " << error.what() << '\n'; }
+            catch (...) { std::cerr << "Native [" << actor.name << "] " << phase << ": unknown exception\n"; }
+        }
+        catch (...) {} // A failing diagnostic stream cannot interrupt cleanup.
+    }
     struct DispatchScope
     {
         bool& active;
@@ -52,16 +63,12 @@ void UWorld::BeginActor(AActor* actor)
 {
     for (const auto& component : actor->Components())
         if (auto* script = dynamic_cast<UScriptComponent*>(component.get())) script->ConfigureRuntime(scripts_);
-    try { actor->DispatchBeginPlay(); } catch (...) {}
+    try { actor->DispatchBeginPlay(); } catch (...) { ReportNativeFailure(*actor, "BeginPlay"); }
 }
 
 void UWorld::EndActor(AActor* actor) noexcept
 {
-    try { actor->DispatchEndPlay(); } catch (...) {}
-    // Actor dispatch filters disabled components; a script disabled after Begin
-    // still owns a live attachment and must finish at this session boundary.
-    for (const auto& component : actor->Components())
-        if (auto* script = dynamic_cast<UScriptComponent*>(component.get())) script->EndPlay();
+    try { actor->DispatchEndPlay(); } catch (...) { ReportNativeFailure(*actor, "EndPlay"); }
 }
 
 void UWorld::BeginPlay()
@@ -81,7 +88,7 @@ void UWorld::Tick(float dt)
     // then per-actor game logic. Controllers tick as actors too.
     physics_.Tick(dt, scene_);
     for (AActor* a : scene_.Actors)
-        try { a->DispatchTick(dt); } catch (...) {}
+        try { a->DispatchTick(dt); } catch (...) { ReportNativeFailure(*a, "Tick"); }
 }
 
 void UWorld::EndPlay() noexcept

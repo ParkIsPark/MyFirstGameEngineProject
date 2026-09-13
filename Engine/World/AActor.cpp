@@ -4,6 +4,7 @@
 #include "FArchive.h"
 #include <algorithm>
 #include <stdexcept>
+#include <exception>
 
 REGISTER_ACTOR("Actor", AActor)
 
@@ -93,25 +94,44 @@ void AActor::SetPhysics(UPrimitiveComponent* p)
 void AActor::DispatchBeginPlay()
 {
     ComponentDispatchScope dispatchScope(dispatchingComponents_);
-    BeginPlay();
+    std::exception_ptr failure;
+    nativeTickFailed_ = false;
+    try { BeginPlay(); }
+    catch (...) { nativeTickFailed_ = true; failure = std::current_exception(); }
     for (const auto& component : components_)
-        if (component->IsEnabled()) component->BeginPlay();
+    {
+        component->nativeTickFailed_ = false;
+        if (component->IsEnabled())
+            try { component->BeginPlay(); }
+            catch (...) { component->nativeTickFailed_ = true; if (!failure) failure = std::current_exception(); }
+    }
+    if (failure) std::rethrow_exception(failure);
 }
 
 void AActor::DispatchTick(float deltaSeconds)
 {
     ComponentDispatchScope dispatchScope(dispatchingComponents_);
-    Tick(deltaSeconds);
+    std::exception_ptr failure;
+    if (!nativeTickFailed_)
+        try { Tick(deltaSeconds); }
+        catch (...) { nativeTickFailed_ = true; failure = std::current_exception(); }
     for (const auto& component : components_)
-        if (component->IsEnabled()) component->Tick(deltaSeconds);
+        if (component->IsEnabled() && !component->nativeTickFailed_)
+            try { component->Tick(deltaSeconds); }
+            catch (...) { component->nativeTickFailed_ = true; if (!failure) failure = std::current_exception(); }
+    if (failure) std::rethrow_exception(failure);
 }
 
 void AActor::DispatchEndPlay()
 {
     ComponentDispatchScope dispatchScope(dispatchingComponents_);
+    std::exception_ptr failure;
     for (const auto& component : components_)
-        if (component->IsEnabled()) component->EndPlay();
-    EndPlay();
+        if (component->IsEnabled() || component->RequiresEndPlay())
+            try { component->EndPlay(); }
+            catch (...) { if (!failure) failure = std::current_exception(); }
+    try { EndPlay(); } catch (...) { if (!failure) failure = std::current_exception(); }
+    if (failure) std::rethrow_exception(failure);
 }
 
 void AActor::RequireComponentMutationAllowed() const

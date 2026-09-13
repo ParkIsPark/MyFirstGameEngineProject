@@ -445,29 +445,9 @@ UMesh* EditorEngine::LoadMeshFile(const std::string& path)
 
 AActor* EditorEngine::CloneActor(AActor* sa, bool resetPhysics)
 {
-    AActor* da = nullptr;
-
-    // Lights: clone the concrete light component so type/params survive.
-    if (ALight* sl = dynamic_cast<ALight*>(sa))
-    {
-        LightComponent* lc = nullptr;
-        if (auto* pl = dynamic_cast<PointLightComponent*>(sl->lightComp))
-            lc = new PointLightComponent(pl->LightColor, pl->LightIntensity);
-        else if (auto* el = dynamic_cast<EnvironmentLightComponent*>(sl->lightComp))
-        {
-            auto* e = new EnvironmentLightComponent(el->LightColor, el->LightIntensity);
-            e->horizonColor = el->horizonColor; e->zenithColor = el->zenithColor; e->skyExp = el->skyExp;
-            e->skyTexPath = el->skyTexPath; e->timeOfDay = el->timeOfDay;
-            lc = e;
-        }
-        else if (sl->lightComp)
-            lc = new LightComponent(sl->lightComp->LightColor, sl->lightComp->LightIntensity);
-        da = new ALight(lc);
-    }
-    else
-    {
-        da = new AActor();
-    }
+    auto* sourceLight = dynamic_cast<ALight*>(sa);
+    std::unique_ptr<AActor> destination(sourceLight ? static_cast<AActor*>(new ALight()) : new AActor());
+    AActor* da = destination.get();
 
     da->name = sa->name;
     // Copy the RELATIVE transform directly (not GetActorLocation, which is world):
@@ -478,36 +458,50 @@ AActor* EditorEngine::CloneActor(AActor* sa, bool resetPhysics)
     da->rootComponent.relScale    = sa->rootComponent.relScale;
     da->rootComponent.MarkDirty();
 
-    if (sa->mesh)
+    std::vector<std::pair<USceneComponent*, USceneComponent*>> sceneCopies;
+    sceneCopies.emplace_back(&sa->rootComponent, &da->rootComponent);
+    for (const auto& source : sa->Components())
     {
-        UMeshComponent* mc = new UMeshComponent(*sa->mesh); // shares UMesh asset; copies meshRef + override + rel xform
-        da->SetMesh(mc);                                    // re-parents under da's root
-    }
-    if (sa->physics)
-    {
-        UPrimitiveComponent* p = nullptr;
-        if (sa->physics->GetShape() == EShape::Sphere)
-        { auto* s = new USphereComponent(da); s->radius = static_cast<USphereComponent*>(sa->physics)->radius; p = s; }
-        else if (sa->physics->GetShape() == EShape::Box)
-        { auto* b = new UBoxComponent(da); b->halfExtents = static_cast<UBoxComponent*>(sa->physics)->halfExtents; p = b; }
-        if (p)
+        std::unique_ptr<UActorComponent> copy;
+        if (auto* c = dynamic_cast<UScriptComponent*>(source.get())) copy = std::make_unique<UScriptComponent>(*c);
+        else if (auto* c = dynamic_cast<UMeshComponent*>(source.get())) copy = std::make_unique<UMeshComponent>(*c);
+        else if (auto* c = dynamic_cast<PointLightComponent*>(source.get())) copy = std::make_unique<PointLightComponent>(*c);
+        else if (auto* c = dynamic_cast<EnvironmentLightComponent*>(source.get())) copy = std::make_unique<EnvironmentLightComponent>(*c);
+        else if (auto* c = dynamic_cast<LightComponent*>(source.get())) copy = std::make_unique<LightComponent>(*c);
+        else if (auto* c = dynamic_cast<USphereComponent*>(source.get())) copy = std::make_unique<USphereComponent>(*c);
+        else if (auto* c = dynamic_cast<UBoxComponent*>(source.get())) copy = std::make_unique<UBoxComponent>(*c);
+        else if (auto* c = dynamic_cast<USceneComponent*>(source.get())) copy = std::make_unique<USceneComponent>(*c);
+        if (!copy) throw std::runtime_error("Cannot clone unsupported Actor component");
+        if (auto* physics = dynamic_cast<UPrimitiveComponent*>(copy.get()))
         {
-            p->mass = sa->physics->mass; p->restitution = sa->physics->restitution;
-            p->friction = sa->physics->friction; p->bAffectedByGravity = sa->physics->bAffectedByGravity;
-            p->bSimulate = sa->physics->bSimulate; p->localOffset = sa->physics->localOffset;
-            p->velocity = resetPhysics ? glm::vec3(0.0f) : sa->physics->velocity;
-            da->SetPhysics(p);
+            if (resetPhysics) physics->velocity = glm::vec3(0.0f);
+            physics->force = glm::vec3(0.0f);
+            physics->isGrounded = false;
         }
+        auto* raw = copy.get();
+        if (source.get() == sa->mesh) da->SetMesh(static_cast<UMeshComponent*>(raw));
+        else if (source.get() == sa->physics) da->SetPhysics(static_cast<UPrimitiveComponent*>(raw));
+        else if (sourceLight && source.get() == sourceLight->lightComp)
+            static_cast<ALight*>(da)->SetLightComponent(static_cast<LightComponent*>(raw));
+        else da->AdoptComponent(raw);
+        copy.release();
+        if (auto* srcScene = dynamic_cast<USceneComponent*>(source.get()))
+            sceneCopies.emplace_back(srcScene, static_cast<USceneComponent*>(raw));
     }
-    for (const auto& component : sa->Components())
-        if (auto* script = dynamic_cast<UScriptComponent*>(component.get()))
-            da->AddComponent<UScriptComponent>(*script);
-    return da;
+    for (size_t i = 1; i < sceneCopies.size(); ++i)
+    {
+        auto* parent = sceneCopies[i].first->attachParent;
+        sceneCopies[i].second->Detach();
+        for (const auto& entry : sceneCopies)
+            if (entry.first == parent) { sceneCopies[i].second->AttachTo(entry.second); break; }
+    }
+    return destination.release();
 }
 
 UWorld* EditorEngine::CopyWorld(UWorld& src, bool resetPhysics)
 {
-    UWorld* dst = new UWorld();
+    auto destination = std::make_unique<UWorld>();
+    UWorld* dst = destination.get();
     dst->GetScene().shadingModel = src.GetScene().shadingModel;
     dst->GetScene().renderMode   = src.GetScene().renderMode;
     dst->GetScene().skyHDRI      = src.GetScene().skyHDRI;
@@ -520,9 +514,9 @@ UWorld* EditorEngine::CopyWorld(UWorld& src, bool resetPhysics)
     dstActors.reserve(srcActors.size());
     for (AActor* sa : srcActors)
     {
-        AActor* da = CloneActor(sa, resetPhysics);
-        dst->Spawn(da);
-        dstActors.push_back(da);
+        std::unique_ptr<AActor> da(CloneActor(sa, resetPhysics));
+        dst->Spawn(da.get());
+        dstActors.push_back(da.release());
     }
     for (size_t i = 0; i < srcActors.size(); ++i)       // re-link parents by position
     {
@@ -532,17 +526,18 @@ UWorld* EditorEngine::CopyWorld(UWorld& src, bool resetPhysics)
             if (srcActors[j] == sp->GetOwner())
             { dstActors[i]->rootComponent.AttachTo(&dstActors[j]->rootComponent); break; }
     }
-    return dst;
+    return destination.release();
 }
 
 void EditorEngine::OnPlay()
 {
     if (playing_ || !editorWorld_) return;
-    pieWorld_ = CopyWorld(*editorWorld_, /*resetPhysics=*/true);   // deep copy (UMesh shared)
+    std::unique_ptr<UWorld> candidate(CopyWorld(*editorWorld_, /*resetPhysics=*/true));
     // No forced floor: bodies fall freely unless the world enables one (a Plane
     // actor with a Box collider can serve as ground).
-    pieWorld_->SetScriptSubsystem(subsystems_.Get<UScriptSubsystem>());
-    pieWorld_->BeginPlay();
+    candidate->SetScriptSubsystem(subsystems_.Get<UScriptSubsystem>());
+    candidate->BeginPlay();
+    pieWorld_ = candidate.release();
     playing_ = true;
 }
 
