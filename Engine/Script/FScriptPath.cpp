@@ -11,6 +11,9 @@ std::filesystem::path NormalizeScriptProjectPath(const std::filesystem::path& pa
     if (spelling.empty() || path.has_root_path() || spelling.find(':') != std::string::npos ||
         spelling.find('\0') != std::string::npos)
         throw std::invalid_argument("Script path must be a project-relative Content/Scripts file");
+    if (spelling.back() == '/' || spelling == "." ||
+        (spelling.size() >= 2 && spelling.compare(spelling.size() - 2, 2, "/.") == 0))
+        throw std::invalid_argument("Script path must name a file, not a directory");
 
     for (const auto& segment : std::filesystem::path(spelling))
         if (segment == "..") throw std::invalid_argument("Script path traversal is forbidden");

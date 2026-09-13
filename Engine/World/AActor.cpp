@@ -69,6 +69,11 @@ void AActor::RemoveOwnedComponent(UActorComponent* component)
 
 void AActor::SetMesh(UMeshComponent* m)
 {
+    // Reserve before adoption: AttachTo then cannot allocate after the actor
+    // becomes owner, so an allocation failure leaves the caller's component
+    // untouched and avoids ambiguous ownership during unwinding.
+    if (m && m->attachParent != &rootComponent)
+        rootComponent.ReserveChildAttachment();
     AdoptComponent(m);
     if (mesh != m) RemoveOwnedComponent(mesh);
     mesh = m;

@@ -104,6 +104,11 @@ void USceneComponent::Detach()
     AttachTo(nullptr);
 }
 
+void USceneComponent::ReserveChildAttachment()
+{
+    children.reserve(children.size() + 1);
+}
+
 void USceneComponent::Serialize(FArchive& ar)
 {
     UActorComponent::Serialize(ar);

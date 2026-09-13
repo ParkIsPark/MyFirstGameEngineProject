@@ -7,6 +7,7 @@
 #include "AActor.h"
 #include "USceneComponent.h"
 #include "UActorComponent.h"
+#include "../Script/UScriptComponent.h"
 #include "UMeshComponent.h"
 #include "ALight.h"
 #include "LightComponent.h"
@@ -126,6 +127,9 @@ bool FWorldSerializer::SaveToFile(UWorld& world, const char* path)
 
 UWorld* FWorldSerializer::Load(const std::string& text)
 {
+    // A direct symbol reference forces the concrete script component TU from a
+    // static Engine.lib before factory lookup.
+    RegisterScriptComponentType();
     UWorld* world = new UWorld();
     UScene& sc = world->GetScene();
     AActor* curActor = nullptr;
@@ -184,14 +188,24 @@ UWorld* FWorldSerializer::Load(const std::string& text)
             }
             if (UMeshComponent* mc = dynamic_cast<UMeshComponent*>(comp.get()))
             {
-                curActor->SetMesh(mc);
-                comp.release(); // SetMesh adopted it; retain ownership until that succeeds.
+                try { curActor->SetMesh(mc); }
+                catch (...)
+                {
+                    if (comp->GetOwner() == curActor) comp.release();
+                    throw;
+                }
+                comp.release();
             }
             else if (auto* lc = dynamic_cast<LightComponent*>(comp.get());
                      lc && dynamic_cast<ALight*>(curActor))
             {
-                static_cast<ALight*>(curActor)->SetLightComponent(lc);
-                comp.release(); // SetLightComponent adopted it; retain it on a thrown handoff.
+                try { static_cast<ALight*>(curActor)->SetLightComponent(lc); }
+                catch (...)
+                {
+                    if (comp->GetOwner() == curActor) comp.release();
+                    throw;
+                }
+                comp.release();
             }
             else
             {

@@ -44,6 +44,9 @@ public:
 
     void AttachTo(USceneComponent* parent);           // re-parent (updates child lists)
     void Detach();                                     // detach from parent
+    // Allows typed actor setters to make ownership transfer transactional: a
+    // potential allocation happens before they adopt the incoming component.
+    void ReserveChildAttachment();
 
     void MarkDirty();                                  // invalidate self + all descendants
 

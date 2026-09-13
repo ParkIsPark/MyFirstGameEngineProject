@@ -16,6 +16,9 @@
 #include "USceneComponent.h"
 #include "UScriptComponent.h"
 #include "UMeshComponent.h"
+#include "UBoxComponent.h"
+#include "ALight.h"
+#include "PointLightComponent.h"
 
 #include <cassert>
 #include <cstdio>
@@ -73,10 +76,24 @@ int main()
             Throws([&] { component.SetScriptPath("Content/Scripts/../Escape.lua"); }) &&
             Throws([&] { component.SetScriptPath("Content/Other/Rotate.lua"); }) &&
             Throws([&] { component.SetScriptPath("Content/Scripts"); }) &&
+            Throws([&] { component.SetScriptPath("Content/Scripts/"); }) &&
+            Throws([&] { component.SetScriptPath("Content/Scripts/."); }) &&
             Throws([&] { component.SetScriptPath("Content/Scripts/Rotate:alt.lua"); });
         Check("script path normalizes valid spelling and rejects invalid input without mutation",
             component.ScriptPath() == std::filesystem::path("Content/Scripts/Rotate.lua") &&
             component.ScriptPath() == original && bad);
+    }
+
+    // Mutation caught: treating an explicit empty Script as an omitted legacy field.
+    {
+        UScriptComponent component;
+        component.SetEnabled(true);
+        component.SetScriptPath("Content/Scripts/Keep.lua");
+        FLoadArchive explicitEmpty("Enabled = 0\nScript =\n");
+        const bool rejected = Throws([&] { component.Serialize(explicitEmpty); });
+        Check("explicit empty serialized script is rejected without changing existing state",
+            rejected && component.IsEnabled() &&
+            component.ScriptPath() == std::filesystem::path("Content/Scripts/Keep.lua"));
     }
 
     // Mutation caught: omitting the base Enabled field or Script field.
@@ -144,6 +161,37 @@ int main()
             scene && dynamic_cast<USceneComponent*>(scene));
         delete script;
         delete scene;
+    }
+
+    // Mutation caught: duplicating legacy physics as [Component], losing
+    // typed aliases, or dropping script attachments from a mixed world.
+    {
+        UWorld world;
+        AActor* actor = new AActor();
+        actor->name = "Mixed";
+        auto* mesh = new UMeshComponent();
+        mesh->meshRef = "Cube 1 1 1";
+        actor->SetMesh(mesh);
+        actor->SetPhysics(new UBoxComponent());
+        actor->AddComponent<UScriptComponent>().SetScriptPath("Content/Scripts/Mixed.lua");
+        ALight* light = new ALight(new PointLightComponent());
+        light->AddComponent<UScriptComponent>().SetScriptPath("Content/Scripts/Light.lua");
+        world.Spawn(actor);
+        world.Spawn(light);
+
+        const std::string saved = FWorldSerializer::Save(world);
+        UWorld* loaded = FWorldSerializer::Load(saved);
+        AActor* loadedActor = loaded && loaded->GetScene().Actors.size() > 0
+            ? loaded->GetScene().Actors[0] : nullptr;
+        ALight* loadedLight = loaded && loaded->GetScene().Actors.size() > 1
+            ? dynamic_cast<ALight*>(loaded->GetScene().Actors[1]) : nullptr;
+        Check("mixed mesh light physics and script world preserves aliases without physics duplication",
+            loadedActor && loadedActor->mesh && loadedActor->physics &&
+            ScriptComponents(*loadedActor).size() == 1 && loadedLight && loadedLight->lightComp &&
+            ScriptComponents(*loadedLight).size() == 1 &&
+            saved.find("[Collision]") != std::string::npos &&
+            saved.find("Type = Primitive") == std::string::npos);
+        delete loaded;
     }
 
     // Mutation caught: discarding an actor after an unknown component instead of skipping one block.

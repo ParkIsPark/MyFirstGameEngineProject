@@ -21,6 +21,8 @@ ALight::ALight(LightComponent* comp)
 
 void ALight::SetLightComponent(LightComponent* comp)
 {
+    if (comp && comp->attachParent != &rootComponent)
+        rootComponent.ReserveChildAttachment();
     AdoptComponent(comp);
     if (lightComp != comp) RemoveOwnedComponent(lightComp);
     lightComp = comp;

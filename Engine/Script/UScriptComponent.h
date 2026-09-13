@@ -5,6 +5,10 @@
 
 class FArchive;
 
+// Explicit loader registration keeps the concrete component object reachable
+// when a consumer links the engine as a static library.
+void RegisterScriptComponentType();
+
 // Serializable Actor attachment selecting one project-relative Lua asset.
 // Runtime Lua state belongs to UScriptSubsystem, never to this component.
 class UScriptComponent final : public UActorComponent
