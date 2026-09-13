@@ -10,6 +10,7 @@ public:
     ALight();
     explicit ALight(LightComponent* comp);
     virtual ~ALight() = default;
+    // Like AActor's typed setters, throws std::logic_error during lifecycle dispatch.
     void SetLightComponent(LightComponent* comp);
 
     const char* TypeName() const override { return "Light"; }

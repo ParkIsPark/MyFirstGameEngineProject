@@ -10,6 +10,7 @@
 #include <cassert>
 #include <iostream>
 #include <stdexcept>
+#include <functional>
 #if defined(_MSC_VER) && defined(_DEBUG)
 #include <crtdbg.h>
 #endif
@@ -47,6 +48,73 @@ struct CountedLight : LightComponent {
     ~CountedLight() override { ++destroyed; }
 };
 
+struct CallbackComponent : UActorComponent {
+    std::function<void()> callback = [] {};
+    std::string_view TypeName() const override { return "Callback"; }
+    void BeginPlay() override { callback(); }
+    void Tick(float) override { callback(); }
+    void EndPlay() override { callback(); }
+};
+
+// Catches callback-driven vector invalidation, mutation before rejection, and
+// a guard left active after exception unwinding. Test each dispatch entry point.
+static void CheckLifecycleMutationRejection()
+{
+    for (int phase = 0; phase < 3; ++phase)
+    {
+        for (int operation = 0; operation < 3; ++operation)
+        {
+            Events events;
+            int physicsDestroyed = 0, lightDestroyed = 0, incomingDestroyed = 0;
+            USceneComponent incomingParent;
+            ALight actor;
+            auto& callback = actor.AddComponent<CallbackComponent>();
+            actor.SetPhysics(new CountedBox(physicsDestroyed));
+            actor.SetLightComponent(new CountedLight(lightDestroyed));
+            auto incoming = std::make_unique<CountedLight>(incomingDestroyed);
+            incoming->AttachTo(&incomingParent);
+            auto* oldPhysics = actor.physics;
+            auto* oldLight = actor.lightComp;
+            callback.callback = [&] {
+                if (operation == 0) actor.AddComponent<Recorder>(events, "forbidden");
+                if (operation == 1) actor.SetPhysics(nullptr);
+                if (operation == 2) actor.SetLightComponent(incoming.get());
+                // Fail here before an unguarded implementation resumes with
+                // invalidated vector iterators (rather than relying on a crash).
+                assert(false && "structural mutation was accepted during lifecycle dispatch");
+            };
+            auto dispatch = [&] {
+                if (phase == 0) actor.DispatchBeginPlay();
+                if (phase == 1) actor.DispatchTick(0.25f);
+                if (phase == 2) actor.DispatchEndPlay();
+            };
+            bool rejected = false;
+            try { dispatch(); } catch (const std::logic_error&) { rejected = true; }
+            assert(rejected);
+            assert(events.empty()); // AddComponent must reject before construction
+            assert(actor.Components().size() == 3);
+            assert(actor.Components()[0].get() == &callback);
+            assert(actor.Components()[1].get() == oldPhysics);
+            assert(actor.Components()[2].get() == oldLight);
+            assert(actor.physics == oldPhysics && actor.lightComp == oldLight);
+            assert(oldPhysics->GetOwner() == &actor && oldLight->GetOwner() == &actor);
+            assert(physicsDestroyed == 0 && lightDestroyed == 0 && incomingDestroyed == 0);
+            assert(incoming->GetOwner() == nullptr && incoming->attachParent == &incomingParent);
+            assert(incomingParent.children.size() == 1 && incomingParent.children[0] == incoming.get());
+            assert(actor.rootComponent.children.size() == 1 && actor.rootComponent.children[0] == oldLight);
+            assert(oldLight->attachParent == &actor.rootComponent);
+
+            callback.callback = [] {};
+            actor.AddComponent<Recorder>(events, "recovered"); // exception reset the guard
+            dispatch();
+            const char* expected[] = {"recovered begin", "recovered tick", "recovered end"};
+            assert((events == Events{"recovered constructed", expected[phase]}));
+            actor.SetPhysics(nullptr); // successful dispatch also reset the guard
+            assert(physicsDestroyed == 1 && actor.physics == nullptr);
+        }
+    }
+}
+
 // Production breaks caught: missing adoption/owner assignment, wrong insertion
 // order, disabled dispatch, wrong actor/component ordering, double destruction,
 // failed foreign-owner rejection, and broken typed lookup. Expectations below
@@ -57,6 +125,7 @@ int main() {
     _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_FILE);
     _CrtSetReportFile(_CRT_WARN, _CRTDBG_FILE_STDERR);
 #endif
+    CheckLifecycleMutationRejection();
     Events events;
     {
         RecordingActor actor(events);

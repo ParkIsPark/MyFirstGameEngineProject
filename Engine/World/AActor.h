@@ -14,9 +14,13 @@ public:
     AActor();
     virtual ~AActor();
 
+    // Structural component APIs (AddComponent, AdoptComponent, and typed setters)
+    // throw std::logic_error during any lifecycle dispatch, including actor hooks.
+    // Rejection occurs before construction, ownership, alias, or hierarchy changes.
     template<class T, class... Args> T& AddComponent(Args&&... args)
     {
         static_assert(std::is_base_of_v<UActorComponent, T>, "T must be an actor component");
+        RequireComponentMutationAllowed();
         auto component = std::make_unique<T>(std::forward<Args>(args)...);
         T& result = *component;
         AdoptComponent(component.get());
@@ -72,6 +76,8 @@ protected:
     virtual void EndPlay();
 
 private:
+    void RequireComponentMutationAllowed() const;
+    bool dispatchingComponents_ = false;
     // Declared after rootComponent so heap scene nodes are destroyed before root.
     std::vector<std::unique_ptr<UActorComponent>> components_;
 };

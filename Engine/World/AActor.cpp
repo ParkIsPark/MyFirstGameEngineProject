@@ -7,6 +7,24 @@
 
 REGISTER_ACTOR("Actor", AActor)
 
+namespace
+{
+    // Restore the prior state on normal return and exception unwinding, including
+    // nested dispatches that must leave the outer dispatch protected.
+    class ComponentDispatchScope
+    {
+    public:
+        explicit ComponentDispatchScope(bool& active) : active_(active), previous_(active)
+        { active_ = true; }
+        ~ComponentDispatchScope() { active_ = previous_; }
+        ComponentDispatchScope(const ComponentDispatchScope&) = delete;
+        ComponentDispatchScope& operator=(const ComponentDispatchScope&) = delete;
+    private:
+        bool& active_;
+        bool previous_;
+    };
+}
+
 AActor::AActor()
 {
     rootComponent.owner_ = this;
@@ -24,6 +42,7 @@ AActor::~AActor()
 
 void AActor::AdoptComponent(UActorComponent* component)
 {
+    RequireComponentMutationAllowed();
     if (!component) return;
     if (component->GetOwner() && component->GetOwner() != this)
         throw std::invalid_argument("Component belongs to a different actor");
@@ -40,6 +59,7 @@ void AActor::AdoptComponent(UActorComponent* component)
 
 void AActor::RemoveOwnedComponent(UActorComponent* component)
 {
+    RequireComponentMutationAllowed();
     auto it = std::find_if(components_.begin(), components_.end(),
         [component](const auto& owned) { return owned.get() == component; });
     if (it == components_.end()) return;
@@ -67,6 +87,7 @@ void AActor::SetPhysics(UPrimitiveComponent* p)
 
 void AActor::DispatchBeginPlay()
 {
+    ComponentDispatchScope dispatchScope(dispatchingComponents_);
     BeginPlay();
     for (const auto& component : components_)
         if (component->IsEnabled()) component->BeginPlay();
@@ -74,6 +95,7 @@ void AActor::DispatchBeginPlay()
 
 void AActor::DispatchTick(float deltaSeconds)
 {
+    ComponentDispatchScope dispatchScope(dispatchingComponents_);
     Tick(deltaSeconds);
     for (const auto& component : components_)
         if (component->IsEnabled()) component->Tick(deltaSeconds);
@@ -81,9 +103,16 @@ void AActor::DispatchTick(float deltaSeconds)
 
 void AActor::DispatchEndPlay()
 {
+    ComponentDispatchScope dispatchScope(dispatchingComponents_);
     for (const auto& component : components_)
         if (component->IsEnabled()) component->EndPlay();
     EndPlay();
+}
+
+void AActor::RequireComponentMutationAllowed() const
+{
+    if (dispatchingComponents_)
+        throw std::logic_error("Cannot change actor components during lifecycle dispatch");
 }
 
 void AActor::Serialize(FArchive& ar)
