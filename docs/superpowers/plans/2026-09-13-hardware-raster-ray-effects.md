@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-13-hardware-raster-lua-scripting-design.md`
 
+**Execution corrigendum:** `docs/superpowers/plans/2026-09-14-hardware-raster-ray-effects-corrigendum.md` is authoritative where this pre-Lua plan names stale formats, files, interfaces, toolchain details, or task order.
+
 ## Global Constraints
 
 - Preserve Flat, Gouraud, and Phong shading; materials, textures, UV tiling, multiple lights, and environment/HDRI rendering.
