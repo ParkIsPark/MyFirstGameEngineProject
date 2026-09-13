@@ -1857,20 +1857,6 @@ void EditorEngine::DrawViewport()
     // it back at screen size (downscale = antialiasing). UI/picking use screen w/h.
     int rw = w * activeRS().ssaa, rh = h * activeRS().ssaa;
 
-    // CPU-raster editor preview: cap the internal resolution. The software raster
-    // costs O(viewport pixels) PER FRAME (shading + sky fill + readback + upload)
-    // regardless of mesh count, so a large viewport tanks the editor frame rate --
-    // and at low FPS ImGui's trickled input makes Content-Browser DOUBLE-CLICK
-    // (e.g. to switch worlds) miss its timing while single-click menus still work.
-    // The linear-filtered Image upscales the capped buffer back to the viewport.
-    // (PIE / standalone game keep full resolution; GPU modes are not pixel-bound.)
-    if (!world.GetScene().renderFeatures.rayTracing && !playing_)
-    {
-        const int CAP = 960;
-        const int m = std::max(rw, rh);
-        if (m > CAP) { rw = std::max(1, rw * CAP / m); rh = std::max(1, rh * CAP / m); }
-    }
-
     if (viewportTarget_.Kind() != ERenderTargetKind::TextureViewport ||
         !viewportTarget_.Resize(rw, rh, ContextGeneration()))
         viewportTarget_ = FRenderTarget::TextureViewport(rw, rh, ContextGeneration());

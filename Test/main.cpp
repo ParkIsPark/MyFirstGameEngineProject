@@ -42,6 +42,13 @@
 #include "UHardwareGBuffer.h"
 #include "UHardwareRasterizer.h"
 #include "UGPUMeshCache.h"
+#include "FWorldSerializer.h"
+#include "URenderer.h"
+#include "URasterLightingPass.h"
+#include "USkyHDRI.h"
+#include "UWorldRenderer.h"
+#include "FRenderTarget.h"
+#include "FRenderQuality.h"
 
 // Load a model trying a few candidate directories (working dir varies between
 // running from bin\ and VS's project dir).
@@ -542,7 +549,7 @@ public:
         glDepthFunc(GL_LESS);
         glDepthMask(GL_TRUE);
         glDisable(GL_CULL_FACE);
-        for (GLuint drawBuffer = 0; drawBuffer < 6; ++drawBuffer)
+        for (GLuint drawBuffer = 0; drawBuffer < 8; ++drawBuffer)
         {
             glDisablei(GL_BLEND, drawBuffer);
             glColorMaski(drawBuffer, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -658,7 +665,7 @@ public:
               gbuffer.IsComplete() && gbuffer.Width() == 80 && gbuffer.Height() == 48);
         check("resize back to 64x64 succeeds", gbuffer.Resize(64, 64, ContextGeneration()) &&
               gbuffer.IsComplete() && gbuffer.Width() == 64 && gbuffer.Height() == 64);
-        check("resize owns one bounded attachment set", gbuffer.OwnedTextureCount() == 7u &&
+        check("resize owns one bounded attachment set", gbuffer.OwnedTextureCount() == 9u &&
               gbuffer.ResourceRevision() == beforeResizeRevision + 2u);
         check("idempotent resize keeps resources", gbuffer.Resize(64, 64, ContextGeneration()) &&
               gbuffer.ResourceRevision() == beforeResizeRevision + 2u);
@@ -671,8 +678,8 @@ public:
         const GLuint oldProgram = rasterizer.Program();
         const GLuint oldFramebuffer = gbuffer.Framebuffer();
         const GLuint oldDepthTexture = gbuffer.DepthTexture();
-        GLuint oldColorTextures[6] = {};
-        for (unsigned semantic = 0; semantic < 6; ++semantic)
+        GLuint oldColorTextures[8] = {};
+        for (unsigned semantic = 0; semantic < 8; ++semantic)
             oldColorTextures[semantic] = gbuffer.Texture(
                 static_cast<EHardwareGBufferSemantic>(semantic));
 
@@ -712,15 +719,15 @@ public:
         glDeleteBuffers(1, &oldMeshResource.indexBuffer);
         glDeleteBuffers(1, &oldMeshResource.vertexBuffer);
         glDeleteVertexArrays(1, &oldMeshResource.vao);
-        glDeleteTextures(6, oldColorTextures);
+        glDeleteTextures(8, oldColorTextures);
         glDeleteTextures(1, &oldDepthTexture);
         glDeleteFramebuffers(1, &oldFramebuffer);
 
         const GLuint currentProgram = rasterizer.Program();
         const GLuint currentFramebuffer = gbuffer.Framebuffer();
         const GLuint currentDepthTexture = gbuffer.DepthTexture();
-        GLuint currentColorTextures[6] = {};
-        for (unsigned semantic = 0; semantic < 6; ++semantic)
+        GLuint currentColorTextures[8] = {};
+        for (unsigned semantic = 0; semantic < 8; ++semantic)
             currentColorTextures[semantic] = gbuffer.Texture(
                 static_cast<EHardwareGBufferSemantic>(semantic));
         const FGPUMeshResource currentMeshResource = meshCache.Acquire(
@@ -751,6 +758,1063 @@ static int RunHardwareRasterGates(const std::string& outputPath)
     return app.RunGates(outputPath);
 }
 
+static std::unique_ptr<UWorld> LoadRenderParityFixture()
+{
+    const char* candidates[] = {
+        "Test/Fixtures/RenderParityScene.world",
+        "../Test/Fixtures/RenderParityScene.world",
+        "../../Test/Fixtures/RenderParityScene.world",
+    };
+    for (const char* path : candidates)
+        if (UWorld* world = FWorldSerializer::LoadFromFile(path))
+            return std::unique_ptr<UWorld>(world);
+    return nullptr;
+}
+
+static float LuminanceAt(const std::vector<float>& image, int width, int x, int y)
+{
+    const std::size_t i = static_cast<std::size_t>(y * width + x) * 3u;
+    return image[i] * 0.2126f + image[i + 1] * 0.7152f + image[i + 2] * 0.0722f;
+}
+
+static double FloatImageAbsDifference(const std::vector<float>& a,
+                                      const std::vector<float>& b)
+{
+    if (a.size() != b.size()) return -1.0;
+    double difference = 0.0;
+    for (std::size_t i = 0; i < a.size(); ++i)
+        difference += std::fabs(static_cast<double>(a[i] - b[i]));
+    return difference;
+}
+
+class FLegacyRasterBaselineApp final : public Engine
+{
+public:
+    void Hide() { glfwHideWindow(window_); }
+};
+
+// Baseline-only path used before the normal executor cutover. It records
+// semantic probes from the compatibility CPU rasterizer; no golden image is
+// checked in because edge rules legitimately vary between CPU and OpenGL.
+static int RunRasterLightingLegacyBaseline()
+{
+    FLegacyRasterBaselineApp app;
+    if (!app.Init(64, 64, "Legacy Raster Baseline")) return 2;
+    app.Hide();
+    std::unique_ptr<UWorld> world = LoadRenderParityFixture();
+    if (!world)
+    {
+        std::fprintf(stderr, "RenderParityScene.world not found\n");
+        return 2;
+    }
+    ACamera& camera = world->GetCamera();
+    camera.SetOrientation(camera.yaw, camera.pitch);
+    camera.SetFOV(camera.fov, 1.0f);
+    FRenderScene scene = ExtractRenderScene(*world, camera);
+    std::printf("fixture actors=%zu meshes=%zu lights=%zu\n",
+        world->GetScene().Actors.size(), scene.meshes.size(), scene.pointLights.size());
+    URenderer renderer;
+    renderer.multithread = false;
+    FRenderShowFlag flags;
+    flags.ambientStrength = 1.0f;
+
+    std::vector<float> images[3];
+    for (int mode = 0; mode < 3; ++mode)
+    {
+        flags.shading = static_cast<EShadingModel>(mode);
+        images[mode] = renderer.RasterShadedLegacyOutput(scene, 64, 64, flags, nullptr);
+    }
+    FRenderScene oneLight = scene;
+    if (oneLight.pointLights.size() > 1) oneLight.pointLights.resize(1);
+    flags.shading = EShadingModel::Phong;
+    const std::vector<float> one = renderer.RasterShadedLegacyOutput(
+        oneLight, 64, 64, flags, nullptr);
+    const std::vector<float> two = renderer.RasterShadedLegacyOutput(
+        scene, 64, 64, flags, nullptr);
+    flags.depthView = true;
+    const std::vector<float> depth = renderer.RasterShadedLegacyOutput(
+        scene, 64, 64, flags, nullptr);
+
+    Material checker;
+    checker.kd = glm::vec3(1.0f);
+    checker.ka = glm::vec3(0.2f);
+    checker.ks = glm::vec3(0.0f);
+    checker.texWidth = 2;
+    checker.texHeight = 2;
+    checker.texChannels = 3;
+    checker.diffuseTexPath = "baseline://checker";
+    checker.texData = {
+        255, 255, 255, 20, 20, 20,
+        20, 20, 20, 255, 255, 255,
+    };
+    FResolvedRenderMaterial checkerResolved;
+    checkerResolved.source = &checker;
+    checkerResolved.albedo = checker.kd;
+    FRenderScene checkerScene = scene;
+    checkerScene.meshes.front().materialOverride = checkerResolved;
+    checkerScene.meshes.front().uvTiling = glm::vec2(2.0f);
+    flags.depthView = false;
+    flags.shading = EShadingModel::Phong;
+    checker.wrapMode = EWrapMode::Repeat;
+    const std::vector<float> checkerRepeat = renderer.RasterShadedLegacyOutput(
+        checkerScene, 64, 64, flags, nullptr);
+    checker.wrapMode = EWrapMode::Clamp;
+    const std::vector<float> checkerClamp = renderer.RasterShadedLegacyOutput(
+        checkerScene, 64, 64, flags, nullptr);
+
+    FRenderScene alternateEnvironment = scene;
+    alternateEnvironment.environment.horizon = glm::vec3(0.7f, 0.03f, 0.02f);
+    alternateEnvironment.environment.zenith = glm::vec3(0.02f, 0.1f, 0.75f);
+    alternateEnvironment.environment.exponent = 2.0f;
+    const std::vector<float> proceduralOriginal = renderer.RasterShadedLegacyOutput(
+        scene, 64, 64, flags, nullptr);
+    const std::vector<float> proceduralAlternate = renderer.RasterShadedLegacyOutput(
+        alternateEnvironment, 64, 64, flags, nullptr);
+
+    const char* baselineHDRPath = "task8_legacy_baseline.tmp.hdr";
+    {
+        std::ofstream hdr(baselineHDRPath, std::ios::binary);
+        hdr << "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 2 +X 2\n";
+        const unsigned char rgbe[16] = {
+            240, 20, 10, 129, 10, 220, 30, 129,
+            15, 30, 240, 129, 210, 180, 20, 129,
+        };
+        hdr.write(reinterpret_cast<const char*>(rgbe), sizeof(rgbe));
+    }
+    USkyHDRI baselineSky;
+    baselineSky.GetOrLoad(baselineHDRPath);
+    const std::vector<float> hdri = renderer.RasterShadedLegacyOutput(
+        scene, 64, 64, flags, &baselineSky);
+
+    const int probes[][2] = {{32, 32}, {22, 31}, {42, 31}, {32, 45}, {2, 2}, {32, 61}};
+    std::printf("=== legacy raster semantic baseline (64x64, gamma output) ===\n");
+    for (int p = 0; p < 6; ++p)
+    {
+        const int x = probes[p][0], y = probes[p][1];
+        std::printf("probe[%d]=(%d,%d) flat=%.6f gouraud=%.6f phong=%.6f one=%.6f two=%.6f depth=%.6f\n",
+            p, x, y, LuminanceAt(images[0], 64, x, y),
+            LuminanceAt(images[1], 64, x, y), LuminanceAt(images[2], 64, x, y),
+            LuminanceAt(one, 64, x, y), LuminanceAt(two, 64, x, y),
+            LuminanceAt(depth, 64, x, y));
+    }
+    std::printf("checker_repeat_vs_clamp_abs=%.6f\n",
+        FloatImageAbsDifference(checkerRepeat, checkerClamp));
+    std::printf("procedural_background_delta=%.6f procedural_geometry_delta=%.6f procedural_image_abs=%.6f\n",
+        std::fabs(LuminanceAt(proceduralOriginal, 64, 2, 2) -
+                  LuminanceAt(proceduralAlternate, 64, 2, 2)),
+        std::fabs(LuminanceAt(proceduralOriginal, 64, 32, 32) -
+                  LuminanceAt(proceduralAlternate, 64, 32, 32)),
+        FloatImageAbsDifference(proceduralOriginal, proceduralAlternate));
+    std::printf("hdri_background_delta=%.6f hdri_geometry_delta=%.6f hdri_image_abs=%.6f\n",
+        std::fabs(LuminanceAt(proceduralOriginal, 64, 2, 2) -
+                  LuminanceAt(hdri, 64, 2, 2)),
+        std::fabs(LuminanceAt(proceduralOriginal, 64, 32, 32) -
+                  LuminanceAt(hdri, 64, 32, 32)),
+        FloatImageAbsDifference(proceduralOriginal, hdri));
+    std::printf("depth_order center=%.6f right=%.6f sphere=%.6f background=%.6f\n",
+        LuminanceAt(depth, 64, 32, 32), LuminanceAt(depth, 64, 42, 31),
+        LuminanceAt(depth, 64, 32, 45), LuminanceAt(depth, 64, 2, 2));
+    std::printf("row31_depth_transitions");
+    bool previousCovered = LuminanceAt(depth, 64, 0, 31) > 0.0f;
+    for (int x = 1; x < 64; ++x)
+    {
+        const bool covered = LuminanceAt(depth, 64, x, 31) > 0.0f;
+        if (covered != previousCovered)
+            std::printf(" x%d:%d", x, covered ? 1 : 0);
+        previousCovered = covered;
+    }
+    std::printf("\n");
+    baselineSky.Cleanup();
+    std::remove(baselineHDRPath);
+    return 0;
+}
+
+class FRasterLightingSelfTestApp final : public Engine
+{
+public:
+    int RunGates(const std::string& outputPath)
+    {
+        glfwHideWindow(window_);
+        int passed = 0, failed = 0;
+        auto check = [&](const char* label, bool result)
+        {
+            std::printf("[%s] %s\n", result ? "PASS" : "FAIL", label);
+            result ? ++passed : ++failed;
+        };
+
+        std::unique_ptr<UMesh> sphere(UMesh::GenerateSphere(0.9f, 12, 8));
+        Material material;
+        material.kd = glm::vec3(0.25f, 0.4f, 0.85f);
+        material.ks = glm::vec3(0.7f);
+        material.shininess = 40.0f;
+        material.emissive = glm::vec3(0.01f, 0.005f, 0.02f);
+
+        FRenderScene scene;
+        scene.camera.nearDistance = 0.1f;
+        scene.camera.left = -0.1f;
+        scene.camera.rightPlane = 0.1f;
+        scene.camera.bottom = -0.1f;
+        scene.camera.top = 0.1f;
+        scene.environment.horizon = glm::vec3(0.08f, 0.12f, 0.22f);
+        scene.environment.zenith = glm::vec3(0.42f, 0.64f, 0.95f);
+        scene.pointLights = {
+            {glm::vec3(-3.0f, 4.0f, -3.0f), glm::vec3(0.9f, 0.75f, 0.6f)},
+            {glm::vec3(3.0f, 1.0f, -4.0f), glm::vec3(0.2f, 0.35f, 0.7f)},
+        };
+        FRenderMeshInstance instance;
+        instance.mesh = sphere.get();
+        instance.modelTransform = glm::translate(glm::mat4(1.0f), glm::vec3(0, 0, -6));
+        instance.normalTransform = glm::mat3(1.0f);
+        FResolvedRenderMaterial resolved;
+        resolved.source = &material;
+        resolved.albedo = material.kd;
+        resolved.specularColor = material.ks;
+        resolved.emissive = material.emissive;
+        resolved.shininess = material.shininess;
+        instance.materialOverride = resolved;
+        instance.materialOverrideIdentity = 7;
+        instance.objectIdentity = 9;
+        scene.meshes.push_back(instance);
+
+        FOpenGLMeshUploadAdapter adapter;
+        UGPUMeshCache cache(adapter);
+        UHardwareGBuffer gbuffer;
+        UHardwareRasterizer rasterizer;
+        URasterLightingPass lighting;
+        FRenderQuality quality;
+        std::string diagnostic;
+        check("lighting shaders compile and link",
+              lighting.Init(ContextGeneration(), &diagnostic));
+        check("lighting output allocation",
+              lighting.Resize(64, 64, ContextGeneration(), &diagnostic));
+        check("lighting G-buffer allocation",
+              gbuffer.Resize(64, 64, ContextGeneration()));
+        cache.BeginFrame();
+        const bool preparedInitialEnvironment = lighting.PrepareEnvironment(
+            scene, ContextGeneration(), &diagnostic);
+        check("Phong geometry includes lighting interpolants",
+              preparedInitialEnvironment && rasterizer.RenderGeometry(
+                  scene, quality, cache, gbuffer, lighting.EnvironmentTexture(),
+                  ContextGeneration(), &diagnostic));
+        cache.ReleaseUnused();
+        FRasterLightingOutput lit;
+        check("Phong G-buffer shades into HDR output",
+              lighting.Render(scene, quality, gbuffer, ContextGeneration(), lit, &diagnostic) &&
+              lit.valid && lit.colorTarget.valid);
+
+        glDrawBuffer(GL_NONE);
+        glViewport(3, 4, 17, 19);
+        glEnable(GL_RASTERIZER_DISCARD);
+        glEnable(GL_STENCIL_TEST);
+        glStencilFunc(GL_NEVER, 1, 0xff);
+        glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+        glEnable(GL_SAMPLE_COVERAGE);
+        glEnable(GL_DITHER);
+        glEnable(GL_PRIMITIVE_RESTART);
+        glEnable(GL_DEPTH_CLAMP);
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(7, 8, 1, 1);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_GREATER);
+        glDepthMask(GL_FALSE);
+        glEnable(GL_CULL_FACE);
+        glEnable(GL_FRAMEBUFFER_SRGB);
+        glDepthRange(0.2, 0.8);
+        glPolygonMode(GL_FRONT, GL_LINE);
+        glPolygonMode(GL_BACK, GL_POINT);
+        glFrontFace(GL_CW);
+        glEnablei(GL_BLEND, 0);
+        glColorMaski(0, GL_FALSE, GL_TRUE, GL_FALSE, GL_TRUE);
+
+        FRasterLightingOutput hostileLit;
+        const bool hostileLightingOK = lighting.Render(
+            scene, quality, gbuffer, ContextGeneration(), hostileLit, &diagnostic);
+        float hostileLightingPixel[4] = {};
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, lighting.Framebuffer());
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glReadPixels(32, 32, 1, 1, GL_RGBA, GL_FLOAT, hostileLightingPixel);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+
+        GLint restoredLightingDrawBuffer = 0;
+        GLint restoredLightingViewport[4] = {};
+        GLint restoredLightingPolygon[2] = {};
+        GLint restoredLightingFrontFace = 0;
+        GLint restoredLightingScissor[4] = {};
+        GLint restoredLightingDepthFunc = 0;
+        GLdouble restoredLightingDepthRange[2] = {};
+        GLboolean restoredLightingDepthMask = GL_TRUE;
+        GLboolean restoredLightingMask[4] = {};
+        glGetIntegerv(GL_DRAW_BUFFER0, &restoredLightingDrawBuffer);
+        glGetIntegerv(GL_VIEWPORT, restoredLightingViewport);
+        glGetIntegerv(GL_POLYGON_MODE, restoredLightingPolygon);
+        glGetIntegerv(GL_FRONT_FACE, &restoredLightingFrontFace);
+        glGetIntegerv(GL_SCISSOR_BOX, restoredLightingScissor);
+        glGetIntegerv(GL_DEPTH_FUNC, &restoredLightingDepthFunc);
+        glGetDoublev(GL_DEPTH_RANGE, restoredLightingDepthRange);
+        glGetBooleanv(GL_DEPTH_WRITEMASK, &restoredLightingDepthMask);
+        glGetBooleani_v(GL_COLOR_WRITEMASK, 0, restoredLightingMask);
+        const bool hostileStateRestored =
+            restoredLightingDrawBuffer == GL_NONE &&
+            restoredLightingViewport[0] == 3 && restoredLightingViewport[1] == 4 &&
+            restoredLightingViewport[2] == 17 && restoredLightingViewport[3] == 19 &&
+            restoredLightingPolygon[0] == GL_LINE &&
+            restoredLightingPolygon[1] == GL_POINT &&
+            restoredLightingFrontFace == GL_CW &&
+            restoredLightingScissor[0] == 7 && restoredLightingScissor[1] == 8 &&
+            restoredLightingScissor[2] == 1 && restoredLightingScissor[3] == 1 &&
+            restoredLightingDepthFunc == GL_GREATER &&
+            restoredLightingDepthMask == GL_FALSE &&
+            std::fabs(restoredLightingDepthRange[0] - 0.2) < 0.000001 &&
+            std::fabs(restoredLightingDepthRange[1] - 0.8) < 0.000001 &&
+            restoredLightingMask[0] == GL_FALSE && restoredLightingMask[1] == GL_TRUE &&
+            restoredLightingMask[2] == GL_FALSE && restoredLightingMask[3] == GL_TRUE &&
+            glIsEnabled(GL_RASTERIZER_DISCARD) && glIsEnabled(GL_STENCIL_TEST) &&
+            glIsEnabled(GL_SAMPLE_ALPHA_TO_COVERAGE) && glIsEnabled(GL_SAMPLE_COVERAGE) &&
+            glIsEnabled(GL_DITHER) && glIsEnabled(GL_PRIMITIVE_RESTART) &&
+            glIsEnabled(GL_DEPTH_CLAMP) && glIsEnabled(GL_POLYGON_OFFSET_FILL) &&
+            glIsEnabled(GL_SCISSOR_TEST) && glIsEnabled(GL_DEPTH_TEST) &&
+            glIsEnabled(GL_CULL_FACE) && glIsEnabled(GL_FRAMEBUFFER_SRGB) &&
+            glIsEnabledi(GL_BLEND, 0);
+        check("lighting pass survives hostile state and restores it exactly",
+              hostileLightingOK && hostileLightingPixel[3] > 0.5f &&
+              hostileLightingPixel[0] + hostileLightingPixel[1] +
+                  hostileLightingPixel[2] > 0.01f && hostileStateRestored);
+
+        FRenderTarget target = FRenderTarget::DefaultFramebuffer(
+            64, 64, ContextGeneration());
+        check("default target binds", target.Begin());
+        FCompositeOutput composite;
+        const bool hostileCompositeOK = lighting.Composite(
+            target, hostileLit, FRayEffectOutputs{}, ContextGeneration(),
+            composite, &diagnostic) && composite.valid;
+        std::vector<unsigned char> pixels(64u * 64u * 3u);
+        glReadPixels(0, 0, 64, 64, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+        GLint restoredCompositeDrawBuffer = 0;
+        glGetIntegerv(GL_DRAW_BUFFER0, &restoredCompositeDrawBuffer);
+        check("composite selects color zero under hostile state and restores draw buffer",
+              hostileCompositeOK && restoredCompositeDrawBuffer == GL_NONE);
+        target.End();
+
+        glDrawBuffer(GL_BACK);
+        glViewport(0, 0, 64, 64);
+        glDisable(GL_RASTERIZER_DISCARD);
+        glDisable(GL_STENCIL_TEST);
+        glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+        glDisable(GL_SAMPLE_COVERAGE);
+        glEnable(GL_DITHER);
+        glDisable(GL_PRIMITIVE_RESTART);
+        glDisable(GL_DEPTH_CLAMP);
+        glDisable(GL_POLYGON_OFFSET_FILL);
+        glDisable(GL_SCISSOR_TEST);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LESS);
+        glDepthMask(GL_TRUE);
+        glDisable(GL_CULL_FACE);
+        glDisable(GL_FRAMEBUFFER_SRGB);
+        glDepthRange(0.0, 1.0);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        glFrontFace(GL_CCW);
+        glDisablei(GL_BLEND, 0);
+        glColorMaski(0, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        const std::size_t center = (32u * 64u + 32u) * 3u;
+        const std::size_t corner = 0;
+        check("lit geometry is non-background and finite",
+              pixels[center] + pixels[center + 1] + pixels[center + 2] > 20u);
+        check("procedural environment fills background",
+              pixels[corner] + pixels[corner + 1] + pixels[corner + 2] > 20u);
+
+        auto renderFrame = [&](FRenderScene& frameScene,
+                               const FRenderQuality& frameQuality)
+        {
+            std::vector<unsigned char> result(64u * 64u * 3u);
+            cache.BeginFrame();
+            const bool environmentOK = lighting.PrepareEnvironment(
+                frameScene, ContextGeneration(), &diagnostic);
+            const bool geometryOK = environmentOK && rasterizer.RenderGeometry(
+                frameScene, frameQuality, cache, gbuffer,
+                lighting.EnvironmentTexture(), ContextGeneration(), &diagnostic);
+            cache.ReleaseUnused();
+            FRasterLightingOutput frameLighting;
+            const bool lightingOK = geometryOK && lighting.Render(
+                frameScene, frameQuality, gbuffer, ContextGeneration(),
+                frameLighting, &diagnostic);
+            FCompositeOutput frameComposite;
+            const bool bound = target.Begin();
+            const bool compositeOK = bound && lightingOK && lighting.Composite(
+                target, frameLighting, FRayEffectOutputs{}, ContextGeneration(),
+                frameComposite, &diagnostic);
+            if (compositeOK)
+                glReadPixels(0, 0, 64, 64, GL_RGB, GL_UNSIGNED_BYTE, result.data());
+            if (bound) target.End();
+            if (!compositeOK && !diagnostic.empty())
+                std::fprintf(stderr, "%s\n", diagnostic.c_str());
+            return std::make_pair(compositeOK, result);
+        };
+
+        auto imageDifference = [](const std::vector<unsigned char>& a,
+                                  const std::vector<unsigned char>& b)
+        {
+            std::uint64_t difference = 0;
+            for (std::size_t i = 0; i < a.size(); ++i)
+                difference += static_cast<std::uint64_t>(std::abs(
+                    static_cast<int>(a[i]) - static_cast<int>(b[i])));
+            return difference;
+        };
+        auto imageEnergy = [](const std::vector<unsigned char>& image)
+        {
+            std::uint64_t energy = 0;
+            for (unsigned char value : image) energy += value;
+            return energy;
+        };
+
+        scene.meshes.front().shadingModel = ERenderShadingModel::Flat;
+        const auto flat = renderFrame(scene, quality);
+        scene.meshes.front().shadingModel = ERenderShadingModel::Gouraud;
+        const auto gouraud = renderFrame(scene, quality);
+        scene.meshes.front().shadingModel = ERenderShadingModel::Phong;
+        const auto phong = renderFrame(scene, quality);
+        check("Flat/Gouraud/Phong frames all render",
+              flat.first && gouraud.first && phong.first);
+        check("Flat is a distinct face-constant lighting result",
+              imageDifference(flat.second, phong.second) > 500u);
+        check("Gouraud vertex lighting differs from per-pixel Phong",
+              imageDifference(gouraud.second, phong.second) > 100u);
+
+        FRenderScene oneLightScene = scene;
+        oneLightScene.pointLights.resize(1);
+        const auto oneLight = renderFrame(oneLightScene, quality);
+        const auto twoLights = renderFrame(scene, quality);
+        check("second point light contributes additively",
+              oneLight.first && twoLights.first &&
+              imageEnergy(twoLights.second) > imageEnergy(oneLight.second) + 100u);
+
+        FRenderQuality noAmbient = quality;
+        noAmbient.ambientStrength = 0.0f;
+        const auto ambientOff = renderFrame(scene, noAmbient);
+        const auto ambientOn = renderFrame(scene, quality);
+        check("ambient strength changes visible geometry",
+              ambientOff.first && ambientOn.first &&
+              imageEnergy(ambientOn.second) > imageEnergy(ambientOff.second) + 100u);
+
+        FRenderScene lowMaterialAmbientScene = scene;
+        lowMaterialAmbientScene.pointLights.clear();
+        lowMaterialAmbientScene.meshes.front().materialOverride->ambient = glm::vec3(0.01f);
+        lowMaterialAmbientScene.meshes.front().materialOverride->emissive = glm::vec3(0.0f);
+        const auto lowMaterialAmbient = renderFrame(lowMaterialAmbientScene, quality);
+        FRenderScene highMaterialAmbientScene = lowMaterialAmbientScene;
+        highMaterialAmbientScene.meshes.front().materialOverride->ambient = glm::vec3(0.8f);
+        const auto highMaterialAmbient = renderFrame(highMaterialAmbientScene, quality);
+        const int lowAmbientCenter =
+            lowMaterialAmbient.second[center] +
+            lowMaterialAmbient.second[center + 1] +
+            lowMaterialAmbient.second[center + 2];
+        const int highAmbientCenter =
+            highMaterialAmbient.second[center] +
+            highMaterialAmbient.second[center + 1] +
+            highMaterialAmbient.second[center + 2];
+        check("material ambient coefficient controls environment fill",
+              lowMaterialAmbient.first && highMaterialAmbient.first &&
+              highAmbientCenter > lowAmbientCenter + 20);
+
+        FRenderQuality depthQuality = quality;
+        depthQuality.depthView = true;
+        const auto depthFrame = renderFrame(scene, depthQuality);
+        const std::size_t depthCenter = (32u * 64u + 32u) * 3u;
+        check("depth visualization separates geometry from background",
+              depthFrame.first && depthFrame.second[depthCenter] > 0u &&
+              depthFrame.second[0] == 0u &&
+              depthFrame.second[depthCenter] == depthFrame.second[depthCenter + 1] &&
+              depthFrame.second[depthCenter] == depthFrame.second[depthCenter + 2]);
+
+        material.kd = glm::vec3(1.0f);
+        material.texWidth = 2;
+        material.texHeight = 2;
+        material.texChannels = 3;
+        material.diffuseTexPath = "Test/Fixtures/Checker2x2.ppm";
+        material.wrapMode = EWrapMode::Repeat;
+        material.uvTiling = glm::vec2(2.0f);
+        material.texData = {
+            255, 255, 255, 20, 20, 20,
+            20, 20, 20, 255, 255, 255,
+        };
+        scene.meshes.front().uvTiling = glm::vec2(2.0f);
+        GLuint hostileGeometrySamplers[2] = {};
+        GLuint hostileEnvironmentBinding = 0;
+        glGenSamplers(2, hostileGeometrySamplers);
+        glSamplerParameteri(hostileGeometrySamplers[0], GL_TEXTURE_MIN_FILTER,
+                            GL_NEAREST_MIPMAP_NEAREST);
+        glSamplerParameteri(hostileGeometrySamplers[1], GL_TEXTURE_MIN_FILTER,
+                            GL_NEAREST_MIPMAP_NEAREST);
+        glGenTextures(1, &hostileEnvironmentBinding);
+        glActiveTexture(GL_TEXTURE0);
+        glBindSampler(0, hostileGeometrySamplers[0]);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, hostileEnvironmentBinding);
+        glBindSampler(1, hostileGeometrySamplers[1]);
+        glActiveTexture(GL_TEXTURE5);
+        const std::uint64_t textureUploadsBefore = rasterizer.MaterialTextureUploads();
+        const std::uint64_t textureFailuresBefore =
+            rasterizer.MaterialTextureUploadFailures();
+        rasterizer.InjectNextMaterialTextureUploadFailureForTesting();
+        const auto checkerFailedUpload = renderFrame(scene, quality);
+        check("failed material texture upload is transactional",
+              !checkerFailedUpload.first &&
+              rasterizer.MaterialTextureUploads() == textureUploadsBefore &&
+              rasterizer.MaterialTextureUploadFailures() == textureFailuresBefore + 1u);
+        glActiveTexture(GL_TEXTURE0 - 1);
+        const auto checkerFirst = renderFrame(scene, quality);
+        const std::uint64_t textureUploadsAfterFirst = rasterizer.MaterialTextureUploads();
+        const auto checkerSecond = renderFrame(scene, quality);
+        GLint restoredGeometryActiveTexture = 0;
+        GLint restoredGeometryEnvironment = 0;
+        GLint restoredGeometrySamplers[2] = {};
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &restoredGeometryActiveTexture);
+        glActiveTexture(GL_TEXTURE1);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &restoredGeometryEnvironment);
+        glGetIntegeri_v(GL_SAMPLER_BINDING, 0, &restoredGeometrySamplers[0]);
+        glGetIntegeri_v(GL_SAMPLER_BINDING, 1, &restoredGeometrySamplers[1]);
+        glActiveTexture(GL_TEXTURE5);
+        check("checker texture uploads once and remains cached",
+              checkerFirst.first && checkerSecond.first &&
+              textureUploadsAfterFirst == textureUploadsBefore + 1u &&
+              rasterizer.MaterialTextureUploads() == textureUploadsAfterFirst);
+        check("geometry ignores hostile samplers and restores units zero/one",
+              restoredGeometryActiveTexture == GL_TEXTURE5 &&
+              restoredGeometryEnvironment ==
+                  static_cast<GLint>(hostileEnvironmentBinding) &&
+              restoredGeometrySamplers[0] ==
+                  static_cast<GLint>(hostileGeometrySamplers[0]) &&
+              restoredGeometrySamplers[1] ==
+                  static_cast<GLint>(hostileGeometrySamplers[1]));
+        check("repeated checker UVs produce alternating surface samples",
+              imageDifference(checkerFirst.second, phong.second) > 1000u);
+        material.texData[0] = 64;
+        rasterizer.InjectNextMaterialTextureUploadFailureForTesting();
+        const auto checkerFailedEdit = renderFrame(scene, quality);
+        check("failed live texture refresh retains the committed cache",
+              !checkerFailedEdit.first &&
+              rasterizer.MaterialTextureUploads() == textureUploadsAfterFirst &&
+              rasterizer.MaterialTextureUploadFailures() == textureFailuresBefore + 2u);
+        const auto checkerEdited = renderFrame(scene, quality);
+        check("live texture byte edits refresh the cached texture",
+              checkerEdited.first &&
+              rasterizer.MaterialTextureUploads() == textureUploadsAfterFirst + 1u);
+        material.texData.clear();
+        material.texWidth = material.texHeight = material.texChannels = 0;
+        material.diffuseTexPath.clear();
+        material.uvTiling = glm::vec2(1.0f);
+        scene.meshes.front().uvTiling = glm::vec2(1.0f);
+        material.kd = glm::vec3(0.25f, 0.4f, 0.85f);
+        glActiveTexture(GL_TEXTURE0);
+        glBindSampler(0, 0);
+        glActiveTexture(GL_TEXTURE1);
+        glBindSampler(1, 0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDeleteSamplers(2, hostileGeometrySamplers);
+        glDeleteTextures(1, &hostileEnvironmentBinding);
+        glActiveTexture(GL_TEXTURE0);
+
+        const char* temporaryHDR = "task8_environment.tmp.hdr";
+        {
+            std::ofstream hdr(temporaryHDR, std::ios::binary);
+            hdr << "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 2 +X 2\n";
+            const unsigned char rgbe[16] = {
+                240, 20, 10, 129, 10, 220, 30, 129,
+                15, 30, 240, 129, 210, 180, 20, 129,
+            };
+            hdr.write(reinterpret_cast<const char*>(rgbe), sizeof(rgbe));
+        }
+        FRenderScene ambientOnlyScene = scene;
+        ambientOnlyScene.pointLights.clear();
+        const auto gradientAmbientFrame = renderFrame(ambientOnlyScene, quality);
+        const auto gradientFrame = renderFrame(scene, quality);
+        scene.environment.skyPath = temporaryHDR;
+        ambientOnlyScene.environment.skyPath = temporaryHDR;
+        const std::uint64_t environmentFailuresBefore =
+            lighting.Stats().environmentTextureUploadFailures;
+        lighting.InjectNextEnvironmentTextureUploadFailureForTesting();
+        const auto failedHDRIFrame = renderFrame(scene, quality);
+        check("failed HDRI upload is transactional and retryable",
+              !failedHDRIFrame.first &&
+              lighting.Stats().environmentTextureUploads == 0u &&
+              lighting.Stats().environmentTextureUploadFailures ==
+                  environmentFailuresBefore + 1u);
+        glActiveTexture(GL_TEXTURE0 - 1);
+        const auto hdriFrame = renderFrame(scene, quality);
+        const auto hdriAmbientFrame = renderFrame(ambientOnlyScene, quality);
+        check("HDRI changes sky/background and uploads once",
+              gradientFrame.first && hdriFrame.first &&
+              imageDifference(gradientFrame.second, hdriFrame.second) > 500u &&
+              lighting.Stats().environmentTextureUploads == 1u);
+        const int ambientGeometryDelta =
+            std::abs(static_cast<int>(gradientAmbientFrame.second[center]) -
+                     static_cast<int>(hdriAmbientFrame.second[center])) +
+            std::abs(static_cast<int>(gradientAmbientFrame.second[center + 1]) -
+                     static_cast<int>(hdriAmbientFrame.second[center + 1])) +
+            std::abs(static_cast<int>(gradientAmbientFrame.second[center + 2]) -
+                     static_cast<int>(hdriAmbientFrame.second[center + 2]));
+        check("HDRI changes geometry ambient contribution",
+              gradientAmbientFrame.first && hdriAmbientFrame.first &&
+              ambientGeometryDelta > 3);
+        FRenderScene gouraudHDRIScene = ambientOnlyScene;
+        gouraudHDRIScene.meshes.front().shadingModel = ERenderShadingModel::Gouraud;
+        const auto gouraudHDRIFrame = renderFrame(gouraudHDRIScene, quality);
+        float gouraudPrecomputed[4] = {};
+        float gouraudLit[4] = {};
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, gbuffer.Framebuffer());
+        glReadBuffer(gbuffer.ColorAttachment(
+            EHardwareGBufferSemantic::PrecomputedLighting));
+        glReadPixels(32, 32, 1, 1, GL_RGBA, GL_FLOAT, gouraudPrecomputed);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, lighting.Framebuffer());
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glReadPixels(32, 32, 1, 1, GL_RGBA, GL_FLOAT, gouraudLit);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        FRenderScene phongHDRIScene = ambientOnlyScene;
+        phongHDRIScene.meshes.front().shadingModel = ERenderShadingModel::Phong;
+        const auto phongHDRIFrame = renderFrame(phongHDRIScene, quality);
+        check("Gouraud HDRI is complete vertex lighting with no fragment delta",
+              gouraudHDRIFrame.first &&
+              std::fabs(gouraudPrecomputed[0] - gouraudLit[0]) < 0.002f &&
+              std::fabs(gouraudPrecomputed[1] - gouraudLit[1]) < 0.002f &&
+              std::fabs(gouraudPrecomputed[2] - gouraudLit[2]) < 0.002f);
+        check("Gouraud HDRI vertex interpolation differs from Phong HDRI",
+              phongHDRIFrame.first &&
+              imageDifference(gouraudHDRIFrame.second, phongHDRIFrame.second) > 100u);
+
+        const char* replacementHDR = "task8_environment_replacement.tmp.hdr";
+        {
+            std::ofstream hdr(replacementHDR, std::ios::binary);
+            hdr << "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 2 +X 2\n";
+            const unsigned char rgbe[16] = {
+                20, 210, 240, 129, 230, 25, 180, 129,
+                210, 210, 20, 129, 30, 35, 220, 129,
+            };
+            hdr.write(reinterpret_cast<const char*>(rgbe), sizeof(rgbe));
+        }
+        const GLuint committedEnvironment = lighting.EnvironmentTexture();
+        scene.environment.skyPath = replacementHDR;
+        lighting.InjectNextEnvironmentTextureUploadFailureForTesting();
+        const auto failedHDRIReplacement = renderFrame(scene, quality);
+        check("failed HDRI refresh retains the committed cache",
+              !failedHDRIReplacement.first &&
+              lighting.EnvironmentTexture() == committedEnvironment &&
+              lighting.Stats().environmentTextureUploads == 1u &&
+              lighting.Stats().environmentTextureUploadFailures ==
+                  environmentFailuresBefore + 2u);
+        glActiveTexture(GL_TEXTURE0 - 1);
+        const auto replacedHDRI = renderFrame(scene, quality);
+        check("failed HDRI refresh retries the same source next frame",
+              replacedHDRI.first &&
+              lighting.EnvironmentTexture() != committedEnvironment &&
+              lighting.Stats().environmentTextureUploads == 2u);
+        const auto hdriCached = renderFrame(scene, quality);
+        check("unchanged HDRI remains cached",
+              hdriCached.first && lighting.Stats().environmentTextureUploads == 2u);
+        std::remove(temporaryHDR);
+        std::remove(replacementHDR);
+        scene.environment.skyPath.clear();
+
+        const std::uint64_t lightingRevision = lighting.ResourceRevision();
+        check("lighting output resizes 64 to 80x48",
+              lighting.Resize(80, 48, ContextGeneration(), &diagnostic) &&
+              lighting.Width() == 80 && lighting.Height() == 48 &&
+              lighting.OwnedTextureCount() == 1u);
+        check("lighting output resizes back and idempotently reuses",
+              lighting.Resize(64, 64, ContextGeneration(), &diagnostic) &&
+              lighting.ResourceRevision() == lightingRevision + 2u &&
+              lighting.Resize(64, 64, ContextGeneration(), &diagnostic) &&
+              lighting.ResourceRevision() == lightingRevision + 2u);
+
+        std::unique_ptr<UMesh> slottedCube(UMesh::GenerateCube(glm::vec3(0.8f)));
+        Material redSlot;
+        redSlot.kd = glm::vec3(0.9f, 0.05f, 0.05f);
+        Material greenSlot;
+        greenSlot.kd = glm::vec3(0.05f, 0.9f, 0.05f);
+        slottedCube->materials = {redSlot, greenSlot};
+        slottedCube->triMaterial.resize(12);
+        for (std::size_t triangle = 0; triangle < slottedCube->triMaterial.size(); ++triangle)
+            slottedCube->triMaterial[triangle] = triangle == 9 ? 1u : 0u;
+        FRenderScene slottedScene = scene;
+        slottedScene.meshes.clear();
+        FRenderMeshInstance slotted;
+        slotted.mesh = slottedCube.get();
+        slotted.modelTransform = glm::translate(glm::mat4(1.0f), glm::vec3(0, 0, -6));
+        slotted.modelTransform = slotted.modelTransform *
+            glm::rotate(glm::mat4(1.0f), 24.0f, glm::vec3(0, 1, 0));
+        slotted.normalTransform = glm::transpose(glm::inverse(glm::mat3(slotted.modelTransform)));
+        for (std::size_t slot = 0; slot < slottedCube->materials.size(); ++slot)
+        {
+            FResolvedRenderMaterial slotMaterial;
+            slotMaterial.source = &slottedCube->materials[slot];
+            slotMaterial.albedo = slottedCube->materials[slot].kd;
+            slotted.materialSlots.push_back(slotMaterial);
+            slotted.materialSlotIdentities.push_back(static_cast<std::uint32_t>(201 + slot));
+        }
+        slotted.triangleMaterialSlots = &slottedCube->triMaterial;
+        slotted.triangleMaterialSlotCount = slottedCube->triMaterial.size();
+        slotted.objectIdentity = 77;
+        slottedScene.meshes.push_back(slotted);
+        const auto slottedFrame = renderFrame(slottedScene, quality);
+        std::vector<float> slotAlbedo(64u * 64u * 4u);
+        std::vector<std::uint32_t> slotIdentity(64u * 64u * 2u);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, gbuffer.Framebuffer());
+        glReadBuffer(gbuffer.ColorAttachment(EHardwareGBufferSemantic::AlbedoShininess));
+        glReadPixels(0, 0, 64, 64, GL_RGBA, GL_FLOAT, slotAlbedo.data());
+        glReadBuffer(gbuffer.ColorAttachment(EHardwareGBufferSemantic::Identity));
+        glReadPixels(0, 0, 64, 64, GL_RG_INTEGER, GL_UNSIGNED_INT, slotIdentity.data());
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        bool foundRedSlot = false, foundGreenSlot = false;
+        for (std::size_t pixel = 0; pixel < 64u * 64u; ++pixel)
+        {
+            foundRedSlot = foundRedSlot || slotIdentity[pixel * 2 + 1] == 201u;
+            foundGreenSlot = foundGreenSlot || slotIdentity[pixel * 2 + 1] == 202u;
+        }
+        check("two mesh material slots preserve distinct identities/colors",
+              slottedFrame.first && foundRedSlot && foundGreenSlot);
+        FResolvedRenderMaterial blueOverride;
+        Material blueMaterial;
+        blueMaterial.kd = glm::vec3(0.05f, 0.1f, 0.9f);
+        blueOverride.source = &blueMaterial;
+        blueOverride.albedo = blueMaterial.kd;
+        slottedScene.meshes.front().materialOverride = blueOverride;
+        slottedScene.meshes.front().materialOverrideIdentity = 303;
+        const auto overrideFrame = renderFrame(slottedScene, quality);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, gbuffer.Framebuffer());
+        glReadBuffer(gbuffer.ColorAttachment(EHardwareGBufferSemantic::Identity));
+        glReadPixels(0, 0, 64, 64, GL_RG_INTEGER, GL_UNSIGNED_INT, slotIdentity.data());
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        bool foundOverride = false, foundSlotUnderOverride = false;
+        for (std::size_t pixel = 0; pixel < 64u * 64u; ++pixel)
+        {
+            foundOverride = foundOverride || slotIdentity[pixel * 2 + 1] == 303u;
+            foundSlotUnderOverride = foundSlotUnderOverride ||
+                slotIdentity[pixel * 2 + 1] == 201u || slotIdentity[pixel * 2 + 1] == 202u;
+        }
+        check("component override wins over every triangle material slot",
+              overrideFrame.first && foundOverride && !foundSlotUnderOverride);
+
+        std::unique_ptr<UMesh> sharedCube(UMesh::GenerateCube(glm::vec3(0.2f)));
+        sharedCube->material.texWidth = 2;
+        sharedCube->material.texHeight = 2;
+        sharedCube->material.texChannels = 3;
+        sharedCube->material.diffuseTexPath = "shared://task8-checker";
+        sharedCube->material.texData = {
+            255, 32, 32, 32, 255, 32,
+            32, 255, 32, 255, 32, 32,
+        };
+        FResolvedRenderMaterial cubeMaterial;
+        cubeMaterial.source = &sharedCube->material;
+        cubeMaterial.albedo = glm::vec3(0.6f, 0.3f, 0.15f);
+        auto sharedInstance = [&](int i)
+        {
+            FRenderMeshInstance shared;
+            shared.mesh = sharedCube.get();
+            const float x = static_cast<float>((i % 10) - 5) * 0.025f;
+            const float y = static_cast<float>(((i / 10) % 10) - 5) * 0.025f;
+            shared.modelTransform = glm::translate(glm::mat4(1.0f),
+                glm::vec3(x, y, -6.0f - static_cast<float>(i / 100) * 0.01f));
+            shared.normalTransform = glm::mat3(1.0f);
+            shared.materialOverride = cubeMaterial;
+            shared.materialOverrideIdentity = 101;
+            shared.objectIdentity = static_cast<std::uint32_t>(i + 1);
+            return shared;
+        };
+        const std::uint64_t uploadsBeforeShared = cache.Stats().uploads;
+        const std::uint64_t hashesBeforeShared =
+            rasterizer.MaterialTextureHashComputations();
+        for (int count : {1, 100, 1000})
+        {
+            scene.meshes.clear();
+            scene.meshes.reserve(static_cast<std::size_t>(count));
+            for (int i = 0; i < count; ++i) scene.meshes.push_back(sharedInstance(i));
+            const auto sharedFrame = renderFrame(scene, quality);
+            check(count == 1 ? "one shared cube renders" :
+                  count == 100 ? "100 shared cubes render" : "1000 shared cubes render",
+                  sharedFrame.first);
+        }
+        check("1/100/1000 instances add one unique geometry upload",
+              cache.Stats().uploads == uploadsBeforeShared + 1u &&
+              cache.Stats().residentResources == 1u);
+        check("1/100/1000 shared textured actors hash once per source per frame",
+              rasterizer.MaterialTextureHashComputations() == hashesBeforeShared + 3u);
+        const std::uint64_t uploadsBeforeUnchanged = cache.Stats().uploads;
+        const std::uint64_t hashesBeforeUnchanged =
+            rasterizer.MaterialTextureHashComputations();
+        const auto unchangedSharedFrame = renderFrame(scene, quality);
+        check("unchanged second frame has zero geometry uploads",
+              unchangedSharedFrame.first &&
+              cache.Stats().uploads == uploadsBeforeUnchanged &&
+              cache.Stats().reuploads == 0u &&
+              rasterizer.MaterialTextureHashComputations() ==
+                  hashesBeforeUnchanged + 1u);
+
+        FRenderScene overflowScene = scene;
+        overflowScene.meshes.resize(1);
+        overflowScene.pointLights.clear();
+        const std::size_t lightLimit = lighting.Stats().pointLightLimit;
+        for (std::size_t i = 0; i < lightLimit + 2u; ++i)
+            overflowScene.pointLights.push_back({
+                glm::vec3(static_cast<float>(i) * 0.1f, 3.0f, -3.0f),
+                glm::vec3(0.03f),
+            });
+        const std::uint64_t warningsBefore = lighting.Stats().overflowWarnings;
+        const auto overflowFirst = renderFrame(overflowScene, quality);
+        const auto overflowSecond = renderFrame(overflowScene, quality);
+        check("excess point lights truncate at queried GL3.3-safe limit",
+              overflowFirst.first && overflowSecond.first &&
+              lighting.Stats().uploadedPointLights == lightLimit &&
+              lighting.Stats().truncatedPointLights == 2u);
+        check("same overflow condition warns only once",
+              lighting.Stats().overflowWarnings == warningsBefore + 1u);
+        overflowScene.pointLights.back().radiance.x += 0.01f;
+        overflowScene.pointLights.back().worldPosition.x += 0.02f;
+        const auto animatedOverflow = renderFrame(overflowScene, quality);
+        check("animated overflow scene does not warn every frame",
+              animatedOverflow.first &&
+              lighting.Stats().overflowWarnings == warningsBefore + 1u);
+        overflowScene.pointLights.push_back({glm::vec3(9.0f), glm::vec3(0.01f)});
+        const auto changedOverflowCount = renderFrame(overflowScene, quality);
+        check("distinct overflow count may emit one new warning",
+              changedOverflowCount.first &&
+              lighting.Stats().overflowWarnings == warningsBefore + 2u);
+
+        std::unique_ptr<UWorld> fixtureWorld = LoadRenderParityFixture();
+        check("sectioned parity fixture loads", fixtureWorld != nullptr);
+        if (fixtureWorld)
+        {
+            ACamera& fixtureCamera = fixtureWorld->GetCamera();
+            fixtureCamera.SetOrientation(fixtureCamera.yaw, fixtureCamera.pitch);
+            fixtureCamera.SetFOV(fixtureCamera.fov, 1.0f);
+            FRenderScene parityScene = ExtractRenderScene(*fixtureWorld, fixtureCamera);
+            auto byteLuminance = [](const std::vector<unsigned char>& image,
+                                    int x, int y)
+            {
+                const std::size_t i = static_cast<std::size_t>(y * 64 + x) * 3u;
+                return (image[i] * 0.2126f + image[i + 1] * 0.7152f +
+                        image[i + 2] * 0.0722f) / 255.0f;
+            };
+            std::pair<bool, std::vector<unsigned char>> parityModes[3];
+            for (int mode = 0; mode < 3; ++mode)
+            {
+                FRenderScene modeScene = parityScene;
+                for (FRenderMeshInstance& mesh : modeScene.meshes)
+                    mesh.shadingModel = static_cast<ERenderShadingModel>(mode);
+                parityModes[mode] = renderFrame(modeScene, quality);
+            }
+            const float legacyModeProbe[3][4] = {
+                {0.667491f, 0.667491f, 0.777746f, 0.661457f},
+                {0.675586f, 0.655532f, 0.805347f, 0.758981f},
+                {0.676912f, 0.658379f, 0.800226f, 0.658601f},
+            };
+            const int parityProbes[4][2] = {
+                {32, 32}, {22, 31}, {42, 31}, {32, 45},
+            };
+            bool modeProbesWithinTolerance = true;
+            for (int mode = 0; mode < 3; ++mode)
+                for (int probe = 0; probe < 4; ++probe)
+                    modeProbesWithinTolerance = modeProbesWithinTolerance &&
+                        std::fabs(byteLuminance(parityModes[mode].second,
+                                               parityProbes[probe][0],
+                                               parityProbes[probe][1]) -
+                                  legacyModeProbe[mode][probe]) < 0.30f;
+            check("hardware Flat/Gouraud/Phong probes match measured legacy values",
+                  parityModes[0].first && parityModes[1].first &&
+                  parityModes[2].first && modeProbesWithinTolerance);
+
+            FRenderScene parityDepthScene = parityScene;
+            FRenderQuality parityDepthQuality = quality;
+            parityDepthQuality.depthView = true;
+            const auto parityDepth = renderFrame(parityDepthScene, parityDepthQuality);
+            int leftTransition = -1;
+            int rightTransition = -1;
+            bool priorCovered = byteLuminance(parityDepth.second, 0, 31) > 0.0f;
+            for (int x = 1; x < 64; ++x)
+            {
+                const bool covered = byteLuminance(parityDepth.second, x, 31) > 0.0f;
+                if (covered != priorCovered)
+                {
+                    if (leftTransition < 0) leftTransition = x;
+                    else if (rightTransition < 0) rightTransition = x;
+                }
+                priorCovered = covered;
+            }
+            const float hardwareDepthCenter = byteLuminance(parityDepth.second, 32, 32);
+            const float hardwareDepthRight = byteLuminance(parityDepth.second, 42, 31);
+            const float hardwareDepthSphere = byteLuminance(parityDepth.second, 32, 45);
+            check("hardware edge coverage matches measured legacy transitions",
+                  parityDepth.first && std::abs(leftTransition - 8) <= 2 &&
+                  std::abs(rightTransition - 53) <= 2);
+            check("hardware depth probes preserve measured legacy ordering",
+                  hardwareDepthCenter > hardwareDepthRight &&
+                  hardwareDepthRight > hardwareDepthSphere &&
+                  byteLuminance(parityDepth.second, 2, 2) == 0.0f);
+
+            FRenderScene oneLightParity = parityScene;
+            oneLightParity.pointLights.resize(1);
+            const auto oneLightHardware = renderFrame(oneLightParity, quality);
+            const auto twoLightHardware = renderFrame(parityScene, quality);
+            const float measuredLegacySecondLightDelta = 0.676912f - 0.490377f;
+            const float hardwareSecondLightDelta =
+                byteLuminance(twoLightHardware.second, 32, 32) -
+                byteLuminance(oneLightHardware.second, 32, 32);
+            check("hardware additive light delta matches measured legacy semantics",
+                  oneLightHardware.first && twoLightHardware.first &&
+                  hardwareSecondLightDelta > 0.02f &&
+                  std::fabs(hardwareSecondLightDelta - measuredLegacySecondLightDelta) < 0.25f);
+
+            Material parityChecker;
+            parityChecker.kd = glm::vec3(1.0f);
+            parityChecker.ka = glm::vec3(0.2f);
+            parityChecker.texWidth = 2;
+            parityChecker.texHeight = 2;
+            parityChecker.texChannels = 3;
+            parityChecker.diffuseTexPath = "baseline://checker";
+            parityChecker.texData = {
+                255, 255, 255, 20, 20, 20,
+                20, 20, 20, 255, 255, 255,
+            };
+            FResolvedRenderMaterial parityCheckerResolved;
+            parityCheckerResolved.source = &parityChecker;
+            parityCheckerResolved.albedo = parityChecker.kd;
+            parityCheckerResolved.ambient = parityChecker.ka;
+            FRenderScene checkerParityScene = parityScene;
+            checkerParityScene.meshes.front().materialOverride = parityCheckerResolved;
+            checkerParityScene.meshes.front().uvTiling = glm::vec2(2.0f);
+            parityChecker.wrapMode = EWrapMode::Repeat;
+            const auto checkerRepeatHardware = renderFrame(checkerParityScene, quality);
+            parityChecker.wrapMode = EWrapMode::Clamp;
+            const auto checkerClampHardware = renderFrame(checkerParityScene, quality);
+            const double checkerHardwareAbs =
+                static_cast<double>(imageDifference(checkerRepeatHardware.second,
+                                                    checkerClampHardware.second)) / 255.0;
+            constexpr double measuredLegacyCheckerAbs = 220.209557;
+            check("hardware checker repetition matches measured legacy semantic delta",
+                  checkerRepeatHardware.first && checkerClampHardware.first &&
+                  checkerHardwareAbs > 20.0 &&
+                  std::fabs(checkerHardwareAbs - measuredLegacyCheckerAbs) < 220.0);
+
+            FRenderScene alternateHardwareEnvironment = parityScene;
+            alternateHardwareEnvironment.environment.horizon =
+                glm::vec3(0.7f, 0.03f, 0.02f);
+            alternateHardwareEnvironment.environment.zenith =
+                glm::vec3(0.02f, 0.1f, 0.75f);
+            alternateHardwareEnvironment.environment.exponent = 2.0f;
+            const auto originalEnvironmentHardware = renderFrame(parityScene, quality);
+            const auto alternateEnvironmentHardware =
+                renderFrame(alternateHardwareEnvironment, quality);
+            const float proceduralBackgroundDelta = std::fabs(
+                byteLuminance(originalEnvironmentHardware.second, 2, 2) -
+                byteLuminance(alternateEnvironmentHardware.second, 2, 2));
+            const float proceduralGeometryDelta = std::fabs(
+                byteLuminance(originalEnvironmentHardware.second, 32, 32) -
+                byteLuminance(alternateEnvironmentHardware.second, 32, 32));
+            check("hardware procedural environment follows measured legacy deltas",
+                  originalEnvironmentHardware.first && alternateEnvironmentHardware.first &&
+                  std::fabs(proceduralBackgroundDelta - 0.237586f) < 0.25f &&
+                  std::fabs(proceduralGeometryDelta - 0.074633f) < 0.15f);
+
+            const char* parityHDRPath = "task8_parity_environment.tmp.hdr";
+            {
+                std::ofstream hdr(parityHDRPath, std::ios::binary);
+                hdr << "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 2 +X 2\n";
+                const unsigned char rgbe[16] = {
+                    240, 20, 10, 129, 10, 220, 30, 129,
+                    15, 30, 240, 129, 210, 180, 20, 129,
+                };
+                hdr.write(reinterpret_cast<const char*>(rgbe), sizeof(rgbe));
+            }
+            FRenderScene hdriParityScene = parityScene;
+            hdriParityScene.environment.skyPath = parityHDRPath;
+            const auto hdriParityHardware = renderFrame(hdriParityScene, quality);
+            const float hdriBackgroundDelta = std::fabs(
+                byteLuminance(originalEnvironmentHardware.second, 2, 2) -
+                byteLuminance(hdriParityHardware.second, 2, 2));
+            const float hdriGeometryDelta = std::fabs(
+                byteLuminance(originalEnvironmentHardware.second, 32, 32) -
+                byteLuminance(hdriParityHardware.second, 32, 32));
+            check("hardware HDRI background tracks measured legacy behavior",
+                  hdriParityHardware.first &&
+                  std::fabs(hdriBackgroundDelta - 0.053053f) < 0.25f);
+            check("hardware HDRI extends measured zero legacy geometry delta",
+                  hdriGeometryDelta > 0.01f);
+            std::remove(parityHDRPath);
+
+            UWorldRenderer worldRenderer;
+            worldRenderer.Init();
+            FRenderTarget viewport = FRenderTarget::TextureViewport(
+                64, 64, ContextGeneration());
+            FBackendSelection backend;
+            backend.requested = ERayTracingBackend::CompatibleGL33;
+            backend.selected = ERayTracingBackend::CompatibleGL33;
+            backend.available = true;
+            backend.rayTracingEnabled = true;
+            const bool routed = worldRenderer.Render(
+                *fixtureWorld, fixtureCamera, viewport,
+                fixtureWorld->GetScene().renderFeatures, quality, backend,
+                ContextGeneration());
+            const std::vector<float> cpuSentinel = {0.25f, 0.5f, 0.75f};
+            fixtureWorld->GetScene().outputImage = cpuSentinel;
+            const bool routedAgain = worldRenderer.Render(
+                *fixtureWorld, fixtureCamera, viewport,
+                fixtureWorld->GetScene().renderFeatures, quality, backend,
+                ContextGeneration());
+            FRenderFeatures rtFeatures = fixtureWorld->GetScene().renderFeatures;
+            rtFeatures.rayTracing = true;
+            const bool routedWithPendingRT = worldRenderer.Render(
+                *fixtureWorld, fixtureCamera, viewport, rtFeatures, quality,
+                backend, ContextGeneration());
+            std::vector<unsigned char> routedPixels(64u * 64u * 3u);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, viewport.Identity());
+            glReadPixels(0, 0, 64, 64, GL_RGB, GL_UNSIGNED_BYTE, routedPixels.data());
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            check("normal UWorldRenderer routes fixture through hardware output",
+                  routed && routedAgain && routedWithPendingRT &&
+                  imageEnergy(routedPixels) > 1000u &&
+                  fixtureWorld->GetScene().outputImage == cpuSentinel);
+            const float routedCenter =
+                (routedPixels[(32u * 64u + 32u) * 3u] * 0.2126f +
+                 routedPixels[(32u * 64u + 32u) * 3u + 1] * 0.7152f +
+                 routedPixels[(32u * 64u + 32u) * 3u + 2] * 0.0722f) / 255.0f;
+            const float routedCorner =
+                (routedPixels[0] * 0.2126f + routedPixels[1] * 0.7152f +
+                 routedPixels[2] * 0.0722f) / 255.0f;
+            check("hardware probes remain within semantic legacy tolerances",
+                  std::fabs(routedCenter - 0.676912f) < 0.25f &&
+                  std::fabs(routedCorner - 0.595910f) < 0.20f);
+            const FWorldRendererStats& normalStats = worldRenderer.Stats();
+            check("raster-only/neutral-RT hardware executor performs zero CPU or ray work",
+                  normalStats.hardwareGBufferPasses == 3u &&
+                  normalStats.rasterLightingPasses == 3u &&
+                  normalStats.compositePasses == 3u &&
+                  normalStats.rayResourceAllocations == 0u &&
+                  normalStats.rayDispatches == 0u &&
+                  normalStats.cpuFramebufferGenerations == 0u &&
+                  normalStats.cpuReadbacks == 0u &&
+                  normalStats.cpuFramebufferUploads == 0u);
+            worldRenderer.Shutdown();
+        }
+        {
+            std::ofstream ppm(outputPath, std::ios::binary);
+            ppm << "P6\n64 64\n255\n";
+            for (int y = 63; y >= 0; --y)
+                ppm.write(reinterpret_cast<const char*>(pixels.data() + y * 64 * 3), 64 * 3);
+            check("lighting PPM written", static_cast<bool>(ppm));
+        }
+        check("lighting pass leaves no GL error", glGetError() == GL_NO_ERROR);
+        lighting.Shutdown();
+        std::printf("=== raster lighting gates: %d passed, %d failed ===\n", passed, failed);
+        return failed == 0 ? 0 : 1;
+    }
+};
+
+static int RunRasterLightingGates(const std::string& outputPath)
+{
+    FRasterLightingSelfTestApp app;
+    if (!app.Init(64, 64, "Raster Lighting Self-Test")) return 2;
+    return app.RunGates(outputPath);
+}
+
 int main(int argc, char** argv)
 {
     const std::string arg = (argc > 1) ? argv[1] : "";
@@ -765,6 +1829,21 @@ int main(int argc, char** argv)
             return 2;
         }
         return RunHardwareRasterGates(outputPath);
+    }
+
+    if (arg == "--raster-lighting-baseline")
+        return RunRasterLightingLegacyBaseline();
+
+    const std::string rasterLightingPrefix = "--raster-lighting-selftest=";
+    if (arg.rfind(rasterLightingPrefix, 0) == 0)
+    {
+        const std::string outputPath = arg.substr(rasterLightingPrefix.size());
+        if (outputPath.empty())
+        {
+            std::fprintf(stderr, "--raster-lighting-selftest requires an output .ppm path\n");
+            return 2;
+        }
+        return RunRasterLightingGates(outputPath);
     }
 
     if (arg == "--fbxtest")

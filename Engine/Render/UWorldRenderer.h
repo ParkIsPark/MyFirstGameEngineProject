@@ -16,6 +16,7 @@ class FOpenGLMeshUploadAdapter;
 class UGPUMeshCache;
 class UHardwareGBuffer;
 class UHardwareRasterizer;
+class URasterLightingPass;
 class UWorld;
 
 struct FWorldRenderRequest
@@ -28,9 +29,21 @@ struct FWorldRenderRequest
     std::vector<ERenderPass> passPlan;
 };
 
+struct FWorldRendererStats
+{
+    std::uint64_t hardwareGBufferPasses = 0;
+    std::uint64_t rasterLightingPasses = 0;
+    std::uint64_t compositePasses = 0;
+    std::uint64_t rayResourceAllocations = 0;
+    std::uint64_t rayDispatches = 0;
+    std::uint64_t cpuFramebufferGenerations = 0;
+    std::uint64_t cpuReadbacks = 0;
+    std::uint64_t cpuFramebufferUploads = 0;
+};
+
 // Narrow dispatch seam: tests observe one immutable scene extraction and one
-// execution request without OpenGL. The default implementation is the clearly
-// named transitional legacy executor replaced by Tasks 7-10.
+// execution request without OpenGL. Production construction selects the
+// hardware G-buffer, raster-lighting, and composite executor.
 class IWorldRenderExecutor
 {
 public:
@@ -60,14 +73,17 @@ public:
                 const FRenderQuality& quality,
                 const FBackendSelection& backendSelection,
                 std::uint64_t expectedContextGeneration = 0);
+    const FWorldRendererStats& Stats() const { return stats_; }
 
 private:
     std::unique_ptr<IWorldRenderExecutor> executor_;
-    // Prepared for the Task 8 lighting/composite cutover. Task 7 initializes
-    // and owns these real GL resources without executing a hidden extra pass.
+    // Shared hardware path resources. The injected-executor constructor leaves
+    // these empty so GL-free routing tests retain their narrow seam.
     std::unique_ptr<FOpenGLMeshUploadAdapter> hardwareUploadAdapter_;
     std::unique_ptr<UGPUMeshCache> hardwareMeshCache_;
     std::unique_ptr<UHardwareGBuffer> hardwareGBuffer_;
     std::unique_ptr<UHardwareRasterizer> hardwareRasterizer_;
+    std::unique_ptr<URasterLightingPass> rasterLightingPass_;
     bool initialized_ = false;
+    FWorldRendererStats stats_;
 };

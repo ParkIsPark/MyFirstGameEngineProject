@@ -82,6 +82,7 @@
     <ClCompile Include="Engine\Render\FGraphicsCapabilities.cpp" />
     <ClCompile Include="Engine\Render\FRenderScene.cpp" />
     <ClCompile Include="Engine\Render\UHardwareGBuffer.cpp" />
+    <ClCompile Include="Engine\Render\URasterLightingPass.cpp" />
     <ClCompile Include="Engine\Render\UHardwareRasterizer.cpp" />
     <ClCompile Include="Engine\Render\FRenderTarget.cpp" />
     <ClCompile Include="Engine\Render\FRenderPipelinePlan.cpp" />
@@ -202,8 +203,10 @@
     <ClInclude Include="Engine\Render\FRenderOutputs.h" />
     <ClInclude Include="Engine\Render\FRenderScene.h" />
     <ClInclude Include="Engine\Render\UHardwareGBuffer.h" />
+    <ClInclude Include="Engine\Render\URasterLightingPass.h" />
     <ClInclude Include="Engine\Render\UHardwareRasterizer.h" />
     <ClInclude Include="Engine\Render\Shaders\HardwareRasterShaders.h" />
+    <ClInclude Include="Engine\Render\Shaders\RasterLightingShaders.h" />
     <ClInclude Include="Engine\Render\FRenderTarget.h" />
     <ClInclude Include="Engine\Render\FGPUMeshResource.h" />
     <ClInclude Include="Engine\Render\FRenderFeatures.h" />

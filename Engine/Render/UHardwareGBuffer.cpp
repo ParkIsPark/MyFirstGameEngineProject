@@ -14,6 +14,8 @@ constexpr GLenum ColorAttachments[] = {
     GL_COLOR_ATTACHMENT3,
     GL_COLOR_ATTACHMENT4,
     GL_COLOR_ATTACHMENT5,
+    GL_COLOR_ATTACHMENT6,
+    GL_COLOR_ATTACHMENT7,
 };
 
 constexpr GLint InternalFormats[] = {
@@ -23,14 +25,18 @@ constexpr GLint InternalFormats[] = {
     GL_RGBA32F, // resolved albedo + shininess
     GL_RGBA32F, // specular color + mirror factor
     GL_RG32UI,  // object + material identity
+    GL_RGBA16F, // flat/Gouraud precomputed lighting
+    GL_RGBA16F, // emissive color
 };
 
 constexpr GLenum ExternalFormats[] = {
     GL_RGBA, GL_RGBA, GL_RGBA, GL_RGBA, GL_RGBA, GL_RG_INTEGER,
+    GL_RGBA, GL_RGBA,
 };
 
 constexpr GLenum ExternalTypes[] = {
     GL_FLOAT, GL_FLOAT, GL_FLOAT, GL_FLOAT, GL_FLOAT, GL_UNSIGNED_INT,
+    GL_FLOAT, GL_FLOAT,
 };
 }
 
@@ -161,6 +167,7 @@ void UHardwareGBuffer::Clear()
     const GLfloat albedoShininess[4] = {1.0f, 1.0f, 1.0f, 0.0f};
     const GLfloat specularMirror[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     const GLuint identity[4] = {0u, 0u, 0u, 0u};
+    const GLfloat black[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     const GLfloat depth = 1.0f;
     glClearBufferfv(GL_COLOR, 0, positionCoverage);
     glClearBufferfv(GL_COLOR, 1, normal);
@@ -168,6 +175,8 @@ void UHardwareGBuffer::Clear()
     glClearBufferfv(GL_COLOR, 3, albedoShininess);
     glClearBufferfv(GL_COLOR, 4, specularMirror);
     glClearBufferuiv(GL_COLOR, 5, identity);
+    glClearBufferfv(GL_COLOR, 6, black);
+    glClearBufferfv(GL_COLOR, 7, black);
     glClearBufferfv(GL_DEPTH, 0, &depth);
 
     if (!wasBound) EndGeometry();

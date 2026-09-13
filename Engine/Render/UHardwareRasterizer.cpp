@@ -1,6 +1,7 @@
 #include "UHardwareRasterizer.h"
 
 #include "FRenderScene.h"
+#include "FRenderQuality.h"
 #include "FRenderTarget.h"
 #include "FTransform.h"
 #include "Material.h"
@@ -22,7 +23,9 @@
 
 namespace
 {
-constexpr GLuint GeometryDrawBufferCount = 6;
+constexpr GLuint GeometryDrawBufferCount = 8;
+constexpr GLuint GeometryTextureUnitCount = 2;
+constexpr int ShaderPointLightCapacity = 16;
 
 struct FGeometryState
 {
@@ -30,8 +33,8 @@ struct FGeometryState
     GLint vertexArray = 0;
     GLint arrayBuffer = 0;
     GLint activeTexture = 0;
-    GLint texture2D = 0;
-    GLint textureUnitZero2D = 0;
+    GLint textures2D[GeometryTextureUnitCount] = {};
+    GLint samplers[GeometryTextureUnitCount] = {};
     GLint depthFunction = GL_LESS;
     GLint frontFace = GL_CCW;
     GLint scissorBox[4] = {};
@@ -61,9 +64,12 @@ FGeometryState CaptureGeometryState()
     glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &state.vertexArray);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &state.arrayBuffer);
     glGetIntegerv(GL_ACTIVE_TEXTURE, &state.activeTexture);
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &state.texture2D);
-    glActiveTexture(GL_TEXTURE0);
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &state.textureUnitZero2D);
+    for (GLuint unit = 0; unit < GeometryTextureUnitCount; ++unit)
+    {
+        glActiveTexture(GL_TEXTURE0 + unit);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &state.textures2D[unit]);
+        glGetIntegeri_v(GL_SAMPLER_BINDING, unit, &state.samplers[unit]);
+    }
     glActiveTexture(static_cast<GLenum>(state.activeTexture));
     glGetIntegerv(GL_DEPTH_FUNC, &state.depthFunction);
     glGetIntegerv(GL_FRONT_FACE, &state.frontFace);
@@ -127,10 +133,13 @@ void RestoreGeometryState(const FGeometryState& state)
     glUseProgram(static_cast<unsigned>(state.program));
     glBindVertexArray(static_cast<unsigned>(state.vertexArray));
     glBindBuffer(GL_ARRAY_BUFFER, static_cast<unsigned>(state.arrayBuffer));
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, static_cast<unsigned>(state.textureUnitZero2D));
+    for (GLuint unit = 0; unit < GeometryTextureUnitCount; ++unit)
+    {
+        glActiveTexture(GL_TEXTURE0 + unit);
+        glBindTexture(GL_TEXTURE_2D, static_cast<unsigned>(state.textures2D[unit]));
+        glBindSampler(unit, static_cast<unsigned>(state.samplers[unit]));
+    }
     glActiveTexture(static_cast<GLenum>(state.activeTexture));
-    glBindTexture(GL_TEXTURE_2D, static_cast<unsigned>(state.texture2D));
 }
 
 class FGeometryStateGuard
@@ -234,31 +243,55 @@ const FResolvedRenderMaterial& MaterialFor(const FRenderMeshInstance& instance,
 
 void UploadMaterial(GLuint program, const FRenderMeshInstance& instance,
                     const FResolvedRenderMaterial& material,
-                    std::uint32_t materialIdentity)
+                    std::uint32_t materialIdentity, unsigned texture)
 {
     glUniform3fv(glGetUniformLocation(program, "uAlbedo"), 1,
                  glm::value_ptr(material.albedo));
+    glUniform3fv(glGetUniformLocation(program, "uAmbient"), 1,
+                 glm::value_ptr(material.ambient));
     glUniform3fv(glGetUniformLocation(program, "uSpecular"), 1,
                  glm::value_ptr(material.specularColor));
+    glUniform3fv(glGetUniformLocation(program, "uEmissive"), 1,
+                 glm::value_ptr(material.emissive));
     glUniform1f(glGetUniformLocation(program, "uShininess"), material.shininess);
     glUniform1f(glGetUniformLocation(program, "uMirrorFactor"), material.mirrorFactor);
     glUniform1ui(glGetUniformLocation(program, "uMaterialIdentity"), materialIdentity);
 
     glm::vec2 tiling = instance.uvTiling;
     bool repeat = true;
-    unsigned texture = 0;
     if (material.source)
     {
         tiling *= material.source->uvTiling;
         repeat = material.source->wrapMode == EWrapMode::Repeat;
-        if (material.source->texture && glIsTexture(material.source->texture))
-            texture = material.source->texture;
     }
     glUniform2fv(glGetUniformLocation(program, "uUVTiling"), 1, glm::value_ptr(tiling));
     glUniform1i(glGetUniformLocation(program, "uRepeatDiffuseTexture"), repeat ? 1 : 0);
     glUniform1i(glGetUniformLocation(program, "uHasDiffuseTexture"), texture ? 1 : 0);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texture);
+}
+
+std::uint64_t TextureSignature(const Material& material)
+{
+    std::uint64_t hash = 1469598103934665603ull;
+    auto mix = [&](const void* bytes, std::size_t count)
+    {
+        const unsigned char* data = static_cast<const unsigned char*>(bytes);
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            hash ^= data[i];
+            hash *= 1099511628211ull;
+        }
+    };
+    mix(&material.texWidth, sizeof(material.texWidth));
+    mix(&material.texHeight, sizeof(material.texHeight));
+    mix(&material.texChannels, sizeof(material.texChannels));
+    const std::size_t size = material.texData.size();
+    mix(&size, sizeof(size));
+    if (!material.texData.empty()) mix(material.texData.data(), material.texData.size());
+    if (!material.diffuseTexPath.empty())
+        mix(material.diffuseTexPath.data(), material.diffuseTexPath.size());
+    return hash;
 }
 }
 
@@ -407,6 +440,7 @@ bool UHardwareRasterizer::Init(std::uint64_t contextGeneration,
     if (program_ && contextGeneration_ == contextGeneration) return true;
     if (program_ && contextGeneration_ != contextGeneration)
     {
+        materialTextures_.clear(); // names belonged to the destroyed context
         program_ = 0;
         contextGeneration_ = 0;
     }
@@ -452,8 +486,24 @@ bool UHardwareRasterizer::Init(std::uint64_t contextGeneration,
     }
     program_ = createdProgram;
     contextGeneration_ = contextGeneration;
+    GLint geometryUniformComponents = 0;
+    GLint geometryTextureUnits = 0;
+    glGetIntegerv(GL_MAX_GEOMETRY_UNIFORM_COMPONENTS, &geometryUniformComponents);
+    glGetIntegerv(GL_MAX_GEOMETRY_TEXTURE_IMAGE_UNITS, &geometryTextureUnits);
+    if (geometryTextureUnits < 2 || geometryUniformComponents < 160)
+    {
+        glDeleteProgram(program_);
+        program_ = 0;
+        contextGeneration_ = 0;
+        if (diagnostic)
+            *diagnostic = "Hardware raster Gouraud/Flat lighting exceeds geometry-stage GL3.3 limits";
+        return false;
+    }
+    pointLightLimit_ = std::min(ShaderPointLightCapacity,
+        std::max(1, (geometryUniformComponents - 64) / 6));
     glUseProgram(program_);
     glUniform1i(glGetUniformLocation(program_, "uDiffuseTexture"), 0);
+    glUniform1i(glGetUniformLocation(program_, "uEnvironmentTexture"), 1);
     glUseProgram(static_cast<unsigned>(previousProgram));
     if (diagnostic) diagnostic->clear();
     return true;
@@ -461,16 +511,150 @@ bool UHardwareRasterizer::Init(std::uint64_t contextGeneration,
 
 void UHardwareRasterizer::Shutdown() noexcept
 {
+    ClearMaterialTextures();
     if (program_ && contextGeneration_ != 0 &&
         contextGeneration_ == ActiveRenderTargetContextGeneration())
         glDeleteProgram(program_);
     program_ = 0;
     contextGeneration_ = 0;
+    pointLightLimit_ = 0;
+}
+
+bool UHardwareRasterizer::ResolveMaterialTexture(
+    const Material* material, std::uint64_t contextGeneration,
+    unsigned& texture, std::string& diagnostic)
+{
+    texture = 0;
+    if (!material) return true;
+    if (material->texture && glIsTexture(material->texture))
+    {
+        texture = material->texture;
+        return true;
+    }
+    const int channels = material->texChannels > 0 ? material->texChannels : 3;
+    const std::size_t required = material->texWidth > 0 && material->texHeight > 0
+        ? static_cast<std::size_t>(material->texWidth) * material->texHeight * channels : 0;
+    if (required == 0 || material->texData.size() < required || channels > 4)
+        return true;
+
+    auto signatureIt = materialSignaturesThisFrame_.find(material);
+    if (signatureIt == materialSignaturesThisFrame_.end())
+    {
+        signatureIt = materialSignaturesThisFrame_.emplace(
+            material, TextureSignature(*material)).first;
+        ++materialTextureHashComputations_;
+    }
+    const std::uint64_t signature = signatureIt->second;
+    auto resourceIt = materialTextures_.find(material);
+    if (resourceIt != materialTextures_.end())
+    {
+        resourceIt->second.lastUsedFrame = materialTextureFrame_;
+        texture = resourceIt->second.texture;
+        if (texture && resourceIt->second.signature == signature) return true;
+    }
+
+    if (!DrainOpenGLErrors(diagnostic))
+    {
+        ++materialTextureUploadFailures_;
+        return false;
+    }
+
+    GLint unpackAlignment = 4;
+    glGetIntegerv(GL_UNPACK_ALIGNMENT, &unpackAlignment);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    unsigned candidate = 0;
+    glGenTextures(1, &candidate);
+    glBindTexture(GL_TEXTURE_2D, candidate);
+    const GLenum format = channels == 4 ? GL_RGBA : channels == 2 ? GL_RG :
+                          channels == 1 ? GL_RED : GL_RGB;
+    const GLint internal = channels == 4 ? GL_RGBA8 : channels == 2 ? GL_RG8 :
+                           channels == 1 ? GL_R8 : GL_RGB8;
+    glTexImage2D(GL_TEXTURE_2D, 0, internal,
+                 material->texWidth, material->texHeight, 0, format,
+                 GL_UNSIGNED_BYTE, material->texData.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, unpackAlignment);
+
+    const bool injectedFailure = failNextMaterialTextureUploadForTesting_;
+    failNextMaterialTextureUploadForTesting_ = false;
+    if (injectedFailure || !candidate ||
+        !CollectOpenGLErrors("Material texture upload", diagnostic))
+    {
+        if (candidate) glDeleteTextures(1, &candidate);
+        if (injectedFailure) diagnostic = "Injected material texture upload failure";
+        ++materialTextureUploadFailures_;
+        return false;
+    }
+
+    const unsigned previous = resourceIt == materialTextures_.end()
+        ? 0u : resourceIt->second.texture;
+    FMaterialTextureResource committed;
+    committed.texture = candidate;
+    committed.signature = signature;
+    committed.lastUsedFrame = materialTextureFrame_;
+    materialTextures_[material] = committed;
+    if (previous) glDeleteTextures(1, &previous);
+    texture = candidate;
+    ++materialTextureUploads_;
+    (void)contextGeneration;
+    diagnostic.clear();
+    return true;
+}
+
+void UHardwareRasterizer::ReleaseUnusedMaterialTextures() noexcept
+{
+    for (auto it = materialTextures_.begin(); it != materialTextures_.end();)
+    {
+        if (it->second.lastUsedFrame == materialTextureFrame_)
+        {
+            ++it;
+            continue;
+        }
+        if (it->second.texture) glDeleteTextures(1, &it->second.texture);
+        it = materialTextures_.erase(it);
+    }
+}
+
+void UHardwareRasterizer::ClearMaterialTextures() noexcept
+{
+    if (contextGeneration_ != 0 &&
+        contextGeneration_ == ActiveRenderTargetContextGeneration())
+        for (auto& pair : materialTextures_)
+            if (pair.second.texture) glDeleteTextures(1, &pair.second.texture);
+    materialTextures_.clear();
+    materialSignaturesThisFrame_.clear();
 }
 
 bool UHardwareRasterizer::RenderGeometry(const FRenderScene& scene,
                                          UGPUMeshCache& meshCache,
                                          UHardwareGBuffer& gbuffer,
+                                         std::uint64_t contextGeneration,
+                                         std::string* diagnostic)
+{
+    const FRenderQuality quality;
+    return RenderGeometry(scene, quality, meshCache, gbuffer,
+                          contextGeneration, diagnostic);
+}
+
+bool UHardwareRasterizer::RenderGeometry(const FRenderScene& scene,
+                                         const FRenderQuality& quality,
+                                         UGPUMeshCache& meshCache,
+                                         UHardwareGBuffer& gbuffer,
+                                         std::uint64_t contextGeneration,
+                                         std::string* diagnostic)
+{
+    return RenderGeometry(scene, quality, meshCache, gbuffer, 0,
+                          contextGeneration, diagnostic);
+}
+
+bool UHardwareRasterizer::RenderGeometry(const FRenderScene& scene,
+                                         const FRenderQuality& quality,
+                                         UGPUMeshCache& meshCache,
+                                         UHardwareGBuffer& gbuffer,
+                                         unsigned environmentTexture,
                                          std::uint64_t contextGeneration,
                                          std::string* diagnostic)
 {
@@ -521,6 +705,45 @@ bool UHardwareRasterizer::RenderGeometry(const FRenderScene& scene,
     glDisable(GL_CULL_FACE); // mirrored meshes remain visible; winding may vary in imported assets.
     gbuffer.Clear();
     glUseProgram(program_);
+    ++materialTextureFrame_;
+    materialSignaturesThisFrame_.clear();
+    if (materialTextureFrame_ == 0)
+    {
+        ClearMaterialTextures();
+        materialTextureFrame_ = 1;
+    }
+
+    glUniform3fv(glGetUniformLocation(program_, "uEye"), 1,
+                 glm::value_ptr(scene.camera.eye));
+    glUniform3fv(glGetUniformLocation(program_, "uEnvironmentTint"), 1,
+                 glm::value_ptr(scene.environment.tint));
+    glUniform3fv(glGetUniformLocation(program_, "uSkyHorizon"), 1,
+                 glm::value_ptr(scene.environment.horizon));
+    glUniform3fv(glGetUniformLocation(program_, "uSkyZenith"), 1,
+                 glm::value_ptr(scene.environment.zenith));
+    glUniform1f(glGetUniformLocation(program_, "uSkyExponent"),
+                scene.environment.exponent);
+    glUniform1f(glGetUniformLocation(program_, "uAmbientStrength"),
+                quality.ambientStrength);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, environmentTexture);
+    glBindSampler(1, 0);
+    glUniform1i(glGetUniformLocation(program_, "uHasEnvironmentTexture"),
+                environmentTexture ? 1 : 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindSampler(0, 0);
+    const int lightCount = std::min<int>(pointLightLimit_,
+        static_cast<int>(scene.pointLights.size()));
+    glUniform1i(glGetUniformLocation(program_, "uPointLightCount"), lightCount);
+    for (int i = 0; i < lightCount; ++i)
+    {
+        const std::string positionName = "uPointLightPositions[" + std::to_string(i) + "]";
+        const std::string radianceName = "uPointLightRadiances[" + std::to_string(i) + "]";
+        glUniform3fv(glGetUniformLocation(program_, positionName.c_str()), 1,
+                     glm::value_ptr(scene.pointLights[static_cast<std::size_t>(i)].worldPosition));
+        glUniform3fv(glGetUniformLocation(program_, radianceName.c_str()), 1,
+                     glm::value_ptr(scene.pointLights[static_cast<std::size_t>(i)].radiance));
+    }
 
     ACamera camera;
     camera.eye = scene.camera.eye;
@@ -578,7 +801,16 @@ bool UHardwareRasterizer::RenderGeometry(const FRenderScene& scene,
                 std::uint32_t materialIdentity = 0;
                 const FResolvedRenderMaterial& material =
                     MaterialFor(instance, slot, materialIdentity);
-                UploadMaterial(program_, instance, material, materialIdentity);
+                unsigned texture = 0;
+                std::string textureDiagnostic;
+                if (!ResolveMaterialTexture(material.source, contextGeneration,
+                                            texture, textureDiagnostic))
+                {
+                    ReleaseUnusedMaterialTextures();
+                    if (diagnostic) *diagnostic = textureDiagnostic;
+                    return false;
+                }
+                UploadMaterial(program_, instance, material, materialIdentity, texture);
                 const std::size_t firstIndex = firstTriangle * 3;
                 const std::size_t indexCount = (endTriangle - firstTriangle) * 3;
                 glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indexCount),
@@ -593,6 +825,7 @@ bool UHardwareRasterizer::RenderGeometry(const FRenderScene& scene,
         if (diagnostic) *diagnostic = std::string("Hardware raster geometry failed: ") + error.what();
         return false;
     }
+    ReleaseUnusedMaterialTextures();
 
     const GLenum glError = glGetError();
     if (glError != GL_NO_ERROR)

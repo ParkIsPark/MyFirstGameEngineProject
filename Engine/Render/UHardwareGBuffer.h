@@ -11,7 +11,9 @@ enum class EHardwareGBufferSemantic : unsigned
     AlbedoShininess = 3,
     SpecularMirror = 4,
     Identity = 5,
-    Count = 6,
+    PrecomputedLighting = 6,
+    Emissive = 7,
+    Count = 8,
 };
 // OpenGL 3.3 physical storage for the backend-neutral logical G-buffer.
 // Geometry binding captures and restores framebuffer/viewport state as a pair.

@@ -1,0 +1,147 @@
+WorldFormat = 3
+
+[World]
+ShadingModel = 2
+SkyHDRI =
+FloorEnabled = 0
+FloorY = 0
+Gravity = 0 -9.80000019 0
+
+[RenderFeatures]
+HardwareRaster = 1
+RayTracing = 0
+RayTracedShadows = 1
+RayTracedGI = 1
+RayTracedReflections = 1
+RayTracingBackend = Auto
+
+[Camera]
+Position = 0 0 0
+Yaw = 0
+Pitch = 0
+Fov = 45
+
+[Actor]
+Type = Actor
+Name = SlottedCube
+Loc = -0.95 0 -6
+Rot = 12 24 0
+Scale = 1 1 1
+Parent =
+  [Component]
+Type = Mesh
+Name = SlottedCubeMesh
+Loc = 0 0 0
+Rot = 0 0 0
+Scale = 1 1 1
+Mesh = Cube 0.8 0.8 0.8
+Material =
+UVTiling = 2 2
+HasMatOverride = 0
+
+[Actor]
+Type = Actor
+Name = OverrideCube
+Loc = 1.05 -0.15 -7
+Rot = -8 -32 0
+Scale = -0.8 1.2 0.7
+Parent =
+  [Component]
+Type = Mesh
+Name = OverrideCubeMesh
+Loc = 0 0 0
+Rot = 0 0 0
+Scale = 1 1 1
+Mesh = Cube 0.8 0.8 0.8
+Material =
+UVTiling = 1 1
+HasMatOverride = 1
+kd = 0.12 0.75 0.18
+ks = 0.25 0.25 0.25
+ka = 0.1 0.1 0.1
+shininess = 24
+km = 0 0 0
+emissive = 0.01 0.02 0.01
+diffuseTex =
+wrap = 0
+uvTiling = 1 1
+
+[Actor]
+Type = Actor
+Name = ShadingSphere
+Loc = 0 1.25 -7.5
+Rot = 0 0 0
+Scale = 0.8 1.15 0.65
+Parent =
+  [Component]
+Type = Mesh
+Name = ShadingSphereMesh
+Loc = 0 0 0
+Rot = 0 0 0
+Scale = 1 1 1
+Mesh = Sphere 0.85 12 8
+Material =
+UVTiling = 1 1
+HasMatOverride = 1
+kd = 0.28 0.38 0.82
+ks = 0.65 0.65 0.65
+ka = 0.08 0.08 0.08
+shininess = 40
+km = 0 0 0
+emissive = 0.015 0.01 0.02
+diffuseTex =
+wrap = 0
+uvTiling = 1 1
+
+[Actor]
+Type = Light
+Name = KeyLight
+Loc = 0 0 0
+Rot = 0 0 0
+Scale = 1 1 1
+Parent =
+  [Component]
+Type = PointLight
+Name = KeyLightComponent
+Loc = -3 4 -3
+Rot = 0 0 0
+Scale = 1 1 1
+LightColor = 1 0.84 0.68
+LightIntensity = 0.9 0.9 0.9
+
+[Actor]
+Type = Light
+Name = FillLight
+Loc = 0 0 0
+Rot = 0 0 0
+Scale = 1 1 1
+Parent =
+  [Component]
+Type = PointLight
+Name = FillLightComponent
+Loc = 3 1 -4
+Rot = 0 0 0
+Scale = 1 1 1
+LightColor = 0.35 0.55 1
+LightIntensity = 0.6 0.6 0.6
+
+[Actor]
+Type = Light
+Name = Environment
+Loc = 0 0 0
+Rot = 0 0 0
+Scale = 1 1 1
+Parent =
+  [Component]
+Type = EnvLight
+Name = EnvironmentComponent
+Loc = 0 0 0
+Rot = 0 0 0
+Scale = 1 1 1
+LightColor = 0.95 0.9 0.8
+LightIntensity = 0.8 0.8 0.8
+Horizon = 0.08 0.12 0.22
+Zenith = 0.42 0.64 0.95
+SkyExp = 0.8
+SkyTex =
+TimeOfDay = 12

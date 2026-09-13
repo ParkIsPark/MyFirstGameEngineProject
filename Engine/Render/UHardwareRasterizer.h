@@ -4,8 +4,11 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 
 struct FRenderScene;
+struct FRenderQuality;
+struct Material;
 class UGPUMeshCache;
 class UHardwareGBuffer;
 
@@ -37,12 +40,51 @@ public:
                         UHardwareGBuffer& gbuffer,
                         std::uint64_t contextGeneration,
                         std::string* diagnostic = nullptr);
+    bool RenderGeometry(const FRenderScene& scene,
+                        const FRenderQuality& quality,
+                        UGPUMeshCache& meshCache,
+                        UHardwareGBuffer& gbuffer,
+                        std::uint64_t contextGeneration,
+                        std::string* diagnostic = nullptr);
+    bool RenderGeometry(const FRenderScene& scene,
+                        const FRenderQuality& quality,
+                        UGPUMeshCache& meshCache,
+                        UHardwareGBuffer& gbuffer,
+                        unsigned environmentTexture,
+                        std::uint64_t contextGeneration,
+                        std::string* diagnostic = nullptr);
 
     bool IsReady() const { return program_ != 0; }
     unsigned Program() const { return program_; }
     std::uint64_t ContextGeneration() const { return contextGeneration_; }
+    std::uint64_t MaterialTextureUploads() const { return materialTextureUploads_; }
+    std::uint64_t MaterialTextureUploadFailures() const { return materialTextureUploadFailures_; }
+    std::uint64_t MaterialTextureHashComputations() const { return materialTextureHashComputations_; }
+    void InjectNextMaterialTextureUploadFailureForTesting() {
+        failNextMaterialTextureUploadForTesting_ = true;
+    }
 
 private:
+    bool ResolveMaterialTexture(const Material* material,
+                                std::uint64_t contextGeneration,
+                                unsigned& texture,
+                                std::string& diagnostic);
+    void ReleaseUnusedMaterialTextures() noexcept;
+    void ClearMaterialTextures() noexcept;
     unsigned program_ = 0;
     std::uint64_t contextGeneration_ = 0;
+    struct FMaterialTextureResource
+    {
+        unsigned texture = 0;
+        std::uint64_t signature = 0;
+        std::uint64_t lastUsedFrame = 0;
+    };
+    std::unordered_map<const Material*, FMaterialTextureResource> materialTextures_;
+    std::unordered_map<const Material*, std::uint64_t> materialSignaturesThisFrame_;
+    std::uint64_t materialTextureFrame_ = 0;
+    std::uint64_t materialTextureUploads_ = 0;
+    std::uint64_t materialTextureUploadFailures_ = 0;
+    std::uint64_t materialTextureHashComputations_ = 0;
+    bool failNextMaterialTextureUploadForTesting_ = false;
+    int pointLightLimit_ = 0;
 };

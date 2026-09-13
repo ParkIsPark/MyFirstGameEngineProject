@@ -12,6 +12,7 @@
 #include "UHybridPass.h"
 #include "UHardwareGBuffer.h"
 #include "UHardwareRasterizer.h"
+#include "URasterLightingPass.h"
 #include "UGPUMeshCache.h"
 #include "UMesh.h"
 #include "URasterizer.h"
@@ -22,6 +23,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <iostream>
 #include <utility>
 #include <vector>
 #include <stdexcept>
@@ -257,6 +259,90 @@ private:
     bool ready_ = false;
 };
 
+class FHardwareWorldRenderExecutor final : public IWorldRenderExecutor
+{
+public:
+    FHardwareWorldRenderExecutor(UGPUMeshCache& meshCache,
+                                 UHardwareGBuffer& gbuffer,
+                                 UHardwareRasterizer& rasterizer,
+                                 URasterLightingPass& lighting,
+                                 FWorldRendererStats& stats)
+        : meshCache_(meshCache), gbuffer_(gbuffer), rasterizer_(rasterizer),
+          lighting_(lighting), stats_(stats)
+    {
+    }
+
+    void Init() override
+    {
+        std::string diagnostic;
+        const std::uint64_t generation = ActiveRenderTargetContextGeneration();
+        if (!rasterizer_.Init(generation, &diagnostic) ||
+            !lighting_.Init(generation, &diagnostic))
+            throw std::runtime_error(diagnostic.empty()
+                ? "Hardware renderer initialization failed" : diagnostic);
+    }
+
+    bool RequiresOpenGLTargetBinding() const override { return true; }
+
+    bool Execute(const FWorldRenderRequest& request) override
+    {
+        const std::uint64_t generation = request.target.ContextGeneration();
+        std::string diagnostic;
+        meshCache_.BeginFrame();
+        if (!lighting_.PrepareEnvironment(request.scene, generation, &diagnostic) ||
+            !gbuffer_.Resize(request.target.Width(), request.target.Height(), generation) ||
+            !rasterizer_.RenderGeometry(request.scene, request.quality, meshCache_,
+                                        gbuffer_, lighting_.EnvironmentTexture(),
+                                        generation, &diagnostic))
+        {
+            meshCache_.ReleaseUnused();
+            if (!diagnostic.empty())
+                std::cerr << "[Renderer] " << diagnostic << '\n';
+            return false;
+        }
+        meshCache_.ReleaseUnused();
+        ++stats_.hardwareGBufferPasses;
+
+        FRasterLightingOutput rasterOutput;
+        if (!lighting_.Render(request.scene, request.quality, gbuffer_, generation,
+                              rasterOutput, &diagnostic))
+        {
+            if (!diagnostic.empty())
+                std::cerr << "[Renderer] " << diagnostic << '\n';
+            return false;
+        }
+        ++stats_.rasterLightingPasses;
+
+        FRayEffectOutputs neutralRayEffects;
+        if (std::find(request.passPlan.begin(), request.passPlan.end(),
+                      ERenderPass::RayTracedEffects) != request.passPlan.end() &&
+            !warnedRayEffectsPending_)
+        {
+            std::cerr << "[Renderer] warning: ray effects are not available in this build yet; "
+                         "hardware raster output remains active\n";
+            warnedRayEffectsPending_ = true;
+        }
+        FCompositeOutput composite;
+        if (!lighting_.Composite(request.target, rasterOutput, neutralRayEffects,
+                                 generation, composite, &diagnostic))
+        {
+            if (!diagnostic.empty())
+                std::cerr << "[Renderer] " << diagnostic << '\n';
+            return false;
+        }
+        ++stats_.compositePasses;
+        return composite.valid;
+    }
+
+private:
+    UGPUMeshCache& meshCache_;
+    UHardwareGBuffer& gbuffer_;
+    UHardwareRasterizer& rasterizer_;
+    URasterLightingPass& lighting_;
+    FWorldRendererStats& stats_;
+    bool warnedRayEffectsPending_ = false;
+};
+
 class FTargetRestoreGuard
 {
 public:
@@ -268,12 +354,15 @@ private:
 } // namespace
 
 UWorldRenderer::UWorldRenderer()
-    : executor_(std::make_unique<FLegacyWorldRenderExecutor>()),
-      hardwareUploadAdapter_(std::make_unique<FOpenGLMeshUploadAdapter>()),
+    : hardwareUploadAdapter_(std::make_unique<FOpenGLMeshUploadAdapter>()),
       hardwareMeshCache_(std::make_unique<UGPUMeshCache>(*hardwareUploadAdapter_)),
       hardwareGBuffer_(std::make_unique<UHardwareGBuffer>()),
-      hardwareRasterizer_(std::make_unique<UHardwareRasterizer>())
+      hardwareRasterizer_(std::make_unique<UHardwareRasterizer>()),
+      rasterLightingPass_(std::make_unique<URasterLightingPass>())
 {
+    executor_ = std::make_unique<FHardwareWorldRenderExecutor>(
+        *hardwareMeshCache_, *hardwareGBuffer_, *hardwareRasterizer_,
+        *rasterLightingPass_, stats_);
 }
 
 UWorldRenderer::UWorldRenderer(std::unique_ptr<IWorldRenderExecutor> executor)
@@ -289,13 +378,6 @@ UWorldRenderer::~UWorldRenderer()
 void UWorldRenderer::Init()
 {
     if (initialized_ || !executor_) return;
-    if (hardwareRasterizer_)
-    {
-        std::string diagnostic;
-        if (!hardwareRasterizer_->Init(ActiveRenderTargetContextGeneration(), &diagnostic))
-            throw std::runtime_error(diagnostic.empty()
-                ? "Hardware raster initialization failed" : diagnostic);
-    }
     executor_->Init();
     initialized_ = true;
 }
@@ -305,6 +387,7 @@ void UWorldRenderer::Shutdown() noexcept
     if (!executor_) return;
     if (hardwareMeshCache_) hardwareMeshCache_->Clear();
     if (hardwareGBuffer_) hardwareGBuffer_->Release();
+    if (rasterLightingPass_) rasterLightingPass_->Shutdown();
     if (hardwareRasterizer_) hardwareRasterizer_->Shutdown();
     executor_->Shutdown();
     initialized_ = false;

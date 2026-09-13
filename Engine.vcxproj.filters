@@ -103,6 +103,7 @@
     <ClCompile Include="Engine\Render\FGraphicsCapabilities.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\FRenderScene.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\UHardwareGBuffer.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="Engine\Render\URasterLightingPass.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\UHardwareRasterizer.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\FRenderTarget.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\FRenderPipelinePlan.cpp"><Filter>Engine\Render</Filter></ClCompile>
@@ -217,8 +218,10 @@
     <ClInclude Include="Engine\Render\FRenderOutputs.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderScene.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\UHardwareGBuffer.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="Engine\Render\URasterLightingPass.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\UHardwareRasterizer.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\Shaders\HardwareRasterShaders.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="Engine\Render\Shaders\RasterLightingShaders.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderTarget.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FGPUMeshResource.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderFeatures.h"><Filter>Engine\Render</Filter></ClInclude>
