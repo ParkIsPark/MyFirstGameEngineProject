@@ -102,6 +102,7 @@
     <!-- Render -->
     <ClCompile Include="Engine\Render\FGraphicsCapabilities.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\FRenderPipelinePlan.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="Engine\Render\UGPUMeshCache.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\URenderer.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\UWorldRenderer.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\USkyHDRI.cpp"><Filter>Engine\Render</Filter></ClCompile>
@@ -209,8 +210,10 @@
     <ClInclude Include="Engine\Rasterizer\UGBuffer.h"><Filter>Engine\Rasterizer</Filter></ClInclude>
     <!-- Render -->
     <ClInclude Include="Engine\Render\FGraphicsCapabilities.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="Engine\Render\FGPUMeshResource.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderFeatures.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderPipelinePlan.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="Engine\Render\UGPUMeshCache.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\URenderer.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\UWorldRenderer.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\USkyHDRI.h"><Filter>Engine\Render</Filter></ClInclude>

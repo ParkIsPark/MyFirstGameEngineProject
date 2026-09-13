@@ -25,5 +25,6 @@ public:
 
     // Returns one UMesh per scene mesh (caller owns each). Empty vector on a
     // missing/unreadable/corrupt file (error is logged, never crashes).
-    static std::vector<UMesh*> Load(const char* path, const LoadOptions& opt = {});
+    static std::vector<UMesh*> Load(const char* path);
+    static std::vector<UMesh*> Load(const char* path, const LoadOptions& opt);
 };

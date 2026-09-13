@@ -306,12 +306,42 @@ static int RunFbxGates()
     return fail == 0 ? 0 : 1;
 }
 
+// Headless Task 5 importer completion gate. Assimp selects its importer from
+// file contents/extension, so a tiny generated OBJ exercises the same
+// UFbxImporter::ConvertMesh completion path without a checked-in binary asset.
+static int RunMeshRevisionGates()
+{
+    const char* path = "mesh_revision_assimp.tmp.obj";
+    {
+        std::ofstream obj(path);
+        obj << "v 0 0 0\n"
+               "v 1 0 0\n"
+               "v 0 1 0\n"
+               "f 1 2 3\n";
+    }
+
+    UMesh baseline;
+    std::vector<UMesh*> meshes = UFbxImporter::Load(path);
+    const bool passed = meshes.size() == 1 &&
+                        meshes[0]->triangleCount() == 1 &&
+                        meshes[0]->GeometryRevision() == baseline.GeometryRevision() + 1;
+
+    for (UMesh* mesh : meshes) delete mesh;
+    std::remove(path);
+    std::printf("[%s] Assimp conversion finalizes geometry exactly once\n",
+                passed ? "PASS" : "FAIL");
+    return passed ? 0 : 1;
+}
+
 int main(int argc, char** argv)
 {
     const std::string arg = (argc > 1) ? argv[1] : "";
 
     if (arg == "--fbxtest")
         return RunFbxGates();
+
+    if (arg == "--meshrevisiontest")
+        return RunMeshRevisionGates();
 
     if (arg == "--hw6")          // HW6 Q1-Q3 visual: keys 1=Flat 2=Gouraud 3=Phong
     {

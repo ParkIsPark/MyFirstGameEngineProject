@@ -197,6 +197,9 @@ UMesh* UObjImporter::Load(const char* path)
     if (!anyNormalProvided)
         ComputeMissingNormals(*mesh);
 
+    if (!mesh->vertices.empty() || !mesh->indices.empty())
+        mesh->FinalizeGeometry();
+
     return mesh;
 }
 
@@ -288,6 +291,8 @@ std::vector<UMesh*> UObjImporter::LoadMulti(const char* path)
         auto it = matMap.find(g.mat);
         if (it != matMap.end()) g.mesh->material = it->second;
         if (!g.anyNormal) ComputeMissingNormals(*g.mesh);
+        if (!g.mesh->vertices.empty() || !g.mesh->indices.empty())
+            g.mesh->FinalizeGeometry();
         out.push_back(g.mesh);
     }
     return out;

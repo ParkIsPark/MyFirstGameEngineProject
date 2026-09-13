@@ -62,6 +62,9 @@ namespace
         if (m->mMaterialIndex < sc->mNumMaterials)
             ConvertMaterial(sc->mMaterials[m->mMaterialIndex], mesh->material);
 
+        if (!mesh->vertices.empty() || !mesh->indices.empty())
+            mesh->FinalizeGeometry();
+
         return mesh;
     }
 }
@@ -90,4 +93,9 @@ std::vector<UMesh*> UFbxImporter::Load(const char* path, const LoadOptions& opt)
     for (unsigned i = 0; i < sc->mNumMeshes; ++i)
         out.push_back(ConvertMesh(sc->mMeshes[i], sc, opt));
     return out;
+}
+
+std::vector<UMesh*> UFbxImporter::Load(const char* path)
+{
+    return Load(path, LoadOptions{});
 }

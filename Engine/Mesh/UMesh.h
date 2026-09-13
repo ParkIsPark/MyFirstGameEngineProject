@@ -10,6 +10,8 @@
 struct URay;
 class  BVH;
 
+using FMeshAssetId = std::uint64_t;
+
 // ---------------------------------------------------------------------------
 // UMesh — triangle mesh asset (Unreal StaticMesh analogue).
 //
@@ -23,12 +25,20 @@ class  BVH;
 class UMesh
 {
 public:
+    // Source compatibility keeps geometry public. Call MarkGeometryDirty() or
+    // FinalizeGeometry() after direct external writes so GPU/CPU derivatives
+    // can observe the change.
     std::vector<Vertex>   vertices;
     std::vector<uint32_t> indices;   // 3 indices per triangle
     Material              material;   // per-asset default material
 
     UMesh();
     ~UMesh();                        // both out-of-line for unique_ptr<BVH> (incomplete)
+
+    FMeshAssetId AssetId() const { return assetId_; }
+    std::uint64_t GeometryRevision() const { return geometryRevision_; }
+    void MarkGeometryDirty();
+    void FinalizeGeometry();
 
     int triangleCount() const { return static_cast<int>(indices.size()) / 3; }
 
@@ -85,4 +95,8 @@ public:
     // content path to a .mesh. Same ref returns the same instance. nullptr if
     // unresolvable. (The cache owns these; do not delete the result.)
     static UMesh* Resolve(const std::string& ref);
+
+private:
+    const FMeshAssetId assetId_;
+    std::uint64_t geometryRevision_ = 1;
 };

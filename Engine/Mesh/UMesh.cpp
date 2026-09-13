@@ -14,9 +14,47 @@
 #include <cstring>
 #include <sstream>
 #include <unordered_map>
+#include <atomic>
+#include <stdexcept>
 
-UMesh::UMesh()  = default;          // out-of-line: BVH is complete here
+namespace
+{
+std::atomic<FMeshAssetId> GNextMeshAssetId{1};
+
+FMeshAssetId NextMeshAssetId()
+{
+    FMeshAssetId current = GNextMeshAssetId.load(std::memory_order_relaxed);
+    for (;;)
+    {
+        if (current == 0)
+            throw std::overflow_error("UMesh asset ID space exhausted");
+
+        const FMeshAssetId next = current + 1;
+        if (GNextMeshAssetId.compare_exchange_weak(
+                current, next, std::memory_order_relaxed, std::memory_order_relaxed))
+            return current;
+    }
+}
+} // namespace
+
+UMesh::UMesh()
+    : assetId_(NextMeshAssetId())
+{
+}
 UMesh::~UMesh() = default;
+
+void UMesh::MarkGeometryDirty()
+{
+    bvh.reset();
+    if (geometryRevision_ == std::numeric_limits<std::uint64_t>::max())
+        throw std::overflow_error("UMesh geometry revision exhausted");
+    ++geometryRevision_;
+}
+
+void UMesh::FinalizeGeometry()
+{
+    MarkGeometryDirty();
+}
 
 void UMesh::BuildBVH()
 {
@@ -92,6 +130,7 @@ UMesh* UMesh::GenerateSphere(float radius, int segW, int segH)
         push((height - 2) * width + 1, (height - 3) * width + (i + 1), (height - 3) * width + i);
     }
 
+    m->FinalizeGeometry();
     return m;
 }
 
@@ -128,6 +167,7 @@ UMesh* UMesh::GenerateCube(const glm::vec3& h)
         m->indices.push_back(base + 0); m->indices.push_back(base + 2); m->indices.push_back(base + 3);
         base += 4;
     }
+    m->FinalizeGeometry();
     return m;
 }
 
@@ -149,6 +189,7 @@ UMesh* UMesh::GeneratePlane(const glm::vec2& size)
         { {-sx, 0.0f,  sz}, n, {0.0f, 1.0f} },
     };
     m->indices = { 0, 1, 2, 0, 2, 3 };
+    m->FinalizeGeometry();
     return m;
 }
 
@@ -313,6 +354,7 @@ UMesh* UMesh::MergeWithSlots(const std::vector<UMesh*>& parts)
         for (int t = 0; t < tris; ++t) m->triMaterial.push_back((uint32_t)m->materials.size() - 1);
     }
     if (!m->materials.empty()) m->material = m->materials[0];
+    if (!m->vertices.empty() || !m->indices.empty()) m->FinalizeGeometry();
     return m;
 }
 
@@ -403,5 +445,6 @@ UMesh* UMesh::LoadBinary(const char* path)
     m->triMaterial.resize(tn);
     for (uint32_t i = 0; i < tn; ++i) if (!rd(f, m->triMaterial[i])) { delete m; return nullptr; }
 
+    if (!m->vertices.empty() || !m->indices.empty()) m->FinalizeGeometry();
     return m;
 }
