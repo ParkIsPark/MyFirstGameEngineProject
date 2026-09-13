@@ -19,7 +19,7 @@
 - Each component gets isolated Lua instance state even when multiple components share one compiled script asset.
 - Stop PIE cleanly, call `EndPlay` once for successfully started instances, destroy all runtime state, and restore the editor world through the existing PIE rollback model.
 - No hot reload in the first milestone. A changed script is picked up on the next Play session.
-- Resolve serialized script paths relative to the project content root and reject traversal outside it.
+- Store serialized script paths relative to the project root, require them to remain beneath `Content/Scripts`, and reject traversal outside that directory.
 - Add every new engine `.h`, `.cpp`, and vendored Lua library source to `Engine.vcxproj`, `Test/Test.vcxproj`, `Template/Template.vcxproj`, and corresponding `.filters` files. Standalone `Test/*_test.cpp` files keep their own `main()` and are not added to `Test.vcxproj`.
 - Keep existing user changes and `docs/index.bleve/` untouched.
 
@@ -151,7 +151,7 @@ public:
     void OnStartup() override;
     void OnShutdown() override;
     FLuaBindingRegistry& Bindings();
-    lua_State* StateForTests() const;
+    lua_State* State() const;
 };
 ```
 
@@ -163,7 +163,7 @@ Engine.Log("message")
 
 - [ ] Test subsystem startup creates one VM, duplicate binding names are rejected, `Engine.Log` reaches an injected log sink, and shutdown closes the VM exactly once.
 - [ ] Run it; expect missing subsystem types.
-- [ ] Implement the VM owner and binding registry. Open only base, table, string, math, and utf8 libraries; do not expose `io`, `os`, `package`, `debug`, `dofile`, or `loadfile`.
+- [ ] Implement the VM owner and binding registry. Open only base, coroutine, table, string, math, and utf8 libraries; do not expose `io`, `os`, `package`, `debug`, `dofile`, or `loadfile`.
 - [ ] Register `Engine.Log` through the same public registry future engine modules will use, and convert Lua type errors into contextual engine diagnostics.
 - [ ] Register `UScriptSubsystem` in the existing subsystem manager and verify startup precedes world `BeginPlay`, while shutdown follows world `EndPlay`.
 - [ ] Commit: `git add Engine/Script/FLuaBindingRegistry.* Engine/Script/UScriptSubsystem.* Test/ScriptSubsystemTest.cpp **/*.vcxproj* && git commit -m "feat: embed Lua script subsystem"`
@@ -204,7 +204,7 @@ public:
 - [ ] Write a fixture whose local counter increments in `Tick`. Create two instances from one cached asset and assert both start at 0, then advance independently.
 - [ ] Add rejection tests for absolute paths, `..` traversal, syntax errors, missing files, and non-function callback fields.
 - [ ] Run the test; expect missing asset/instance types.
-- [ ] Implement canonical path resolution constrained to the project content root, source read, `luaL_loadbufferx`, bytecode dump cache, and a separate environment table per instance with safe globals inherited through `__index`.
+- [ ] Implement canonical path resolution from the project root constrained beneath `Content/Scripts`, source read, `luaL_loadbufferx`, bytecode dump cache, and a separate environment table per instance with safe globals inherited through `__index`.
 - [ ] Store callback references in the Lua registry, restore stack height after every call, and include file/callback/actor context in errors.
 - [ ] Run the isolation and validation tests; confirm no instance can mutate another instance's locals.
 - [ ] Commit: `git add Engine/Script/FLuaScriptAsset.h Engine/Script/FLuaScriptCache.* Engine/Script/FLuaScriptInstance.* Test/LuaScriptInstanceTest.cpp Test/Fixtures/Scripts/StateIsolation.lua **/*.vcxproj* && git commit -m "feat: cache Lua assets with isolated instances"`
@@ -240,7 +240,7 @@ public:
 {
   "Type": "ScriptComponent",
   "Enabled": true,
-  "Script": "Scripts/Rotator.lua"
+  "Script": "Content/Scripts/Rotator.lua"
 }
 ```
 
@@ -300,7 +300,7 @@ end
 - [ ] Add a packaging manifest test or dry-run command asserting every script referenced by a saved world is included at its project-relative path and an unreferenced script follows the project's documented content policy.
 - [ ] Run the packaging check; expect referenced Lua files to be absent.
 - [ ] Add Script Component creation/removal, enabled toggle, `.lua` asset picker, clear action, and validation message to the inspector. Never execute the selected script in edit mode.
-- [ ] Teach content discovery and packaging to include `.lua` as data, without compiling it into the executable. Add a readable `ExampleActor.lua` using all three callbacks and `Engine.Log` only.
+- [ ] Teach content discovery and packaging to include every `.lua` file beneath `Content/Scripts` as data, without compiling it into the executable. Add a readable `ExampleActor.lua` using all three callbacks and `Engine.Log` only.
 - [ ] Manually assign the example to two actors, save/reopen the world, run PIE, stop, package, and run standalone from a path containing spaces.
 - [ ] Commit: `git add Engine/Editor Engine/Framework Template/Package.ps1 Template/Package.bat Content/Scripts/ExampleActor.lua && git commit -m "feat: assign and package Lua actor scripts"`
 
