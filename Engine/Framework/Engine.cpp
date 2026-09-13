@@ -11,6 +11,59 @@
 #define GLFW_DLL
 #include <GLFW/glfw3.h>
 
+namespace
+{
+GLFWwindow* CreateCompatibilityWindow(int major,
+                                      int minor,
+                                      int width,
+                                      int height,
+                                      const char* title)
+{
+    glfwDefaultWindowHints();
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, major);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, minor);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
+    return glfwCreateWindow(width, height, title, nullptr, nullptr);
+}
+
+class FCurrentOpenGLCapabilitySource final : public IGraphicsCapabilitySource
+{
+public:
+    bool QueryIntegerVersion(int& major, int& minor) const override
+    {
+        glGetIntegerv(GL_MAJOR_VERSION, &major);
+        glGetIntegerv(GL_MINOR_VERSION, &minor);
+        return glGetError() == GL_NO_ERROR && major > 0;
+    }
+
+    const char* QueryVersionString() const override
+    {
+        return reinterpret_cast<const char*>(glGetString(GL_VERSION));
+    }
+
+    bool HasExtension(const char* extensionName) const override
+    {
+        return glewIsSupported(extensionName) == GL_TRUE;
+    }
+
+    bool HasRequiredComputeEntryPoints() const override
+    {
+        static const char* requiredEntryPoints[] = {
+            "glDispatchCompute",
+            "glMemoryBarrier",
+            "glBindBufferBase",
+            "glShaderStorageBlockBinding",
+            "glBindImageTexture",
+        };
+        for (const char* entryPoint : requiredEntryPoints)
+        {
+            if (!glfwGetProcAddress(entryPoint)) return false;
+        }
+        return true;
+    }
+};
+} // namespace
+
 Engine::Engine(Role role) : role_(role)
 {
     subsystems_.Register(new UScriptSubsystem());
@@ -19,8 +72,7 @@ Engine::Engine(Role role) : role_(role)
 Engine::~Engine()
 {
     delete world_;
-    if (window_) glfwDestroyWindow(window_);
-    glfwTerminate();
+    cleanupGraphics();
 }
 
 bool Engine::Init(int width, int height, const char* title)
@@ -28,21 +80,56 @@ bool Engine::Init(int width, int height, const char* title)
     width_  = width;
     height_ = height;
 
-    if (!glfwInit()) return false;
+    cleanupGraphics();
+    backendWarningEmitted_ = false;
 
-    // Request a 3.3 *compatibility* context. 3.3 is the engine's GPU baseline
-    // (all shaders are #version 330; the mesh ray tracer feeds triangles via a
-    // texture buffer, core since 3.1 -- no SSBO/4.3 assumption). Compatibility
-    // keeps fixed-function glOrtho/glDrawPixels alive for the CPU raster path.
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
+    if (!glfwInit())
+    {
+        std::cerr << "[Engine] GLFW initialization failed\n";
+        return false;
+    }
+    glfwInitialized_ = true;
 
-    window_ = glfwCreateWindow(width_, height_, title, nullptr, nullptr);
-    if (!window_) { glfwTerminate(); return false; }
+    // Prefer a 4.3 compatibility context for the optional Compute backend,
+    // then recreate at the supported 3.3 minimum. Compatibility is temporary
+    // while the deprecated fixed-function renderers remain available.
+    window_ = CreateCompatibilityWindow(4, 3, width_, height_, title);
+    if (!window_)
+        window_ = CreateCompatibilityWindow(3, 3, width_, height_, title);
+    if (!window_)
+    {
+        std::cerr << "[Engine] Unable to create an OpenGL 4.3 or 3.3 compatibility context; "
+                     "this engine requires OpenGL 3.3 or newer.\n";
+        cleanupGraphics();
+        return false;
+    }
     glfwMakeContextCurrent(window_);
 
-    if (glewInit() != GLEW_OK) { std::cerr << "GLEW init failed\n"; return false; }
+    glewExperimental = GL_TRUE;
+    const GLenum glewStatus = glewInit();
+    glGetError(); // GLEW may leave one benign GL_INVALID_ENUM on core-capable drivers.
+    if (glewStatus != GLEW_OK)
+    {
+        std::cerr << "[Engine] GLEW initialization failed: "
+                  << reinterpret_cast<const char*>(glewGetErrorString(glewStatus)) << "\n";
+        cleanupGraphics();
+        return false;
+    }
+
+    const FCurrentOpenGLCapabilitySource capabilitySource;
+    graphicsCapabilities_ = ProbeGraphicsCapabilities(capabilitySource);
+    if (!graphicsCapabilities_.MeetsOpenGL33())
+    {
+        std::cerr << "[Engine] Detected OpenGL " << graphicsCapabilities_.major << "."
+                  << graphicsCapabilities_.minor
+                  << "; this engine requires OpenGL 3.3 or newer.\n";
+        cleanupGraphics();
+        return false;
+    }
+    backendSelection_ = SelectRayTracingBackend(
+        proj_.defaultRenderFeatures.rayTracingBackend, graphicsCapabilities_);
+    std::cout << "[Engine] OpenGL " << graphicsCapabilities_.major << "."
+              << graphicsCapabilities_.minor << " initialized\n";
 
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
@@ -51,6 +138,40 @@ bool Engine::Init(int width, int height, const char* title)
     glfwSetWindowUserPointer(window_, this);
     glfwSetFramebufferSizeCallback(window_, &Engine::resizeTrampoline);
     return true;
+}
+
+void Engine::cleanupGraphics()
+{
+    if (window_)
+    {
+        glfwDestroyWindow(window_);
+        window_ = nullptr;
+    }
+    if (glfwInitialized_)
+    {
+        glfwTerminate();
+        glfwInitialized_ = false;
+    }
+    graphicsCapabilities_ = FGraphicsCapabilities{};
+    backendSelection_ = FBackendSelection{};
+}
+
+void Engine::resolveRayTracingBackend()
+{
+    backendSelection_ = SelectRayTracingBackend(
+        proj_.defaultRenderFeatures.rayTracingBackend, graphicsCapabilities_);
+
+    std::cout << "[Engine] ray backend requested="
+              << FProjectDescriptor::RayTracingBackendName(backendSelection_.requested)
+              << " selected="
+              << FProjectDescriptor::RayTracingBackendName(backendSelection_.selected)
+              << " available=" << (backendSelection_.available ? "yes" : "no") << "\n";
+
+    if (!backendSelection_.fallbackReason.empty() && !backendWarningEmitted_)
+    {
+        std::cerr << "[Engine] warning: " << backendSelection_.fallbackReason << "\n";
+        backendWarningEmitted_ = true;
+    }
 }
 
 bool Engine::KeyDown(int glfwKey) const
@@ -118,6 +239,8 @@ int Engine::Run(const char* projPath)
         }
         else std::cout << "[Engine] project load failed -> defaults\n";
     }
+
+    resolveRayTracingBackend();
 
     OnStartup();
     handleResize(width_, height_);          // initial viewport / ortho

@@ -2,6 +2,7 @@
 
 #include "FProjectDescriptor.h"
 #include "USubsystemManager.h"
+#include "../Render/FGraphicsCapabilities.h"
 
 struct GLFWwindow;
 class  UWorld;
@@ -36,6 +37,9 @@ public:
     bool Init(int width = 1024, int height = 1024, const char* title = "Engine");
     int  Run(const char* projPath = nullptr);   // nullptr -> defaults, no world
 
+    const FGraphicsCapabilities& GraphicsCapabilities() const { return graphicsCapabilities_; }
+    const FBackendSelection& RayTracingBackendSelection() const { return backendSelection_; }
+
 protected:
     void BootWorld(const std::string& projectRoot);
     // ---- hooks (override in the app) ----
@@ -60,8 +64,14 @@ protected:
 
 private:
     const Role role_;
+    void cleanupGraphics();
+    void resolveRayTracingBackend();
     void handleResize(int w, int h);
     static void resizeTrampoline(GLFWwindow* win, int w, int h);
 
     double lastTime_ = 0.0;
+    bool glfwInitialized_ = false;
+    bool backendWarningEmitted_ = false;
+    FGraphicsCapabilities graphicsCapabilities_;
+    FBackendSelection backendSelection_;
 };
