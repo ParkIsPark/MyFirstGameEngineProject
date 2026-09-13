@@ -80,22 +80,40 @@ main loop
   -> Engine::Tick -> UWorld::Tick -> ... -> Lua Tick(dt)
 ```
 
-Cleanup is intentionally the reverse dependency order:
+Cleanup differs between an Editor PIE Stop and standalone process shutdown.
+
+An Editor PIE Stop destroys only the runtime clone and leaves the subsystem VM alive for a later Play session:
 
 ```text
-EditorEngine::OnStop or Engine::Run exit
-  -> UWorld::EndPlay
+EditorEngine::OnStop
+  -> pieWorld_->EndPlay
     -> AActor::DispatchEndPlay (component insertion order, then Actor)
       -> UScriptComponent::EndPlay
         -> FLuaScriptInstance::EndPlay -> protected Lua EndPlay()
         -> unref callback functions and instance environment
-  -> destroy PIE/game world and ScriptComponents
+  -> delete pieWorld_ -> destroy its C++ Actors and ScriptComponents
+  -> VM remains initialized for the next Editor Play
+```
+
+When the editor application exits, `Engine::Run` calls `EditorEngine::OnShutdown`, which performs that same `OnStop`, before subsystem shutdown. Standalone shutdown intentionally retains the C++ world object until after the VM has closed:
+
+```text
+Engine::Run exit (standalone Game)
+  -> world_->EndPlay
+    -> AActor::DispatchEndPlay (component insertion order, then Actor)
+      -> UScriptComponent::EndPlay
+        -> FLuaScriptInstance::EndPlay -> protected Lua EndPlay()
+        -> unref callback functions and instance environment
+  -> Engine::OnShutdown
   -> USubsystemManager::ShutdownAll
     -> UScriptSubsystem::Shutdown
-      -> invalidate any outstanding handles
-      -> clear compiled cache and subsystem registry references
+      -> invalidate any outstanding instance handles and registry references
+      -> clear compiled cache
       -> lua_close
+  -> delete world_ -> destroy the C++ world, Actors, and ScriptComponents
 ```
+
+All script callbacks and normal instance releases therefore finish before subsystem shutdown. Standalone's later C++ object destruction cannot call Lua: `UScriptComponent::EndPlay` already cleared its lifecycle state, and subsystem shutdown invalidated any outstanding handles before `lua_close`.
 
 The editor world is never the PIE world. `CopyWorld` clones serialized configuration into a runtime world; Stop destroys that clone and reveals the untouched edit world. A second Play creates fresh Lua instance state.
 
