@@ -47,3 +47,7 @@ bin/*.obj
 bin/*.world
 Content/__pie.world
 Config/GameSettings.ini
+
+# Superpowers isolated implementation workspaces and local run ledger
+.worktrees/
+.superpowers/
