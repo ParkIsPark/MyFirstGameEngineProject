@@ -35,6 +35,7 @@
 #include "FEditorAssetWorkflow.h"
 #include "FProcess.h"
 #include "FIniFile.h"
+#include "FRenderQualitySettings.h"
 #include "../Script/UScriptComponent.h"
 #include "../Script/UScriptSubsystem.h"
 
@@ -871,41 +872,6 @@ void EditorEngine::DrawRenderSettings()
         if (changed) SaveRenderSettings();       // persist immediately to ini
     }
     ImGui::End();
-}
-
-// Read one [section] of an FIniFile into an FRenderQuality, defaulting to q.
-static FRenderQuality ReadRenderQuality(FIniFile& ini, const char* sec, const FRenderQuality& def)
-{
-    FRenderQuality q = def;
-    q.giSamples      = ini.GetInt  (sec, "GISamples", q.giSamples);
-    q.giBounces      = ini.GetInt  (sec, "GIBounces", q.giBounces);
-    q.ssaa           = ini.GetInt  (sec, "SSAA", q.ssaa);
-    q.ambientStrength= ini.GetFloat(sec, "AmbientStrength", q.ambientStrength);
-    q.giStrength     = ini.GetFloat(sec, "GIStrength", q.giStrength);
-    q.reflStrength   = ini.GetFloat(sec, "ReflectionStrength", q.reflStrength);
-    q.shininess      = ini.GetFloat(sec, "Shininess", q.shininess);
-    q.shadowSamples  = ini.GetInt  (sec, "ShadowSamples", q.shadowSamples);
-    q.shadowSoftness = ini.GetFloat(sec, "ShadowSoftness", q.shadowSoftness);
-    if (q.shadowSamples < 1) q.shadowSamples = 1;  if (q.shadowSamples > 16) q.shadowSamples = 16;
-    if (q.giSamples < 0) q.giSamples = 0;          if (q.giSamples > 32) q.giSamples = 32;
-    if (q.giBounces < 0) q.giBounces = 0;          if (q.giBounces > 4)  q.giBounces = 4;
-    if (q.ssaa < 1) q.ssaa = 1;                     if (q.ssaa > 2) q.ssaa = 2;
-    return q;
-}
-
-// Write one FRenderQuality as an ini [section] body.
-static void WriteRenderQuality(std::ostream& f, const char* sec, const FRenderQuality& q)
-{
-    f << "[" << sec << "]\n"
-      << "GISamples = "          << q.giSamples       << "\n"
-      << "GIBounces = "          << q.giBounces       << "\n"
-      << "SSAA = "               << q.ssaa            << "\n"
-      << "AmbientStrength = "    << q.ambientStrength << "\n"
-      << "GIStrength = "         << q.giStrength      << "\n"
-      << "ReflectionStrength = " << q.reflStrength    << "\n"
-      << "Shininess = "          << q.shininess       << "\n"
-      << "ShadowSamples = "      << q.shadowSamples   << "\n"
-      << "ShadowSoftness = "     << q.shadowSoftness  << "\n";
 }
 
 void EditorEngine::LoadRenderSettings()

@@ -80,6 +80,8 @@
     <ClCompile Include="Engine\Rasterizer\URasterizer.cpp" />
     <!-- Engine: Render -->
     <ClCompile Include="Engine\Render\FGraphicsCapabilities.cpp" />
+    <ClCompile Include="Engine\Render\FRenderMath.cpp" />
+    <ClCompile Include="Engine\Render\FRenderQualitySettings.cpp" />
     <ClCompile Include="Engine\Render\FRenderScene.cpp" />
     <ClCompile Include="Engine\Render\UHardwareGBuffer.cpp" />
     <ClCompile Include="Engine\Render\URasterLightingPass.cpp" />
@@ -206,6 +208,8 @@
     <ClInclude Include="Engine\Rasterizer\UGBuffer.h" />
     <!-- Engine: Render headers -->
     <ClInclude Include="Engine\Render\FGraphicsCapabilities.h" />
+    <ClInclude Include="Engine\Render\FRenderMath.h" />
+    <ClInclude Include="Engine\Render\FRenderQualitySettings.h" />
     <ClInclude Include="Engine\Render\FRenderOutputs.h" />
     <ClInclude Include="Engine\Render\FRenderScene.h" />
     <ClInclude Include="Engine\Render\UHardwareGBuffer.h" />
