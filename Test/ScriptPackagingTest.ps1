@@ -67,6 +67,7 @@ Script = Content/Scripts/Referenced.lua
         New-Item -ItemType Directory -Path (Join-Path $fakeEngine $folder) | Out-Null
     }
     Write-Utf8 (Join-Path $fakeEngine 'Engine\Marker.h') 'engine marker'
+    Write-Utf8 (Join-Path $fakeEngine 'Config\DeveloperSettings.ini') "[Rendering]`nLegacyOverride=PureGPURayTracer`nShowDeprecatedFeatures=false`nShowExperimentalWarnings=false"
     Write-Utf8 (Join-Path $fakeEngine 'ThirdParty\Lua\5.4.9\src\lua.h') 'vendored lua marker'
     Write-Utf8 (Join-Path $fakeEngine 'OpenglViewer.props') '<Project />'
     $engineForProps = $fakeEngine
@@ -79,6 +80,9 @@ Script = Content/Scripts/Referenced.lua
 "@
     $regularOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $packageScript -ProjectDir $projectDir)
     Assert-True ($LASTEXITCODE -eq 0) 'regular package freeze succeeds against a minimal engine root with spaces'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $projectDir 'Config\DeveloperSettings.ini')) -and
+                 -not (Test-Path -LiteralPath (Join-Path $projectDir 'bin\DeveloperSettings.ini'))) `
+        'package freeze never copies local Developer Settings from the engine into project or bin'
     Assert-True ((Get-Content -LiteralPath (Join-Path $projectDir 'ThirdParty\Lua\5.4.9\src\lua.h') -Raw) -ceq
                  'vendored lua marker') `
         'regular package copies the vendored Lua build dependency into the self-contained project'
@@ -110,6 +114,9 @@ Script = Content/Scripts/Referenced.lua
                  (Get-Content -LiteralPath $generatedExample -Raw) -ceq (Get-Content -LiteralPath $templateExample -Raw)) `
         'generated projects contain the byte-identical template ExampleActor script'
     [xml]$generatedProject = Get-Content -LiteralPath (Join-Path $generated 'GeneratedLua.vcxproj') -Raw
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $generated 'Config\DeveloperSettings.ini')) -and
+                 -not (Test-Path -LiteralPath (Join-Path $generated 'bin\DeveloperSettings.ini'))) `
+        'project generation excludes local Developer Settings'
     $visibleLua = @($generatedProject.Project.ItemGroup.None | Where-Object { $_.Include -eq 'Content\Scripts\**\*.lua' })
     Assert-True ($visibleLua.Count -eq 1) 'generated project files expose nested Lua content in Solution Explorer'
     $generatedManifest = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $generated 'Package.ps1') `

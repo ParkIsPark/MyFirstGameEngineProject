@@ -302,4 +302,12 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <ItemGroup>
+    <ClInclude Include="$(EngineRootDir)Engine\Developer\FDeveloperSettings.h" />
+    <ClCompile Include="$(EngineRootDir)Engine\Developer\FDeveloperSettings.cpp" />
+    <ClInclude Include="$(EngineRootDir)Engine\Developer\FDeveloperWorldRenderRoute.h" />
+    <ClCompile Include="$(EngineRootDir)Engine\Developer\FDeveloperWorldRenderRoute.cpp" />
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\DeveloperSettingsPanel.h" />
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\DeveloperSettingsPanel.cpp" />
+  </ItemGroup>
 </Project>

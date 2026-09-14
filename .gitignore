@@ -51,3 +51,4 @@ Config/GameSettings.ini
 # Superpowers isolated implementation workspaces and local run ledger
 .worktrees/
 .superpowers/
+Config/DeveloperSettings.ini

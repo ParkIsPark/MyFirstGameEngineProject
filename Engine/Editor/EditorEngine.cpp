@@ -1,4 +1,5 @@
 #include "EditorEngine.h"
+#include "DeveloperSettingsPanel.h"
 
 #include <GL/glew.h>
 #define GLFW_DLL
@@ -85,6 +86,7 @@ namespace {
 EditorEngine::~EditorEngine()
 {
     OnStop();
+    developerOverride_.Shutdown();
     worldRenderer_.Shutdown();
     viewportTarget_.Release();
     if (imguiReady_)
@@ -544,6 +546,7 @@ void EditorEngine::OnPlay()
 void EditorEngine::OnShutdown()
 {
     OnStop();
+    developerOverride_.Shutdown();
     worldRenderer_.Shutdown();
     viewportTarget_.Release();
 }
@@ -581,6 +584,14 @@ void EditorEngine::OnStartup()
     worldRenderer_.Init();
 
     LoadRenderSettings();
+    developerSettings_ = FDeveloperSettings::Load();
+    if (!developerOverride_.Apply(developerSettings_.legacyOverride))
+        developerSettings_.legacyOverride = developerOverride_.ActiveOverride();
+    // First launch creates the canonical local file; a rejected existing file
+    // remains available for diagnosis until the user changes settings.
+    std::error_code developerSettingsError;
+    if (!std::filesystem::exists("Config/DeveloperSettings.ini", developerSettingsError) && !developerSettingsError)
+        developerSettings_.Save();
     editorWorld_ = new UWorld();
     editorWorld_->GetScene().renderFeatures = proj_.defaultRenderFeatures;
     ScanContent();
@@ -773,6 +784,17 @@ void EditorEngine::DrawUI()
 
     if (showBuildLog_) DrawBuildLog();
     if (showRenderSettings_) DrawRenderSettings();
+    if (showDeveloperSettings_)
+    {
+        const auto description = DescribeDeveloperSettings(developerSettings_,
+            ActiveWorld().GetScene().renderFeatures, worldRenderer_.Stats().activeRayBackend);
+        if (DrawDeveloperSettingsPanel(showDeveloperSettings_, developerSettings_, description))
+        {
+            if (!developerOverride_.Apply(developerSettings_.legacyOverride))
+                developerSettings_.legacyOverride = developerOverride_.ActiveOverride();
+            developerSettings_.Save();
+        }
+    }
     if (showMatEditor_) DrawMaterialEditor();
     if (showProjectSettings_) DrawProjectSettings();
     if (showDemo_) ImGui::ShowDemoWindow(&showDemo_);
@@ -941,6 +963,7 @@ void EditorEngine::DrawMenuBar()
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Project Settings...")) showProjectSettings_ = true;
+        if (ImGui::MenuItem("Developer Settings...")) showDeveloperSettings_ = true;
         ImGui::Separator();
         if (ImGui::MenuItem("Quit")) glfwSetWindowShouldClose(window_, GL_TRUE);
         ImGui::EndMenu();
@@ -1262,8 +1285,14 @@ void EditorEngine::DrawStatusBar(float x, float y, float w, float h)
         ImGui::SameLine(); ImGui::TextDisabled("|  Selected: %s",
             (selected_ >= 0 && selected_ < (int)actorNames_.size()) ? actorNames_[selected_].c_str() : "(none)");
         const FRenderFeatures& features = ActiveWorld().GetScene().renderFeatures;
+        if (const auto* legacy = LegacyFeature(developerOverride_.ActiveOverride()))
+        {
+            ImGui::SameLine(); ImGui::TextDisabled("|  %s (Deprecated)", legacy->displayName.c_str());
+        }
+        else {
         ImGui::SameLine(); ImGui::TextDisabled("|  Hardware Raster | RT %s (%s)",
             features.rayTracing ? "On" : "Off", FProjectDescriptor::RayTracingBackendName(features.rayTracingBackend));
+        }
         ImGui::SameLine(ImGui::GetWindowWidth() - 150);
         ImGui::TextDisabled("Alt+P Play  *  %.0f FPS", ImGui::GetIO().Framerate);
     }
@@ -1835,7 +1864,11 @@ void EditorEngine::DrawDetails()
 void EditorEngine::DrawViewport()
 {
     const FRenderFeatures& viewportFeatures = ActiveWorld().GetScene().renderFeatures;
-    ImGui::TextDisabled("[Hardware Raster%s%s%s] %s   (RMB-drag + WASD/QE to fly, LMB to pick)",
+    DrawDeveloperLifecycleBadges(DescribeDeveloperSettings(developerSettings_,
+        viewportFeatures, worldRenderer_.Stats().activeRayBackend));
+    if (const auto* legacy = LegacyFeature(developerOverride_.ActiveOverride()))
+        ImGui::TextDisabled("[%s] %s", legacy->displayName.c_str(), playing_ ? "Playing (PIE)" : "Editor World");
+    else ImGui::TextDisabled("[Hardware Raster%s%s%s] %s   (RMB-drag + WASD/QE to fly, LMB to pick)",
                         viewportFeatures.rayTracing ? " + RT (" : " / ",
                         viewportFeatures.rayTracing ? FProjectDescriptor::RayTracingBackendName(viewportFeatures.rayTracingBackend) : kShading[ActiveWorld().GetScene().shadingModel],
                         viewportFeatures.rayTracing ? ")" : "",
@@ -1865,9 +1898,11 @@ void EditorEngine::DrawViewport()
     frameQuality.depthView = depthView_;
     const FBackendSelection& backend =
         ResolveRayTracingBackend(world.GetScene().renderFeatures.rayTracingBackend);
-    const bool shown = worldRenderer_.Render(
+    const FDeveloperRenderFrame developerFrame{&world, &cam, &viewportTarget_,
+        &world.GetScene().renderFeatures, &frameQuality, &backend, ContextGeneration()};
+    const bool shown = developerOverride_.Render(developerFrame, [&] { return worldRenderer_.Render(
         world, cam, viewportTarget_, world.GetScene().renderFeatures,
-        frameQuality, backend, ContextGeneration());
+        frameQuality, backend, ContextGeneration()); });
     if (shown)
         ImGui::Image((ImTextureID)(intptr_t)viewportTarget_.ColorTexture(),
                      avail, ImVec2(0, 1), ImVec2(1, 0));

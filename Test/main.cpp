@@ -39,6 +39,7 @@
 #include "URasterizer.h"
 #include "UMeshRayTracer.h"
 #include "FDeprecatedWorldRenderExecutor.h"
+#include "../Engine/Developer/FDeveloperWorldRenderRoute.h"
 #include "UHybridPass.h"
 #include "UObjImporter.h"
 #include "UFbxImporter.h"
@@ -3989,6 +3990,48 @@ public:
               glGetError() == GL_NO_ERROR);
         std::printf("=== deprecated ray tracer lifecycle gates: %d passed, %d failed ===\n",
                     passed, failed);
+        const int legacyFailures = failed;
+        passed = 0; failed = 0;
+        int developerWarnings = 0;
+        int normalCalls = 0;
+        UWorldRenderer normalRenderer;
+        normalRenderer.Init();
+        FDeveloperOverrideController developer(CreateDeveloperWorldRenderRoute,
+            [&](const std::string&) { ++developerWarnings; });
+        FDeveloperRenderFrame frame{&world, &world.GetCamera(), &target,
+            &features, &quality, &backend, ContextGeneration()};
+        auto renderDeveloper = [&] { return developer.Render(frame, [&] {
+            ++normalCalls;
+            return normalRenderer.Render(world, world.GetCamera(), target, features,
+                quality, backend, ContextGeneration());
+        }); };
+        check("Developer None exclusively renders normal hardware",
+            developer.Apply(ELegacyRendererOverride::None) && renderDeveloper() &&
+            normalCalls == 1 && developerWarnings == 0);
+        check("Developer CPU factory renders through shared world renderer",
+            developer.Apply(ELegacyRendererOverride::SoftwareRasterizer) &&
+            renderDeveloper() && normalCalls == 1 && developerWarnings == 1);
+        check("Developer same CPU override is a no-op",
+            developer.Apply(ELegacyRendererOverride::SoftwareRasterizer) &&
+            renderDeveloper() && normalCalls == 1 && developerWarnings == 1);
+        check("Developer switches to real pure GPU factory exclusively",
+            developer.Apply(ELegacyRendererOverride::PureGPURayTracer) &&
+            renderDeveloper() && normalCalls == 1 && developerWarnings == 2);
+        check("Developer returning to None resumes hardware once",
+            developer.Apply(ELegacyRendererOverride::None) && renderDeveloper() &&
+            normalCalls == 2 && normalRenderer.Stats().hardwareGBufferPasses == 2);
+        check("Developer repeated CPU activation renders without repeated warning",
+            developer.Apply(ELegacyRendererOverride::SoftwareRasterizer) &&
+            renderDeveloper() && developerWarnings == 2 && normalCalls == 2);
+        const std::string worldOutput = FWorldSerializer::Save(world);
+        check("active Developer override never leaks into serialized world",
+            !worldOutput.empty() && worldOutput.find("LegacyOverride") == std::string::npos &&
+            worldOutput.find("ShowDeprecatedFeatures") == std::string::npos &&
+            worldOutput.find("ShowExperimentalWarnings") == std::string::npos);
+        developer.Shutdown(); normalRenderer.Shutdown();
+        check("Developer route shutdown leaves no GL error", glGetError() == GL_NO_ERROR);
+        std::printf("=== Developer Settings real-GL routing: %d passed, %d failed ===\n", passed, failed);
+        failed += legacyFailures;
         return failed == 0 ? 0 : 1;
     }
 };

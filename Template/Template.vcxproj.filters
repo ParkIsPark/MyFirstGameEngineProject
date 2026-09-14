@@ -266,4 +266,13 @@
   <ItemGroup>
     <None Include="Content\Scripts\**\*.lua"><Filter>Content\Scripts</Filter></None>
   </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Engine\Developer" />
+    <ClInclude Include="$(EngineRootDir)Engine\Developer\FDeveloperSettings.h"><Filter>Engine\Developer</Filter></ClInclude>
+    <ClCompile Include="$(EngineRootDir)Engine\Developer\FDeveloperSettings.cpp"><Filter>Engine\Developer</Filter></ClCompile>
+    <ClInclude Include="$(EngineRootDir)Engine\Developer\FDeveloperWorldRenderRoute.h"><Filter>Engine\Developer</Filter></ClInclude>
+    <ClCompile Include="$(EngineRootDir)Engine\Developer\FDeveloperWorldRenderRoute.cpp"><Filter>Engine\Developer</Filter></ClCompile>
+    <ClInclude Include="$(EngineRootDir)Engine\Editor\DeveloperSettingsPanel.h"><Filter>Engine\Editor</Filter></ClInclude>
+    <ClCompile Include="$(EngineRootDir)Engine\Editor\DeveloperSettingsPanel.cpp"><Filter>Engine\Editor</Filter></ClCompile>
+  </ItemGroup>
 </Project>

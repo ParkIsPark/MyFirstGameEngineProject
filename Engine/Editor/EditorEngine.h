@@ -5,6 +5,7 @@
 #include "UWorldRenderer.h"
 #include "BuildManager.h"
 #include "FEditorAssetWorkflow.h"
+#include "../Developer/FDeveloperWorldRenderRoute.h"
 
 #include <vector>
 #include <string>
@@ -103,6 +104,9 @@ private:
     bool showDemo_     = false;
     bool showBuildLog_ = false;
     bool showRenderSettings_ = false;
+    bool showDeveloperSettings_ = false;
+    FDeveloperSettings developerSettings_;
+    FDeveloperOverrideController developerOverride_{CreateDeveloperWorldRenderRoute};
     bool showMatEditor_ = false;          // material editor window open
     std::string matEditPath_;             // Content path of the material being edited
     bool showProjectSettings_ = false;    // Project Settings window open
