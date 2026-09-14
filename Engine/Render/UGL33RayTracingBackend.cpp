@@ -4,6 +4,7 @@
 #include "FRenderTarget.h"
 #include "Shaders/RayEffectsFragmentShaders.h"
 #include "UHardwareGBuffer.h"
+#include "UGL43RayTracingBackend.h"
 
 #include <GL/glew.h>
 #include <glm/gtc/type_ptr.hpp>
@@ -737,17 +738,10 @@ void UGL33RayTracingBackend::ForgetCurrentResources() noexcept
     sceneCache_.Clear();
 }
 
-std::unique_ptr<IRayTracingBackend> FOpenGLRayTracingBackendFactory::Create(
-    ERayTracingBackend backend, std::string* diagnostic)
+FOpenGLRayTracingBackendFactory::FOpenGLRayTracingBackendFactory()
+    : compatibleCreator_([] { return std::make_unique<UGL33RayTracingBackend>(); }),
+      computeCreator_([] { return std::make_unique<UGL43RayTracingBackend>(); })
 {
-    if (backend == ERayTracingBackend::CompatibleGL33)
-    {
-        if (diagnostic) diagnostic->clear();
-        return std::make_unique<UGL33RayTracingBackend>();
-    }
-    if (diagnostic)
-        *diagnostic = "OpenGL 4.3 Compute ray effects are staged for Task 10";
-    return {};
 }
 
 void FStderrRayEffectsWarningSink::Warn(const std::string& warning)

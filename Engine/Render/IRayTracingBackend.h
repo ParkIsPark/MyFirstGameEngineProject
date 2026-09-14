@@ -29,6 +29,8 @@ struct FRayTracingBackendStats
     std::uint64_t resourceAllocations = 0;
     std::uint64_t renderCalls = 0;
     std::uint64_t rayDraws = 0;
+    std::uint64_t rayDispatches = 0;
+    std::uint64_t memoryBarriers = 0;
     std::uint64_t sceneUploads = 0;
     std::uint64_t blasUploads = 0;
     std::uint64_t instanceUploads = 0;

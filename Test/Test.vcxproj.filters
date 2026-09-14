@@ -80,7 +80,9 @@
     <ClCompile Include="$(EngineRootDir)Engine\Render\UHardwareGBuffer.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\URasterLightingPass.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\IRayTracingBackend.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Render\FGL43ComputeApi.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\UGL33RayTracingBackend.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="$(EngineRootDir)Engine\Render\UGL43RayTracingBackend.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\RayTracing\FRaySceneCache.cpp"><Filter>Engine\RayTracing</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\UHardwareRasterizer.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="$(EngineRootDir)Engine\Render\FRenderTarget.cpp"><Filter>Engine\Render</Filter></ClCompile>
@@ -200,12 +202,15 @@
     <ClInclude Include="$(EngineRootDir)Engine\Render\UHardwareGBuffer.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\URasterLightingPass.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\IRayTracingBackend.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\FGL43ComputeApi.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\UGL33RayTracingBackend.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\UGL43RayTracingBackend.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\RayTracing\FRaySceneCache.h"><Filter>Engine\RayTracing</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\UHardwareRasterizer.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\HardwareRasterShaders.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\RasterLightingShaders.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\RayEffectsFragmentShaders.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\RayEffectsComputeShaders.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderTarget.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FGPUMeshResource.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderFeatures.h"><Filter>Engine\Render</Filter></ClInclude>

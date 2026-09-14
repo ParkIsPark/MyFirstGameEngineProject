@@ -4,8 +4,10 @@
 #include "FRaySceneCache.h"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 
 class UGL33RayTracingBackend final : public IRayTracingBackend
 {
@@ -70,8 +72,36 @@ private:
 class FOpenGLRayTracingBackendFactory final : public IRayTracingBackendFactory
 {
 public:
+    using FBackendCreator = std::function<std::unique_ptr<IRayTracingBackend>()>;
+
+    FOpenGLRayTracingBackendFactory();
+    FOpenGLRayTracingBackendFactory(FBackendCreator compatibleCreator,
+                                    FBackendCreator computeCreator)
+        : compatibleCreator_(std::move(compatibleCreator)),
+          computeCreator_(std::move(computeCreator)) {}
     std::unique_ptr<IRayTracingBackend> Create(
-        ERayTracingBackend backend, std::string* diagnostic = nullptr) override;
+        ERayTracingBackend backend, std::string* diagnostic = nullptr) override
+    {
+        FBackendCreator* creator = nullptr;
+        if (backend == ERayTracingBackend::CompatibleGL33)
+            creator = &compatibleCreator_;
+        else if (backend == ERayTracingBackend::ComputeGL43)
+            creator = &computeCreator_;
+        if (!creator || !*creator)
+        {
+            if (diagnostic)
+                *diagnostic = backend == ERayTracingBackend::Auto
+                    ? "Auto must be resolved before creating an OpenGL ray-effects backend"
+                    : "Requested OpenGL ray-effects backend has no registered creator";
+            return {};
+        }
+        if (diagnostic) diagnostic->clear();
+        return (*creator)();
+    }
+
+private:
+    FBackendCreator compatibleCreator_;
+    FBackendCreator computeCreator_;
 };
 
 class FStderrRayEffectsWarningSink final : public IRayEffectsWarningSink

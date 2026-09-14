@@ -7,6 +7,17 @@
 #include <unordered_map>
 #include <vector>
 
+// Both physical ray backends upload these arrays verbatim. vec4/uvec4 have
+// the exact std430 array stride required by GLSL; scalar float arrays use the
+// std430 scalar stride. Buffer object base addresses provide the base alignment.
+static_assert(sizeof(glm::vec4) == 16, "packed ray vec4 must match std430");
+static_assert(sizeof(glm::uvec4) == 16, "packed ray uvec4 must match std430");
+static_assert(sizeof(float) == 4, "packed ray scalar must be IEEE-width float");
+static_assert(sizeof(glm::vec4) == 4 * sizeof(float),
+              "packed ray vec4 array stride must match std430");
+static_assert(sizeof(glm::uvec4) == 4 * sizeof(std::uint32_t),
+              "packed ray uvec4 array stride must match std430");
+
 struct FRenderScene;
 
 struct FPackedRayScene

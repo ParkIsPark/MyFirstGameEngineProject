@@ -84,7 +84,9 @@
     <ClCompile Include="Engine\Render\UHardwareGBuffer.cpp" />
     <ClCompile Include="Engine\Render\URasterLightingPass.cpp" />
     <ClCompile Include="Engine\Render\IRayTracingBackend.cpp" />
+    <ClCompile Include="Engine\Render\FGL43ComputeApi.cpp" />
     <ClCompile Include="Engine\Render\UGL33RayTracingBackend.cpp" />
+    <ClCompile Include="Engine\Render\UGL43RayTracingBackend.cpp" />
     <ClCompile Include="Engine\RayTracing\FRaySceneCache.cpp" />
     <ClCompile Include="Engine\Render\UHardwareRasterizer.cpp" />
     <ClCompile Include="Engine\Render\FRenderTarget.cpp" />
@@ -208,12 +210,15 @@
     <ClInclude Include="Engine\Render\UHardwareGBuffer.h" />
     <ClInclude Include="Engine\Render\URasterLightingPass.h" />
     <ClInclude Include="Engine\Render\IRayTracingBackend.h" />
+    <ClInclude Include="Engine\Render\FGL43ComputeApi.h" />
     <ClInclude Include="Engine\Render\UGL33RayTracingBackend.h" />
+    <ClInclude Include="Engine\Render\UGL43RayTracingBackend.h" />
     <ClInclude Include="Engine\RayTracing\FRaySceneCache.h" />
     <ClInclude Include="Engine\Render\UHardwareRasterizer.h" />
     <ClInclude Include="Engine\Render\Shaders\HardwareRasterShaders.h" />
     <ClInclude Include="Engine\Render\Shaders\RasterLightingShaders.h" />
     <ClInclude Include="Engine\Render\Shaders\RayEffectsFragmentShaders.h" />
+    <ClInclude Include="Engine\Render\Shaders\RayEffectsComputeShaders.h" />
     <ClInclude Include="Engine\Render\FRenderTarget.h" />
     <ClInclude Include="Engine\Render\FGPUMeshResource.h" />
     <ClInclude Include="Engine\Render\FRenderFeatures.h" />
