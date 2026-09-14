@@ -534,11 +534,9 @@ bool UHardwareRasterizer::ResolveMaterialTexture(
 {
     texture = 0;
     if (!material) return true;
-    if (material->texture && glIsTexture(material->texture))
-    {
-        texture = material->texture;
-        return true;
-    }
+    // Legacy externally-owned handles have no reliable color-space or mip
+    // contract. Never sample them after removing manual gamma decode; use CPU
+    // source bytes below when available, otherwise the scalar albedo fallback.
     const int channels = material->texChannels > 0 ? material->texChannels : 3;
     const std::size_t required = material->texWidth > 0 && material->texHeight > 0
         ? static_cast<std::size_t>(material->texWidth) * material->texHeight * channels : 0;
@@ -553,12 +551,30 @@ bool UHardwareRasterizer::ResolveMaterialTexture(
         ++materialTextureHashComputations_;
     }
     const std::uint64_t signature = signatureIt->second;
+    const FTextureSamplingPolicy sampling = TextureSamplingPolicyForContext(
+        contextGeneration, requestedAnisotropy);
+    const float effectiveAnisotropy = sampling.EffectiveAnisotropy();
     auto resourceIt = materialTextures_.find(material);
     if (resourceIt != materialTextures_.end())
     {
         resourceIt->second.lastUsedFrame = materialTextureFrame_;
         texture = resourceIt->second.texture;
-        if (texture && resourceIt->second.signature == signature) return true;
+        if (texture && resourceIt->second.signature == signature)
+        {
+            if (sampling.anisotropySupported &&
+                resourceIt->second.effectiveAnisotropy != effectiveAnisotropy)
+            {
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, texture);
+                glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT,
+                                effectiveAnisotropy);
+                if (!CollectOpenGLErrors("Material texture anisotropy update",
+                                         diagnostic))
+                    return false;
+                resourceIt->second.effectiveAnisotropy = effectiveAnisotropy;
+            }
+            return true;
+        }
     }
 
     if (!DrainOpenGLErrors(diagnostic))
@@ -566,9 +582,6 @@ bool UHardwareRasterizer::ResolveMaterialTexture(
         ++materialTextureUploadFailures_;
         return false;
     }
-
-    const FTextureSamplingPolicy sampling = TextureSamplingPolicyForContext(
-        contextGeneration, requestedAnisotropy);
 
     FPixelUnpackGuard unpack;
     glActiveTexture(GL_TEXTURE0);
@@ -607,6 +620,7 @@ bool UHardwareRasterizer::ResolveMaterialTexture(
     committed.texture = candidate;
     committed.signature = signature;
     committed.lastUsedFrame = materialTextureFrame_;
+    committed.effectiveAnisotropy = effectiveAnisotropy;
     materialTextures_[material] = committed;
     if (previous) glDeleteTextures(1, &previous);
     texture = candidate;

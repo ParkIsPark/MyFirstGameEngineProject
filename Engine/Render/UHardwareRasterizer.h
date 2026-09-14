@@ -86,6 +86,7 @@ private:
         unsigned texture = 0;
         std::uint64_t signature = 0;
         std::uint64_t lastUsedFrame = 0;
+        float effectiveAnisotropy = 1.0f;
     };
     std::unordered_map<const Material*, FMaterialTextureResource> materialTextures_;
     std::unordered_map<const Material*, std::uint64_t> materialSignaturesThisFrame_;

@@ -1512,6 +1512,26 @@ public:
         check("raster anisotropy is capability bounded",
               rasterAnisotropy >= 1.0f &&
               rasterAnisotropy <= implementationAnisotropy);
+        FRenderQuality oneXAnisotropy = quality;
+        oneXAnisotropy.anisotropy = 1.0f;
+        const auto checkerOneX = renderFrame(scene, oneXAnisotropy);
+        const GLuint rasterMaterialTextureAfterQualityChange =
+            static_cast<GLuint>(rasterizer.MaterialTextureForTesting(&material));
+        GLfloat rasterUpdatedAnisotropy = 1.0f;
+        if (GLEW_EXT_texture_filter_anisotropic)
+        {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, rasterMaterialTextureAfterQualityChange);
+            glGetTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT,
+                &rasterUpdatedAnisotropy);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glActiveTexture(GL_TEXTURE5);
+        }
+        check("raster quality-only anisotropy changes update the resident texture",
+              checkerOneX.first &&
+              rasterMaterialTextureAfterQualityChange == rasterMaterialTexture &&
+              std::fabs(rasterUpdatedAnisotropy - 1.0f) < 0.001f &&
+              rasterizer.MaterialTextureUploads() == textureUploadsAfterFirst);
         check("geometry ignores hostile samplers and restores units zero/one",
               restoredGeometryActiveTexture == GL_TEXTURE5 &&
               restoredGeometryEnvironment ==
@@ -1548,6 +1568,36 @@ public:
         material.uvTiling = glm::vec2(1.0f);
         scene.meshes.front().uvTiling = glm::vec2(1.0f);
         material.kd = glm::vec3(0.25f, 0.4f, 0.85f);
+        material.texture = 0;
+        const auto externalFallbackReference = renderFrame(scene, quality);
+        GLuint hostileLegacyTexture = 0;
+        const unsigned char hostileLegacyPixels[16] = {
+            255, 0, 0, 255, 255, 0, 0, 255,
+            255, 0, 0, 255, 255, 0, 0, 255,
+        };
+        glGenTextures(1, &hostileLegacyTexture);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, hostileLegacyTexture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_RGBA,
+            GL_UNSIGNED_BYTE, hostileLegacyPixels);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        material.texture = hostileLegacyTexture;
+        const auto hostileExternalFrame = renderFrame(scene, quality);
+        GLint hostileExternalMinFilter = 0;
+        glBindTexture(GL_TEXTURE_2D, hostileLegacyTexture);
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+            &hostileExternalMinFilter);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        check("legacy external linear material textures use the scalar fallback",
+              externalFallbackReference.first && hostileExternalFrame.first &&
+              imageDifference(externalFallbackReference.second,
+                              hostileExternalFrame.second) == 0u &&
+              rasterizer.MaterialTextureForTesting(&material) == 0u &&
+              hostileExternalMinFilter == GL_NEAREST);
+        material.texture = 0;
+        glDeleteTextures(1, &hostileLegacyTexture);
         glActiveTexture(GL_TEXTURE0);
         glBindSampler(0, 0);
         glActiveTexture(GL_TEXTURE1);
@@ -3390,6 +3440,61 @@ public:
                 "GL43 ray material array is sRGB with complete bounded filtering",
                 static_cast<GLuint>(
                     computeControlledRays.MaterialAtlasTextureForTesting()));
+        const auto gl33StatsBeforeAnisotropy = controlledRays.Stats();
+        const auto gl43StatsBeforeAnisotropy = computeControlledRays.Stats();
+        const GLuint gl33AtlasBeforeAnisotropy = static_cast<GLuint>(
+            controlledRays.MaterialAtlasTextureForTesting());
+        const GLuint gl43AtlasBeforeAnisotropy = static_cast<GLuint>(
+            computeControlledRays.MaterialAtlasTextureForTesting());
+        controlledInputs.quality.anisotropy = 1.0f;
+        FRayEffectOutputs oneXGL33Outputs, oneXGL43Outputs;
+        const bool oneXGL33OK = controlledRays.RenderEffects(
+            controlledInputs, oneXGL33Outputs, &diagnostic);
+        const bool oneXGL43OK = !computeQualityAvailable ||
+            computeControlledRays.RenderEffects(
+                controlledInputs, oneXGL43Outputs, &diagnostic);
+        auto residentAtlasAnisotropy = [](GLuint atlas)
+        {
+            GLfloat value = 1.0f;
+            if (GLEW_EXT_texture_filter_anisotropic && atlas)
+            {
+                glBindTexture(GL_TEXTURE_2D_ARRAY, atlas);
+                glGetTexParameterfv(GL_TEXTURE_2D_ARRAY,
+                    GL_TEXTURE_MAX_ANISOTROPY_EXT, &value);
+                glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+            }
+            return value;
+        };
+        const auto gl33StatsAfterAnisotropy = controlledRays.Stats();
+        const auto gl43StatsAfterAnisotropy = computeControlledRays.Stats();
+        check("GL33 quality-only anisotropy updates without atlas repack",
+              oneXGL33OK && controlledRays.MaterialAtlasTextureForTesting() ==
+                  gl33AtlasBeforeAnisotropy &&
+              std::fabs(residentAtlasAnisotropy(gl33AtlasBeforeAnisotropy) -
+                        1.0f) < 0.001f &&
+              gl33StatsAfterAnisotropy.resourceAllocations ==
+                  gl33StatsBeforeAnisotropy.resourceAllocations &&
+              gl33StatsAfterAnisotropy.sceneUploadAttempts ==
+                  gl33StatsBeforeAnisotropy.sceneUploadAttempts &&
+              gl33StatsAfterAnisotropy.materialUploads ==
+                  gl33StatsBeforeAnisotropy.materialUploads &&
+              gl33StatsAfterAnisotropy.textureUploadCalls ==
+                  gl33StatsBeforeAnisotropy.textureUploadCalls);
+        if (computeQualityAvailable)
+            check("GL43 quality-only anisotropy updates without atlas repack",
+                  oneXGL43OK &&
+                  computeControlledRays.MaterialAtlasTextureForTesting() ==
+                      gl43AtlasBeforeAnisotropy &&
+                  std::fabs(residentAtlasAnisotropy(gl43AtlasBeforeAnisotropy) -
+                            1.0f) < 0.001f &&
+                  gl43StatsAfterAnisotropy.resourceAllocations ==
+                      gl43StatsBeforeAnisotropy.resourceAllocations &&
+                  gl43StatsAfterAnisotropy.sceneUploadAttempts ==
+                      gl43StatsBeforeAnisotropy.sceneUploadAttempts &&
+                  gl43StatsAfterAnisotropy.materialUploads ==
+                      gl43StatsBeforeAnisotropy.materialUploads &&
+                  gl43StatsAfterAnisotropy.textureUploadCalls ==
+                      gl43StatsBeforeAnisotropy.textureUploadCalls);
         if (computeQualityAvailable)
             check("GL43 non-white mixed-resolution textured secondary hit matches GL33",
                   computeControlledReflectionOK &&

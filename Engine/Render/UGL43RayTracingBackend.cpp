@@ -549,6 +549,17 @@ bool UGL43RayTracingBackend::UploadScene(const FPackedRayScene& packed,
     const bool uploadBLAS = packed.blasRevision != uploadedBLASRevision_;
     const bool uploadInstances = packed.instanceRevision != uploadedInstanceRevision_;
     const bool uploadMaterials = packed.materialRevision != uploadedMaterialRevision_;
+    const float effectiveAnisotropy = sampling.EffectiveAnisotropy();
+    if (!uploadMaterials && materialAtlasTexture_ && sampling.anisotropySupported &&
+        materialAtlasAnisotropy_ != effectiveAnisotropy)
+    {
+        glBindTexture(GL_TEXTURE_2D_ARRAY, materialAtlasTexture_);
+        glTexParameterf(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_ANISOTROPY_EXT,
+                        effectiveAnisotropy);
+        if (!CollectError("GL43 ray material anisotropy update", diagnostic))
+            return false;
+        materialAtlasAnisotropy_ = effectiveAnisotropy;
+    }
     if (!uploadBLAS && !uploadInstances && !uploadMaterials) return true;
     ++stats.sceneUploadAttempts;
 
@@ -656,6 +667,7 @@ bool UGL43RayTracingBackend::UploadScene(const FPackedRayScene& packed,
         if (materialAtlasTexture_) { glDeleteTextures(1, &materialAtlasTexture_); ++stats.releasedResources; }
         materialBuffer_ = material;
         materialAtlasTexture_ = atlas;
+        materialAtlasAnisotropy_ = effectiveAnisotropy;
         ++stats_.materialUploads;
 
         uploadedMaterialRevision_ = packed.materialRevision;
@@ -862,6 +874,7 @@ void UGL43RayTracingBackend::ForgetCurrentResources() noexcept
     triangleBuffer_ = blasNodeBuffer_ = blasIndexBuffer_ = 0;
     instanceBuffer_ = tlasNodeBuffer_ = tlasIndexBuffer_ = 0;
     instanceIdentityBuffer_ = materialBuffer_ = materialAtlasTexture_ = 0;
+    materialAtlasAnisotropy_ = 1.0f;
     width_ = height_ = 0;
     outputMask_ = 0;
     maxShaderStorageBlockSize_ = 0;

@@ -66,3 +66,57 @@ Compatible GL3.3 submission path and the optional GL4.3 compute path.
 - The available machine exposes OpenGL 4.6; the GL3.3 backend and its strict
   baseline rules were exercised, but not on a physical 3.3-only driver.
 - Existing repository C4819 and deprecated-GLM build warnings remain unchanged.
+
+## Fix round 1
+
+### Findings and RED
+
+- A quality-only anisotropy change was hidden behind unchanged raster texture
+  signatures and unchanged ray scene revisions. New real-GL probes failed on
+  the resident raster texture and both GL3.3/GL4.3 material arrays while proving
+  their object names and upload/allocation counters remained stable.
+- A hostile legacy `GL_RGBA8` external `Material::texture` was sampled directly.
+  Its no-mip nearest-filtered red content produced a different frame from the
+  scalar material fallback, so the new raster probe failed as intended.
+- RED totals: raster 69 passed / 2 failed; ray output reached both new expected
+  GL33/GL43 failures before the run was superseded by the implementation.
+
+### GREEN implementation
+
+- Each committed raster texture and ray material array now records its effective
+  anisotropy. Cache-hit quality changes update only
+  `GL_TEXTURE_MAX_ANISOTROPY_EXT`; they do not allocate, upload, regenerate
+  mipmaps, repack materials, or advance scene-upload counters. Unsupported or
+  malformed capabilities remain the silent 1x/trilinear path.
+- Externally owned material handles are explicitly excluded from raster material
+  sampling because their color space, mutability, mip completeness, and lifetime
+  cannot be guaranteed. Valid CPU bytes still produce the engine-owned compliant
+  sRGB copy; external-only materials use the scalar resolved-albedo fallback.
+  The hostile source texture remains untouched.
+- The existing render state guards cover the sampler-only update, and context
+  teardown resets the recorded array anisotropy. Runtime revision invalidation,
+  eight-texel material records, the 256 MiB atlas guard, transactional replacement,
+  Task 7 history, and the GL3.3 16-unit limit are unchanged.
+
+### GREEN verification
+
+- `MSBuild Engine.sln Debug|Win32 /m:1 /nr:false`: success.
+- `RunStandaloneTests.ps1`: 35 sources, 0 failures, including the focused policy.
+- `RunStandaloneRunnerSelfTest.ps1`: 7 cases, 0 failures.
+- `--raster-lighting-selftest`: 71 passed, 0 failed.
+- `--ray-effects-selftest`: 185 passed, 0 failed; GL3.3/GL4.3 sampler-only
+  updates preserve atlas names with zero allocation, upload, or repack counters.
+- `--render-performance-selftest`: 389 passed, 0 failed; Editor/Game hooks pass.
+- Mesh revision, deprecated ray lifecycle (18/18), developer routing (16/16),
+  hardware raster (29/29), and GL43 compute-init gates pass.
+- `git diff --check` is clean apart from line-ending notices; forbidden manual
+  texture gamma/global-shadow searches have no hits. `task13_final_upload.tmp.hdr`
+  is absent and only user-owned `Test/Config/` remains untracked.
+
+### Fix-round self-review and concerns
+
+- The external-handle policy deliberately favors color correctness and ownership
+  safety over legacy handle sampling. Callers that need texture sampling must
+  retain valid CPU texture bytes so the renderer can create compliant storage.
+- Hardware verification again used the available OpenGL 4.6 context; the strict
+  Compatible GL3.3 path passed, but a physical 3.3-only driver was unavailable.

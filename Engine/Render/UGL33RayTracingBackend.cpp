@@ -428,6 +428,7 @@ bool UGL33RayTracingBackend::UploadScene(const FPackedRayScene& packed,
     const bool uploadBLAS = packed.blasRevision != uploadedBLASRevision_;
     const bool uploadInstances = packed.instanceRevision != uploadedInstanceRevision_;
     const bool uploadMaterials = packed.materialRevision != uploadedMaterialRevision_;
+    const float effectiveAnisotropy = sampling.EffectiveAnisotropy();
     auto fits = [&](std::size_t texels) {
         return texels <= static_cast<std::size_t>(maxTextureBufferTexels_);
     };
@@ -462,6 +463,16 @@ bool UGL33RayTracingBackend::UploadScene(const FPackedRayScene& packed,
         if (diagnostic)
             *diagnostic = "Ray material atlas exceeds GL3.3 texture size/layer limits";
         return false;
+    }
+    if (!uploadMaterials && materialAtlasTexture_ && sampling.anisotropySupported &&
+        materialAtlasAnisotropy_ != effectiveAnisotropy)
+    {
+        glBindTexture(GL_TEXTURE_2D_ARRAY, materialAtlasTexture_);
+        glTexParameterf(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_ANISOTROPY_EXT,
+                        effectiveAnisotropy);
+        if (!CollectError("GL33 ray material anisotropy update", diagnostic))
+            return false;
+        materialAtlasAnisotropy_ = effectiveAnisotropy;
     }
     if (!uploadBLAS && !uploadInstances && !uploadMaterials) return true;
     ++stats.sceneUploadAttempts;
@@ -568,6 +579,7 @@ bool UGL33RayTracingBackend::UploadScene(const FPackedRayScene& packed,
         if (materialAtlasTexture_) { glDeleteTextures(1, &materialAtlasTexture_); ++stats.releasedResources; }
         materialBuffer_ = mb; materialTexture_ = mt;
         materialAtlasTexture_ = atlas;
+        materialAtlasAnisotropy_ = effectiveAnisotropy;
         ++stats_.materialUploads;
 
         uploadedMaterialRevision_ = packed.materialRevision;
@@ -776,6 +788,7 @@ void UGL33RayTracingBackend::ForgetCurrentResources() noexcept
     tlasNodeBuffer_ = tlasNodeTexture_ = 0;
     tlasIndexBuffer_ = tlasIndexTexture_ = 0;
     materialBuffer_ = materialTexture_ = materialAtlasTexture_ = 0;
+    materialAtlasAnisotropy_ = 1.0f;
     width_ = height_ = 0;
     outputMask_ = 0;
     contextGeneration_ = 0;

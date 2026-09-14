@@ -60,6 +60,7 @@ private:
     unsigned tlasIndexBuffer_ = 0, tlasIndexTexture_ = 0;
     unsigned materialBuffer_ = 0, materialTexture_ = 0;
     unsigned materialAtlasTexture_ = 0;
+    float materialAtlasAnisotropy_ = 1.0f;
     int width_ = 0;
     int height_ = 0;
     unsigned outputMask_ = 0;
