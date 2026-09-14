@@ -76,7 +76,7 @@ public:
     // Soft shadows: samples per light (1 = hard) + penumbra radius.
     void SetShadow(int samples, float softness) { shadowSamples_ = samples; shadowSoftness_ = softness; }
     void Cleanup();
-    bool ready() const { return prog_ != 0; }
+    bool ready() const { return prog_ != 0 && vao_ != 0 && vbo_ != 0; }
     FMeshRayTracerResourceState ResourceState() const noexcept;
 
 private:

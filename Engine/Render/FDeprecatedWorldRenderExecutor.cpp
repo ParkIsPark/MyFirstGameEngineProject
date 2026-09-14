@@ -75,6 +75,7 @@ public:
     void Init() override
     {
         if (initialized_) return;
+        ++stats_.initializationAttempts;
         initialized_ = true;
         ++stats_.initializations;
     }
@@ -88,6 +89,7 @@ public:
     }
 
     bool RequiresOpenGLTargetBinding() const override { return true; }
+    bool Ready() const noexcept override { return initialized_; }
     ELegacyRendererOverride OverrideKind() const noexcept override
     {
         return ELegacyRendererOverride::SoftwareRasterizer;
@@ -135,22 +137,27 @@ public:
     {
         if (!ready_)
         {
+            initializationStarted_ = true;
+            ++stats_.initializationAttempts;
             rayTracer_.Init();
             ready_ = rayTracer_.ready();
             if (ready_) ++stats_.initializations;
+            else Shutdown();
         }
     }
 
     void Shutdown() noexcept override
     {
-        if (!ready_) return;
+        if (!initializationStarted_) return;
         rayTracer_.Cleanup();
         sky_.Cleanup();
         ready_ = false;
+        initializationStarted_ = false;
         ++stats_.shutdowns;
     }
 
     bool RequiresOpenGLTargetBinding() const override { return true; }
+    bool Ready() const noexcept override { return ready_ && rayTracer_.ready(); }
     ELegacyRendererOverride OverrideKind() const noexcept override
     {
         return ELegacyRendererOverride::PureGPURayTracer;
@@ -235,6 +242,7 @@ private:
     USkyHDRI sky_;
     FDeprecatedWorldRenderExecutorStats stats_;
     bool ready_ = false;
+    bool initializationStarted_ = false;
 };
 } // namespace
 

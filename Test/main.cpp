@@ -3775,6 +3775,40 @@ static int RunRayEffectsGates(const std::string& outputPath)
     return app.RunGates(outputPath);
 }
 
+// Fault injection stays in the test harness: real shader/program allocation,
+// but one real link-status query reports failure, like a driver/linker failure.
+static PFNGLGETPROGRAMIVPROC developerOriginalGetProgramiv = nullptr;
+static GLuint developerRejectedProgram = 0;
+static GLuint developerRejectedShaders[2] = {};
+#ifdef _WIN32
+static void __stdcall
+#else
+static void
+#endif
+RejectFirstDeveloperLink(GLuint program, GLenum pname, GLint* value)
+{
+    developerOriginalGetProgramiv(program,pname,value);
+    if (pname == GL_LINK_STATUS && developerRejectedProgram == 0)
+    {
+        developerRejectedProgram=program;
+        GLsizei attached=0;
+        glGetAttachedShaders(program,2,&attached,developerRejectedShaders);
+        *value=GL_FALSE;
+    }
+}
+class FScopedRejectedDeveloperLink
+{
+public:
+    FScopedRejectedDeveloperLink()
+    {
+        developerRejectedProgram=0;
+        developerRejectedShaders[0]=developerRejectedShaders[1]=0;
+        developerOriginalGetProgramiv=__glewGetProgramiv;
+        __glewGetProgramiv=RejectFirstDeveloperLink;
+    }
+    ~FScopedRejectedDeveloperLink() { __glewGetProgramiv=developerOriginalGetProgramiv; }
+};
+
 class FDeprecatedRayTracerLifecycleSelfTestApp final : public Engine
 {
 public:
@@ -3998,6 +4032,14 @@ public:
         normalRenderer.Init();
         FDeveloperOverrideController developer(CreateDeveloperWorldRenderRoute,
             [&](const std::string&) { ++developerWarnings; });
+        auto statsEqual = [&](ELegacyRendererOverride kind, std::uint64_t attempts,
+                              std::uint64_t initialized, std::uint64_t executed, std::uint64_t stopped) {
+            const auto stats=developer.Stats(kind);
+            return stats.initializationAttempts==attempts && stats.initializations==initialized &&
+                stats.executions==executed && stats.shutdowns==stopped;
+        };
+        const auto cpuKind=ELegacyRendererOverride::SoftwareRasterizer;
+        const auto gpuKind=ELegacyRendererOverride::PureGPURayTracer;
         FDeveloperRenderFrame frame{&world, &world.GetCamera(), &target,
             &features, &quality, &backend, ContextGeneration()};
         auto renderDeveloper = [&] { return developer.Render(frame, [&] {
@@ -4007,28 +4049,74 @@ public:
         }); };
         check("Developer None exclusively renders normal hardware",
             developer.Apply(ELegacyRendererOverride::None) && renderDeveloper() &&
-            normalCalls == 1 && developerWarnings == 0);
+            normalCalls == 1 && developerWarnings == 0 && statsEqual(cpuKind,0,0,0,0) && statsEqual(gpuKind,0,0,0,0));
         check("Developer CPU factory renders through shared world renderer",
             developer.Apply(ELegacyRendererOverride::SoftwareRasterizer) &&
-            renderDeveloper() && normalCalls == 1 && developerWarnings == 1);
+            renderDeveloper() && normalCalls == 1 && developerWarnings == 1 && statsEqual(cpuKind,1,1,1,0) &&
+            normalRenderer.Stats().hardwareGBufferPasses==1);
         check("Developer same CPU override is a no-op",
             developer.Apply(ELegacyRendererOverride::SoftwareRasterizer) &&
-            renderDeveloper() && normalCalls == 1 && developerWarnings == 1);
+            renderDeveloper() && normalCalls == 1 && developerWarnings == 1 && statsEqual(cpuKind,1,1,2,0) &&
+            normalRenderer.Stats().hardwareGBufferPasses==1);
         check("Developer switches to real pure GPU factory exclusively",
             developer.Apply(ELegacyRendererOverride::PureGPURayTracer) &&
-            renderDeveloper() && normalCalls == 1 && developerWarnings == 2);
+            renderDeveloper() && normalCalls == 1 && developerWarnings == 2 && statsEqual(cpuKind,1,1,2,1) &&
+            statsEqual(gpuKind,1,1,1,0) && normalRenderer.Stats().hardwareGBufferPasses==1);
         check("Developer returning to None resumes hardware once",
             developer.Apply(ELegacyRendererOverride::None) && renderDeveloper() &&
-            normalCalls == 2 && normalRenderer.Stats().hardwareGBufferPasses == 2);
+            normalCalls == 2 && normalRenderer.Stats().hardwareGBufferPasses == 2 && statsEqual(gpuKind,1,1,1,1));
         check("Developer repeated CPU activation renders without repeated warning",
             developer.Apply(ELegacyRendererOverride::SoftwareRasterizer) &&
-            renderDeveloper() && developerWarnings == 2 && normalCalls == 2);
+            renderDeveloper() && developerWarnings == 2 && normalCalls == 2 && statsEqual(cpuKind,2,2,3,1) &&
+            normalRenderer.Stats().hardwareGBufferPasses==2);
         const std::string worldOutput = FWorldSerializer::Save(world);
         check("active Developer override never leaks into serialized world",
             !worldOutput.empty() && worldOutput.find("LegacyOverride") == std::string::npos &&
             worldOutput.find("ShowDeprecatedFeatures") == std::string::npos &&
             worldOutput.find("ShowExperimentalWarnings") == std::string::npos);
-        developer.Shutdown(); normalRenderer.Shutdown();
+        developer.Shutdown(); developer.Shutdown();
+        check("Developer actual route shutdown totals are idempotent",
+            statsEqual(cpuKind,2,2,3,2) && statsEqual(gpuKind,1,1,1,1));
+
+        std::vector<std::string> failureWarnings;
+        FDeveloperOverrideController initFailure(CreateDeveloperWorldRenderRoute,
+            [&](const std::string& message) { failureWarnings.push_back(message); });
+        bool failedActivation=true;
+        {
+            FScopedRejectedDeveloperLink reject;
+            failedActivation=initFailure.Apply(gpuKind);
+        }
+        const auto failedStats=initFailure.Stats(gpuKind);
+        check("real link failure rejects override and deletes partially initialized program",
+            !failedActivation && developerRejectedProgram!=0 && !glIsProgram(developerRejectedProgram) &&
+            developerRejectedShaders[0]!=0 && developerRejectedShaders[1]!=0 &&
+            !glIsShader(developerRejectedShaders[0]) && !glIsShader(developerRejectedShaders[1]) &&
+            initFailure.ActiveOverride()==ELegacyRendererOverride::None && failedStats.initializationAttempts==1 &&
+            failedStats.initializations==0 && failedStats.executions==0 && failedStats.shutdowns==1);
+        check("real failed activation emits diagnostic without consuming deprecated warning",
+            failureWarnings.size()==1 && failureWarnings[0].find("activation failed")!=std::string::npos &&
+            failureWarnings[0].find(" | Deprecated ")==std::string::npos);
+        int recoveredHardware=0;
+        auto recoverNormal=[&] { ++recoveredHardware; return normalRenderer.Render(world,world.GetCamera(),target,
+            features,quality,backend,ContextGeneration()); };
+        check("real init failure restores one normal hardware frame",
+            initFailure.Render(frame,recoverNormal) && recoveredHardware==1);
+        check("real failed GPU route can retry initialization and execute exactly once",
+            initFailure.Apply(gpuKind) && initFailure.Render(frame,recoverNormal) && recoveredHardware==1 &&
+            initFailure.Stats(gpuKind).initializationAttempts==2 && initFailure.Stats(gpuKind).initializations==1 &&
+            initFailure.Stats(gpuKind).executions==1 && initFailure.Stats(gpuKind).shutdowns==1 &&
+            failureWarnings.size()==2 && failureWarnings[1].find(" | Deprecated ")!=std::string::npos);
+        FDeveloperRenderFrame invalidFrame=frame;
+        invalidFrame.contextGeneration=ContextGeneration()+1;
+        check("real failed frame disables GPU route without another execution or hardware pass",
+            !initFailure.Render(invalidFrame,recoverNormal) && recoveredHardware==1 &&
+            initFailure.ActiveOverride()==ELegacyRendererOverride::None &&
+            initFailure.Stats(gpuKind).executions==1 && initFailure.Stats(gpuKind).shutdowns==2);
+        check("real frame after disabled broken route returns to hardware",
+            initFailure.Render(frame,recoverNormal) && recoveredHardware==2);
+        initFailure.Shutdown();
+        check("real failed-init/retry lifecycles each clean up exactly once", initFailure.Stats(gpuKind).shutdowns==2);
+        normalRenderer.Shutdown();
         check("Developer route shutdown leaves no GL error", glGetError() == GL_NO_ERROR);
         std::printf("=== Developer Settings real-GL routing: %d passed, %d failed ===\n", passed, failed);
         failed += legacyFailures;

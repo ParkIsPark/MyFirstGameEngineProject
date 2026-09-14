@@ -6,9 +6,20 @@ class FDeveloperWorldRenderRoute final : public IDeveloperRenderRoute
 {
 public:
     explicit FDeveloperWorldRenderRoute(std::unique_ptr<IDeprecatedWorldRenderExecutor> executor)
-        : kind_(executor->OverrideKind()), renderer_(std::move(executor)) {}
+        : kind_(executor->OverrideKind()), executor_(executor.get()), renderer_(std::move(executor)) {}
     ELegacyRendererOverride OverrideKind() const noexcept override { return kind_; }
-    void Init() override { renderer_.Init(); }
+    bool Init() override
+    {
+        renderer_.Init();
+        if (executor_->Ready()) return true;
+        renderer_.Shutdown();
+        return false;
+    }
+    FDeveloperRouteStats Stats() const noexcept override
+    {
+        const auto& stats=executor_->LifecycleStats();
+        return {stats.initializationAttempts,stats.initializations,stats.executions,stats.shutdowns};
+    }
     void Shutdown() noexcept override { renderer_.Shutdown(); }
     bool Render(const FDeveloperRenderFrame& frame) override
     {
@@ -18,6 +29,8 @@ public:
     }
 private:
     const ELegacyRendererOverride kind_;
+    // Borrowed from renderer_, whose executor ownership outlives this pointer.
+    const IDeprecatedWorldRenderExecutor* executor_;
     UWorldRenderer renderer_;
 };
 }

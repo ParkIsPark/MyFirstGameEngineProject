@@ -372,28 +372,44 @@ void main() {
 static GLuint compile(GLenum type, const char* src)
 {
     GLuint id = glCreateShader(type);
+    if (!id) { std::cerr << "UMeshRayTracer shader allocation failed\n"; return 0; }
     glShaderSource(id, 1, &src, nullptr);
     glCompileShader(id);
-    GLint ok; glGetShaderiv(id, GL_COMPILE_STATUS, &ok);
-    if (!ok) { char buf[4096]; glGetShaderInfoLog(id, sizeof(buf), nullptr, buf);
-               std::cerr << "UMeshRayTracer shader error:\n" << buf << "\n"; }
+    GLint ok = GL_FALSE; glGetShaderiv(id, GL_COMPILE_STATUS, &ok);
+    if (!ok) { char buf[4096] = {}; glGetShaderInfoLog(id, sizeof(buf), nullptr, buf);
+               std::cerr << "UMeshRayTracer shader error:\n" << buf << "\n";
+               glDeleteShader(id); return 0; }
     return id;
 }
 
 void UMeshRayTracer::Init()
 {
     if (ready()) return;
+    Cleanup(); // A retry must not inherit names from a partial initialization.
 
     const std::string frag = std::string(FRAG_HEAD) + RT_SHADING_GLSL + FRAG_BODY;
     GLuint vs = compile(GL_VERTEX_SHADER,   VERT_SRC);
     GLuint fs = compile(GL_FRAGMENT_SHADER, frag.c_str());
+    if (!vs || !fs)
+    {
+        if (vs) glDeleteShader(vs);
+        if (fs) glDeleteShader(fs);
+        return;
+    }
     prog_ = glCreateProgram();
+    if (!prog_)
+    {
+        glDeleteShader(vs); glDeleteShader(fs);
+        std::cerr << "UMeshRayTracer program allocation failed\n";
+        return;
+    }
     glAttachShader(prog_, vs); glAttachShader(prog_, fs);
     glLinkProgram(prog_);
-    GLint ok; glGetProgramiv(prog_, GL_LINK_STATUS, &ok);
-    if (!ok) { char buf[4096]; glGetProgramInfoLog(prog_, sizeof(buf), nullptr, buf);
+    GLint ok = GL_FALSE; glGetProgramiv(prog_, GL_LINK_STATUS, &ok);
+    if (!ok) { char buf[4096] = {}; glGetProgramInfoLog(prog_, sizeof(buf), nullptr, buf);
                std::cerr << "UMeshRayTracer link error:\n" << buf << "\n"; }
     glDeleteShader(vs); glDeleteShader(fs);
+    if (!ok) { Cleanup(); return; }
 
     const float quad[] = { -1,-1,  1,-1,  -1,1,   -1,1,  1,-1,  1,1 };
     glGenVertexArrays(1, &vao_);
@@ -404,6 +420,7 @@ void UMeshRayTracer::Init()
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
     glBindVertexArray(0);
+    if (!ready() || glGetError() != GL_NO_ERROR) Cleanup();
 }
 
 void UMeshRayTracer::UploadMesh(const UMesh& mesh, const glm::mat4& model)

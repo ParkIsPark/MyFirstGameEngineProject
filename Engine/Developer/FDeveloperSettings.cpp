@@ -45,6 +45,13 @@ const char* LifecycleLabel(EFeatureLifecycle lifecycle)
     }
     return "Unknown";
 }
+void AddStats(FDeveloperRouteStats& total, const FDeveloperRouteStats& value)
+{
+    total.initializationAttempts += value.initializationAttempts;
+    total.initializations += value.initializations;
+    total.executions += value.executions;
+    total.shutdowns += value.shutdowns;
+}
 }
 
 void EmitDeveloperWarning(const FDeveloperWarningSink& sink, const std::string& message) noexcept
@@ -188,8 +195,21 @@ FDeveloperOverrideController::FDeveloperOverrideController(Factory factory,FDeve
 FDeveloperOverrideController::~FDeveloperOverrideController() { Shutdown(); }
 void FDeveloperOverrideController::Shutdown() noexcept
 {
-    if (route_) { route_->Shutdown(); route_.reset(); }
+    if (route_) {
+        route_->Shutdown();
+        const auto kind=route_->OverrideKind();
+        if (kind==ELegacyRendererOverride::SoftwareRasterizer || kind==ELegacyRendererOverride::PureGPURayTracer)
+            AddStats(closedStats_[kind==ELegacyRendererOverride::SoftwareRasterizer?0:1],route_->Stats());
+        route_.reset();
+    }
     active_=ELegacyRendererOverride::None;
+}
+FDeveloperRouteStats FDeveloperOverrideController::Stats(ELegacyRendererOverride kind) const noexcept
+{
+    if (kind!=ELegacyRendererOverride::SoftwareRasterizer && kind!=ELegacyRendererOverride::PureGPURayTracer) return {};
+    auto result=closedStats_[kind==ELegacyRendererOverride::SoftwareRasterizer?0:1];
+    if (route_ && route_->OverrideKind()==kind) AddStats(result,route_->Stats());
+    return result;
 }
 bool FDeveloperOverrideController::Apply(ELegacyRendererOverride kind) noexcept
 {
@@ -202,7 +222,7 @@ bool FDeveloperOverrideController::Apply(ELegacyRendererOverride kind) noexcept
         route_=factory_(kind);
         if (!route_) throw std::runtime_error("legacy renderer factory returned no route");
         if (route_->OverrideKind()!=kind) throw std::runtime_error("legacy renderer factory returned the wrong implementation");
-        route_->Init();
+        if (!route_->Init()) throw std::runtime_error("renderer initialization is not ready; check shader/link diagnostics and retry after correcting the GPU/driver problem");
         active_=kind;
         const std::size_t index=kind==ELegacyRendererOverride::SoftwareRasterizer?0:1;
         if (!warned_[index]) {
@@ -218,5 +238,17 @@ bool FDeveloperOverrideController::Apply(ELegacyRendererOverride kind) noexcept
 }
 bool FDeveloperOverrideController::Render(const FDeveloperRenderFrame& frame,const std::function<bool()>& normal)
 {
-    return route_ ? route_->Render(frame) : normal();
+    if (!route_) return normal();
+    try {
+        if (route_->Render(frame)) return true;
+        EmitDeveloperWarning(warning_,"Developer Settings: legacy render failed; disabling the override. Hardware Rasterizer resumes next frame; check GPU/target diagnostics before retrying.");
+    } catch (const std::exception& e) {
+        EmitDeveloperWarning(warning_,std::string("Developer Settings: legacy render failed: ")+e.what()+"; disabling the override. Hardware Rasterizer resumes next frame.");
+    } catch (...) {
+        EmitDeveloperWarning(warning_,"Developer Settings: legacy render failed; disabling the override. Hardware Rasterizer resumes next frame.");
+    }
+    // The failed route may already have drawn. Never render a second route in
+    // this frame; release it now and let the next frame use normal hardware.
+    Shutdown();
+    return false;
 }

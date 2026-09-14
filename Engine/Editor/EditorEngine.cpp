@@ -1903,6 +1903,11 @@ void EditorEngine::DrawViewport()
     const bool shown = developerOverride_.Render(developerFrame, [&] { return worldRenderer_.Render(
         world, cam, viewportTarget_, world.GetScene().renderFeatures,
         frameQuality, backend, ContextGeneration()); });
+    if (developerSettings_.legacyOverride != developerOverride_.ActiveOverride())
+    {
+        developerSettings_.legacyOverride = developerOverride_.ActiveOverride();
+        developerSettings_.Save();
+    }
     if (shown)
         ImGui::Image((ImTextureID)(intptr_t)viewportTarget_.ColorTexture(),
                      avail, ImVec2(0, 1), ImVec2(1, 0));

@@ -8,6 +8,7 @@
 
 struct FDeprecatedWorldRenderExecutorStats
 {
+    std::uint64_t initializationAttempts = 0;
     std::uint64_t initializations = 0;
     std::uint64_t executions = 0;
     std::uint64_t shutdowns = 0;
@@ -16,6 +17,7 @@ struct FDeprecatedWorldRenderExecutorStats
 class IDeprecatedWorldRenderExecutor : public IWorldRenderExecutor
 {
 public:
+    virtual bool Ready() const noexcept = 0;
     virtual ELegacyRendererOverride OverrideKind() const noexcept = 0;
     virtual const FDeprecatedWorldRenderExecutorStats& LifecycleStats()
         const noexcept = 0;

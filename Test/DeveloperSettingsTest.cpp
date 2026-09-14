@@ -26,12 +26,14 @@ struct Counts { int made=0, init=0, execute=0, stop=0, destroyed=0; };
 struct Route : IDeveloperRenderRoute {
     Counts& c;
     ELegacyRendererOverride kind;
+    bool initSucceeds=true, renderSucceeds=true, initThrows=false, renderThrows=false;
     explicit Route(Counts& value, ELegacyRendererOverride selected) : c(value),kind(selected) { ++c.made; }
     ELegacyRendererOverride OverrideKind() const noexcept override { return kind; }
     ~Route() override { ++c.destroyed; }
-    void Init() override { ++c.init; }
+    bool Init() override { ++c.init; if(initThrows) throw std::runtime_error("partial init failure"); return initSucceeds; }
     void Shutdown() noexcept override { ++c.stop; }
-    bool Render(const FDeveloperRenderFrame&) override { ++c.execute; return true; }
+    bool Render(const FDeveloperRenderFrame&) override { ++c.execute; if(renderThrows) throw std::runtime_error("draw failed"); return renderSucceeds; }
+    FDeveloperRouteStats Stats() const noexcept override { return {}; }
 };
 int main() {
     const auto dir = std::filesystem::path("Test/DeveloperSettingsTest.tmp");
@@ -122,6 +124,36 @@ int main() {
         Counts mismatched;
         FDeveloperOverrideController wrongFactory([&](ELegacyRendererOverride) -> std::unique_ptr<IDeveloperRenderRoute> { return std::make_unique<Route>(mismatched,kinds[2]); },sink);
         Check(!wrongFactory.Apply(kinds[1]) && mismatched.init==0 && mismatched.execute==0 && mismatched.destroyed==1, "wrong concrete factory identity must be rejected before initialization");
+        Counts failing; bool failInit=true; bool throwInit=false; bool failRender=false; bool throwRender=false;
+        warnings.clear();
+        FDeveloperOverrideController failures([&](ELegacyRendererOverride kind) -> std::unique_ptr<IDeveloperRenderRoute> {
+            auto route=std::make_unique<Route>(failing,kind);
+            route->initSucceeds=!failInit; route->initThrows=throwInit;
+            route->renderSucceeds=!failRender; route->renderThrows=throwRender;
+            return route;
+        },sink);
+        Check(!failures.Apply(kinds[2]) && failures.ActiveOverride()==kinds[0] && failing.init==1 && failing.stop==1 && failing.destroyed==1, "not-ready Init must clean partial route and remain None");
+        Check(warnings.size()==1 && warnings[0].find("activation failed")!=std::string::npos && warnings[0].find("Hardware Rasterizer")!=std::string::npos, "failed activation emits actionable diagnostic, not deprecated activation warning");
+        Check(failures.Render(frame,[]{return true;}) && failing.execute==0, "failed initialization resumes normal without legacy execution");
+        failInit=false;
+        Check(failures.Apply(kinds[2]) && failures.Render(frame,[]{return false;}) && failing.init==2 && failing.execute==1 && warnings.size()==2, "retry initializes successfully and emits first deprecated warning");
+        failures.Shutdown(); throwInit=true;
+        Check(!failures.Apply(kinds[2]) && failing.stop==3 && failing.destroyed==3 && failures.ActiveOverride()==kinds[0], "throwing partial Init is cleaned");
+        throwInit=false; failRender=true;
+        Check(failures.Apply(kinds[2]), "retry after throwing Init");
+        int failedFrameNormal=0;
+        Check(!failures.Render(frame,[&]{++failedFrameNormal;return true;}) && failedFrameNormal==0 && failures.ActiveOverride()==kinds[0] && failing.stop==4 && failing.destroyed==4, "failed Render disables route without double rendering failed frame");
+        Check(failures.Render(frame,[&]{++failedFrameNormal;return true;}) && failedFrameNormal==1, "next frame after failed Render uses hardware");
+        failRender=false; throwRender=true;
+        Check(failures.Apply(kinds[2]) && !failures.Render(frame,[]{return true;}) && failing.stop==5 && failing.destroyed==5 && failures.ActiveOverride()==kinds[0], "throwing Render also cleans and disables broken override");
+        int successfulActivationWarnings=0;
+        for(const auto& warning:warnings) if(warning.find(" | Deprecated ")!=std::string::npos) ++successfulActivationWarnings;
+        Check(successfulActivationWarnings==1, "failure/retry cycles never repeat a successful activation warning");
+        FDeveloperOverrideController nullFactory([](ELegacyRendererOverride)->std::unique_ptr<IDeveloperRenderRoute>{return nullptr;},sink);
+        Check(!nullFactory.Apply(kinds[1]) && nullFactory.ActiveOverride()==kinds[0], "null factory leaves None");
+        Counts destructorCounts;
+        { FDeveloperOverrideController scoped([&](ELegacyRendererOverride kind)->std::unique_ptr<IDeveloperRenderRoute>{return std::make_unique<Route>(destructorCounts,kind);},sink); scoped.Apply(kinds[1]); }
+        Check(destructorCounts.stop==1 && destructorCounts.destroyed==1, "controller destructor closes active route once");
         for (const char* source : {"Engine/Framework/GameEngine.cpp", "Engine/Framework/GameEngine.h", "Engine/Serialization/FWorldSerializer.cpp", "Engine/Framework/FProjectDescriptor.cpp"}) {
             Check(std::filesystem::exists(source), "isolation source must exist");
             Check(Read(source).find("DeveloperSettings")==std::string::npos && Read(source).find("LegacyOverride")==std::string::npos, "game and serializers exclude local override");
