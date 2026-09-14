@@ -680,6 +680,8 @@ bool UGL33RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
         std::clamp(inputs.quality.giSamples, 0, 32));
     glUniform1i(glGetUniformLocation(program_, "uGIBounces"),
         std::clamp(inputs.quality.giBounces, 0, 4));
+    glUniform1i(glGetUniformLocation(program_, "uFrameIndex"),
+        static_cast<GLint>(inputs.frameIndex & 0x7fffffffu));
     glUniform1f(glGetUniformLocation(program_, "uGIStrength"), inputs.quality.giStrength);
     glUniform1f(glGetUniformLocation(program_, "uReflectionStrength"), inputs.quality.reflStrength);
     glUniform1i(glGetUniformLocation(program_, "uShadowSamples"),

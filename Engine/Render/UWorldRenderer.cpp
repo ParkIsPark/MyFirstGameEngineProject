@@ -2,11 +2,13 @@
 
 #include "ACamera.h"
 #include "IRayTracingBackend.h"
+#include "FRenderHistory.h"
 #include "FRenderMath.h"
 #include "UHardwareGBuffer.h"
 #include "UHardwareRasterizer.h"
 #include "UHybridPresentationPass.h"
 #include "URasterLightingPass.h"
+#include "URayEffectsReconstruction.h"
 #include "UGL33RayTracingBackend.h"
 #include "UGPUMeshCache.h"
 #include "UWorld.h"
@@ -30,9 +32,12 @@ public:
                                  URasterLightingPass& lighting,
                                  UHybridPresentationPass& presentation,
                                  FRayEffectsScheduler& rayEffects,
+                                 URayEffectsReconstruction& reconstruction,
+                                 FTemporalSequence& temporalSequence,
                                  FWorldRendererStats& stats)
         : meshCache_(meshCache), gbuffer_(gbuffer), rasterizer_(rasterizer),
           lighting_(lighting), presentation_(presentation), rayEffects_(rayEffects),
+          reconstruction_(reconstruction), temporalSequence_(temporalSequence),
           stats_(stats)
     {
     }
@@ -84,6 +89,16 @@ public:
             std::find(request.passPlan.begin(), request.passPlan.end(),
                       ERenderPass::RayTracedEffects) != request.passPlan.end())
         {
+            const ERayTracingBackend signatureBackend =
+                rayEffects_.ActiveKind() == ERayTracingBackend::Auto
+                    ? request.backendSelection.selected : rayEffects_.ActiveKind();
+            const std::uint64_t signature = BuildRenderHistorySignature(
+                request.scene, request.features, request.quality,
+                request.internalWidth, request.internalHeight, signatureBackend,
+                generation, lighting_.EnvironmentRevision());
+            const FTemporalFrame temporal = temporalSequence_.Begin(signature,
+                static_cast<std::uint32_t>(request.quality.temporalFrames));
+            stats_.temporalFrameIndex = temporal.frameIndex;
             FRayEffectInputs rayInputs;
             rayInputs.gbuffer = &gbuffer_;
             rayInputs.scene = &request.scene;
@@ -93,10 +108,41 @@ public:
             rayInputs.environmentTexture = lighting_.EnvironmentTexture();
             rayInputs.width = request.internalWidth;
             rayInputs.height = request.internalHeight;
+            rayInputs.historySignature = signature;
+            rayInputs.frameIndex = temporal.frameIndex;
             rayInputs.contextGeneration = generation;
             rayEffects_.Execute(rayInputs, request.backendSelection, rayOutputs);
             stats_.activeRayBackend = rayEffects_.ActiveKind();
             stats_.backendReason = rayEffects_.BackendReason();
+            if (rayEffects_.ActiveKind() == ERayTracingBackend::Auto ||
+                (!rayOutputs.shadowedDirectTarget && !rayOutputs.globalIlluminationTarget &&
+                 !rayOutputs.opticalContributionTarget))
+            {
+                temporalSequence_.Reset();
+                reconstruction_.Reset();
+                stats_.temporalFrameIndex = 0;
+            }
+            else
+            {
+                FRayEffectOutputs reconstructed;
+                if (reconstruction_.Reconstruct(gbuffer_, rayOutputs, temporal,
+                    request.quality, generation, reconstructed, &diagnostic))
+                    rayOutputs = reconstructed;
+                else
+                {
+                    reconstruction_.Reset();
+                    temporalSequence_.Reset();
+                    stats_.temporalFrameIndex = 0;
+                    if (!diagnostic.empty())
+                        std::cerr << "[Renderer] " << diagnostic << '\n';
+                }
+            }
+        }
+        else
+        {
+            temporalSequence_.Reset();
+            reconstruction_.Reset();
+            stats_.temporalFrameIndex = 0;
         }
         if (!presentation_.Resize(request.internalWidth, request.internalHeight,
                                   generation, &diagnostic))
@@ -134,6 +180,8 @@ private:
     URasterLightingPass& lighting_;
     UHybridPresentationPass& presentation_;
     FRayEffectsScheduler& rayEffects_;
+    URayEffectsReconstruction& reconstruction_;
+    FTemporalSequence& temporalSequence_;
     FWorldRendererStats& stats_;
 };
 
@@ -157,11 +205,14 @@ UWorldRenderer::UWorldRenderer()
       rayBackendFactory_(std::make_unique<FOpenGLRayTracingBackendFactory>()),
       rayWarningSink_(std::make_unique<FStderrRayEffectsWarningSink>()),
       rayEffectsScheduler_(std::make_unique<FRayEffectsScheduler>(
-          *rayBackendFactory_, *rayWarningSink_))
+          *rayBackendFactory_, *rayWarningSink_)),
+      rayEffectsReconstruction_(std::make_unique<URayEffectsReconstruction>()),
+      temporalSequence_(std::make_unique<FTemporalSequence>())
 {
     executor_ = std::make_unique<FHardwareWorldRenderExecutor>(
         *hardwareMeshCache_, *hardwareGBuffer_, *hardwareRasterizer_,
-        *rasterLightingPass_, *hybridPresentationPass_, *rayEffectsScheduler_, stats_);
+        *rasterLightingPass_, *hybridPresentationPass_, *rayEffectsScheduler_,
+        *rayEffectsReconstruction_, *temporalSequence_, stats_);
 }
 
 UWorldRenderer::UWorldRenderer(std::unique_ptr<IWorldRenderExecutor> executor)
@@ -185,6 +236,8 @@ void UWorldRenderer::Shutdown() noexcept
 {
     if (!executor_) return;
     if (rayEffectsScheduler_) rayEffectsScheduler_->Shutdown();
+    if (rayEffectsReconstruction_) rayEffectsReconstruction_->Shutdown();
+    if (temporalSequence_) temporalSequence_->Reset();
     if (hardwareMeshCache_) hardwareMeshCache_->Clear();
     if (hardwareGBuffer_) hardwareGBuffer_->Release();
     if (rasterLightingPass_) rasterLightingPass_->Shutdown();
@@ -236,6 +289,12 @@ const FWorldRendererStats& UWorldRenderer::Stats() const
         const auto* backend = rayEffectsScheduler_->ActiveBackend();
         stats_.liveRayOutputTextures = backend ? backend->Stats().ownedOutputTextures : 0u;
         stats_.liveRayBLAS = backend ? backend->Stats().residentBLAS : 0u;
+        const auto& reconstruction = rayEffectsReconstruction_->Stats();
+        stats_.reconstructionResourceAllocations = reconstruction.resourceAllocations;
+        stats_.reconstructionReleasedResources = reconstruction.releasedResources;
+        stats_.reconstructionPasses = reconstruction.reconstructionPasses;
+        stats_.liveReconstructionTextures = reconstruction.ownedTextures;
+        stats_.liveReconstructionFramebuffers = reconstruction.ownedFramebuffers;
     }
     return stats_;
 }

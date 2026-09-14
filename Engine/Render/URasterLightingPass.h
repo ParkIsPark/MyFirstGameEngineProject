@@ -54,6 +54,7 @@ public:
     int Height() const { return height_; }
     std::uint64_t ContextGeneration() const { return contextGeneration_; }
     std::uint64_t ResourceRevision() const { return resourceRevision_; }
+    std::uint64_t EnvironmentRevision() const { return environmentRevision_; }
     std::size_t OwnedTextureCount() const {
         return (environmentAmbientTexture_ ? 1u : 0u) +
                (unshadowedDirectTexture_ ? 1u : 0u);
@@ -82,6 +83,7 @@ private:
     std::uint64_t resourceRevision_ = 0;
     std::string environmentPath_;
     std::uint64_t environmentStamp_ = 0;
+    std::uint64_t environmentRevision_ = 0;
     int pointLightLimit_ = 0;
     FRasterLightingPassStats stats_;
     std::unordered_set<std::uint64_t> overflowWarnings_;

@@ -25,6 +25,8 @@ struct FRayEffectInputs
     unsigned environmentTexture = 0;
     int width = 0;
     int height = 0;
+    std::uint64_t historySignature = 0;
+    std::uint32_t frameIndex = 0;
     std::uint64_t contextGeneration = 0;
 };
 struct FRayTracingBackendStats

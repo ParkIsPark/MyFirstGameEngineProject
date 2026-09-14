@@ -104,6 +104,8 @@
     <ClCompile Include="Engine\Render\FRenderMath.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\FRenderQualitySettings.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\FRenderScene.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="Engine\Render\FRenderHistory.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="Engine\Render\URayEffectsReconstruction.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\UHardwareGBuffer.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\URasterLightingPass.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\UHybridPresentationPass.cpp"><Filter>Engine\Render</Filter></ClCompile>
@@ -228,6 +230,8 @@
     <ClInclude Include="Engine\Render\FRenderQualitySettings.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderOutputs.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderScene.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="Engine\Render\FRenderHistory.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="Engine\Render\URayEffectsReconstruction.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\UHardwareGBuffer.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\URasterLightingPass.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\UHybridPresentationPass.h"><Filter>Engine\Render</Filter></ClInclude>
@@ -242,6 +246,7 @@
     <ClInclude Include="Engine\Render\Shaders\RasterLightingShaders.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\Shaders\HybridPresentationShaders.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\Shaders\RayEffectsFragmentShaders.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="Engine\Render\Shaders\RayEffectsReconstructionShaders.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\Shaders\RayEffectsComputeShaders.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderTarget.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FPixelUnpackGuard.h"><Filter>Engine\Render</Filter></ClInclude>

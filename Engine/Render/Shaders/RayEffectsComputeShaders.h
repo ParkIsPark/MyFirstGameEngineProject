@@ -18,7 +18,7 @@ layout(std430,binding=7)readonly buffer Materials{vec4 materials[];};
 uniform sampler2D uPositionCoverage,uGeometricNormal,uShadingNormalModel,uAlbedoShininess,uSpecularMirror,uUnshadowedDirect,uSky;
 uniform usampler2D uIdentity;uniform sampler2DArray uMaterialAtlas;
 uniform bool uDoShadows,uDoGI,uDoReflections,uDoTranslucency,uHasSky;uniform ivec2 uOutputSize;
-uniform int uInstanceCount,uGISamples,uGIBounces,uShadowSamples,uPrimaryOpticsBase,uPrimaryMaterialCount;
+uniform int uInstanceCount,uGISamples,uGIBounces,uShadowSamples,uPrimaryOpticsBase,uPrimaryMaterialCount,uFrameIndex;
 uniform float uGIStrength,uReflectionStrength,uShadowSoftness,uSkyExponent;
 uniform vec3 uEye,uEnvironmentTint,uSkyHorizon,uSkyZenith;
 const int MAX_LIGHTS=16;uniform int uLightCount;uniform vec3 uLightPositions[MAX_LIGHTS],uLightSources[MAX_LIGHTS];
@@ -32,7 +32,7 @@ bool blas(int ins,vec3 wo,vec3 wd,float mn,uint oo,uint om,inout float cl,out in
 bool trace(vec3 ro,vec3 rd,float mn,float mx,uint oo,uint om,out float ht,out int hi,out int htr,out vec2 hb){ht=mx;hi=-1;htr=-1;if(uInstanceCount<=0)return false;int st[32],sp=0;st[sp++]=0;while(sp>0){int n=st[--sp];vec4 a=tlasNodes[n*2],b=tlasNodes[n*2+1];if(!slab(ro,rd,a.xyz,b.xyz,ht))continue;int cnt=int(b.w);if(cnt>0){int start=int(a.w);for(int k=0;k<cnt;++k){int ins=int(tlasIndices[start+k]+.5);if(!slab(ro,rd,imin(ins),imax(ins),ht))continue;float c=ht;int tr;vec2 ba;if(blas(ins,ro,rd,mn,oo,om,c,tr,ba)&&c<ht){ht=c;hi=ins;htr=tr;hb=ba;}}}else if(sp<=30){st[sp++]=int(a.w);st[sp++]=-cnt;}}return hi>=0;}
 vec3 alb(int i,int t,vec2 b){int m=mi(i,t);vec3 base=materials[m*8].rgb;vec4 el=materials[m*8+3],meta=materials[m*8+4];if(el.w<0.)return base;float w=1.-b.x-b.y;vec2 uv=vec2(tt(t,0).w,tt(t,3).w)*w+vec2(tt(t,1).w,tt(t,4).w)*b.x+vec2(tt(t,2).w,tt(t,5).w)*b.y;uv*=meta.xy;uv=meta.z>.5?fract(uv):clamp(uv,vec2(0),vec2(1));vec2 logical=materials[m*8+5].xy,atlas=vec2(textureSize(uMaterialAtlas,0).xy);vec2 atlasUV=(uv*logical+vec2(1.))/atlas;vec3 decoded=pow(max(texture(uMaterialAtlas,vec3(atlasUV,el.w)).rgb,vec3(0)),vec3(2.2));return base*decoded;}
 void surface(int i,int t,vec2 b,out vec3 n,out vec3 a,out vec3 am,out vec3 sp,out float sh,out vec3 em,out uint id){float w=1.-b.x-b.y;vec3 ln=normalize(tt(t,3).xyz*w+tt(t,4).xyz*b.x+tt(t,5).xyz*b.y);n=xn(ir0(i),ir1(i),ir2(i),ln);int m=mi(i,t);a=alb(i,t,b);am=materials[m*8+1].rgb;sh=materials[m*8+1].a;sp=materials[m*8+2].rgb;em=materials[m*8+3].rgb;id=mid(i,t);}
-float h(vec2 x){return fract(sin(dot(x,vec2(127.1,311.7)))*43758.5453);}void basis(vec3 n,out vec3 t,out vec3 b){vec3 u=abs(n.y)<.99?vec3(0,1,0):vec3(1,0,0);t=normalize(cross(u,n));b=cross(n,t);}vec3 hemi(vec3 n,float a,float b){float r=sqrt(a),p=6.2831853*b;vec3 t,bt;basis(n,t,bt);return normalize(t*r*cos(p)+bt*r*sin(p)+n*sqrt(max(0.,1.-a)));}
+float h(vec2 x){x+=vec2(float(uFrameIndex)*17.17,float(uFrameIndex)*43.31);return fract(sin(dot(x,vec2(127.1,311.7)))*43758.5453);}void basis(vec3 n,out vec3 t,out vec3 b){vec3 u=abs(n.y)<.99?vec3(0,1,0):vec3(1,0,0);t=normalize(cross(u,n));b=cross(n,t);}vec3 hemi(vec3 n,float a,float b){float r=sqrt(a),p=6.2831853*b;vec3 t,bt;basis(n,t,bt);return normalize(t*r*cos(p)+bt*r*sin(p)+n*sqrt(max(0.,1.-a)));}
 )GLSL";
 inline constexpr const char* EffectsAfterPointLight = R"GLSL(
 vec3 direct(vec3 p,vec3 n,vec3 v,vec3 a,vec3 sp,float sh){vec3 z=vec3(0);for(int i=0;i<MAX_LIGHTS;++i){if(i>=uLightCount)break;vec3 df,ss;evaluatePointLight(p,n,v,a,sp,sh,uLightPositions[i],uLightSources[i],df,ss);z+=df+ss;}return z;}

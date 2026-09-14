@@ -4820,6 +4820,79 @@ public:
                     ERayTracingBackend::CompatibleGL33 &&
                 worldRenderer.Stats().rayResourceAllocations > 0u &&
                 worldRenderer.Stats().cpuReadbacks == 0u;
+            auto readTarget = [](const FRenderTarget& target) {
+                GLint priorRead = 0, priorBuffer = GL_BACK;
+                glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &priorRead);
+                glGetIntegerv(GL_READ_BUFFER, &priorBuffer);
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, target.Identity());
+                glReadBuffer(GL_COLOR_ATTACHMENT0);
+                std::vector<unsigned char> pixels(64u * 64u * 3u);
+                glReadPixels(0, 0, 64, 64, GL_RGB, GL_UNSIGNED_BYTE,
+                             pixels.data());
+                glBindFramebuffer(GL_READ_FRAMEBUFFER,
+                                  static_cast<GLuint>(priorRead));
+                glReadBuffer(static_cast<GLenum>(priorBuffer));
+                return pixels;
+            };
+            std::vector<std::vector<unsigned char>> temporalImages;
+            if (routedRayEffects)
+            {
+                temporalImages.push_back(readTarget(routedTarget));
+                for (int temporalFrame = 1; temporalFrame != 32; ++temporalFrame)
+                {
+                    routedRayEffects = routedRayEffects && worldRenderer.Render(
+                        *routedWorld, routedCamera, routedTarget, routedFeatures,
+                        routedQuality, routedSelection, ContextGeneration());
+                    temporalImages.push_back(readTarget(routedTarget));
+                }
+            }
+            double strongestEarlyVariance = 0.0;
+            double matchingLateVariance = 0.0;
+            if (temporalImages.size() == 32)
+            {
+                for (std::size_t channel = 0; channel < temporalImages[0].size();
+                     ++channel)
+                {
+                    auto variance = [&](int begin) {
+                        double mean = 0.0, square = 0.0;
+                        for (int f = begin; f != begin + 8; ++f)
+                        {
+                            const double value = temporalImages[f][channel];
+                            mean += value; square += value * value;
+                        }
+                        mean /= 8.0;
+                        return square / 8.0 - mean * mean;
+                    };
+                    const double early = variance(0);
+                    if (early > strongestEarlyVariance)
+                    {
+                        strongestEarlyVariance = early;
+                        matchingLateVariance = variance(24);
+                    }
+                }
+            }
+            check("static stochastic pixel variance falls over 32 temporal frames",
+                strongestEarlyVariance > 0.0 &&
+                matchingLateVariance < strongestEarlyVariance);
+
+            routedCamera.eye.x += 0.35f;
+            const bool movedOK = worldRenderer.Render(*routedWorld, routedCamera,
+                routedTarget, routedFeatures, routedQuality, routedSelection,
+                ContextGeneration());
+            const auto resetPixels = readTarget(routedTarget);
+            UWorldRenderer freshRenderer;
+            freshRenderer.Init();
+            FRenderTarget freshTarget = FRenderTarget::TextureViewport(
+                64, 64, ContextGeneration());
+            const bool freshOK = freshRenderer.Render(*routedWorld, routedCamera,
+                freshTarget, routedFeatures, routedQuality, routedSelection,
+                ContextGeneration());
+            const auto freshPixels = readTarget(freshTarget);
+            check("camera change resets frame index and leaves no old-color ghost",
+                movedOK && freshOK && worldRenderer.Stats().temporalFrameIndex == 0 &&
+                resetPixels == freshPixels);
+            freshRenderer.Shutdown();
+            freshTarget.Release();
             worldRenderer.Shutdown();
         }
         check("UWorldRenderer factory scheduler executes the real GL33 ray path",
@@ -5355,6 +5428,24 @@ public:
                     "only compute backend dispatches and issues visibility barrier");
                 check(first.rayDraws - before.rayDraws == (expected == ERayTracingBackend::CompatibleGL33 ? 1u : 0u),
                     "fragment backend draws; compute backend does not report a draw");
+                if (count == 1 && requested == ERayTracingBackend::CompatibleGL33)
+                {
+                    const auto warm = renderer.Stats();
+                    bool unchangedFrames = true;
+                    for (int stableFrame = 0; stableFrame != 100; ++stableFrame)
+                        unchangedFrames = unchangedFrames && renderer.Render(
+                            world, world.GetCamera(), target, features, quality,
+                            selection, ContextGeneration());
+                    const auto converged = renderer.Stats();
+                    check(unchangedFrames &&
+                        converged.reconstructionResourceAllocations ==
+                            warm.reconstructionResourceAllocations &&
+                        converged.liveReconstructionTextures == 8 &&
+                        converged.liveReconstructionFramebuffers == 1,
+                        "100 unchanged frames allocate zero reconstruction textures/framebuffers");
+                    check(converged.temporalFrameIndex >= 100,
+                        "unchanged stochastic frames advance the exposed temporal sequence");
+                }
                 for (int cycle = 0; cycle != 3; ++cycle)
                 {
                     world.BeginPlay();
@@ -5370,6 +5461,8 @@ public:
                             stable.liveHybridHDRTextures == 1 && stable.liveHybridFramebuffers == 1 &&
                             stable.liveEnvironmentTextures == 1 &&
                             stable.liveRayOutputTextures == 3 && stable.liveRayBLAS == 1 &&
+                            stable.liveReconstructionTextures == 8 &&
+                            stable.liveReconstructionFramebuffers == 1 &&
                             target.OwnedAttachmentCount() == 3,
                             "Play/resize live mesh/G-buffer/material/ray/target ownership remains bounded");
                         check(stable.rayBLASUploads == first.rayBLASUploads,
@@ -5410,12 +5503,17 @@ public:
             const auto closed = renderer.Stats();
             check(closed.rayResourceAllocations == closed.rayReleasedResources,
                 "renderer aggregates every ray allocation and rollback/shutdown release");
+            check(closed.reconstructionResourceAllocations ==
+                    closed.reconstructionReleasedResources,
+                "renderer releases every reconstruction allocation");
             check(closed.residentGeometryResources == 0 && closed.liveGBufferTextures == 0 &&
                 closed.liveGBufferFramebuffers == 0 && closed.liveRasterOutputTextures == 0 &&
                 closed.liveRasterFramebuffers == 0 && closed.liveMaterialTextures == 0 &&
                 closed.liveHybridHDRTextures == 0 && closed.liveHybridFramebuffers == 0 &&
                 closed.liveEnvironmentTextures == 0 && closed.liveRayOutputTextures == 0 &&
-                closed.liveRayBLAS == 0 && target.OwnedAttachmentCount() == 0,
+                closed.liveRayBLAS == 0 && closed.liveReconstructionTextures == 0 &&
+                closed.liveReconstructionFramebuffers == 0 &&
+                target.OwnedAttachmentCount() == 0,
                 "shutdown releases all owned resource classes");
             renderer.Init();
             target = FRenderTarget::TextureViewport(64, 64, ContextGeneration());

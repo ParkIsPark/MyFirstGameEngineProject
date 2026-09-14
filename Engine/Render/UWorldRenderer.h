@@ -21,6 +21,8 @@ class UHardwareGBuffer;
 class UHardwareRasterizer;
 class URasterLightingPass;
 class UHybridPresentationPass;
+class URayEffectsReconstruction;
+class FTemporalSequence;
 class UWorld;
 
 struct FWorldRenderRequest
@@ -84,6 +86,12 @@ struct FWorldRendererStats
     std::size_t liveHybridFramebuffers = 0;
     std::size_t liveRayOutputTextures = 0;
     std::size_t liveRayBLAS = 0;
+    std::uint64_t reconstructionResourceAllocations = 0;
+    std::uint64_t reconstructionReleasedResources = 0;
+    std::uint64_t reconstructionPasses = 0;
+    std::size_t liveReconstructionTextures = 0;
+    std::size_t liveReconstructionFramebuffers = 0;
+    std::uint32_t temporalFrameIndex = 0;
     std::uint64_t cpuFramebufferGenerations = 0;
     std::uint64_t cpuReadbacks = 0;
     std::uint64_t cpuFramebufferUploads = 0;
@@ -152,6 +160,8 @@ private:
     std::unique_ptr<FOpenGLRayTracingBackendFactory> rayBackendFactory_;
     std::unique_ptr<FStderrRayEffectsWarningSink> rayWarningSink_;
     std::unique_ptr<FRayEffectsScheduler> rayEffectsScheduler_;
+    std::unique_ptr<URayEffectsReconstruction> rayEffectsReconstruction_;
+    std::unique_ptr<FTemporalSequence> temporalSequence_;
     bool initialized_ = false;
     mutable FWorldRendererStats stats_;
 };

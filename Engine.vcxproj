@@ -83,6 +83,8 @@
     <ClCompile Include="Engine\Render\FRenderMath.cpp" />
     <ClCompile Include="Engine\Render\FRenderQualitySettings.cpp" />
     <ClCompile Include="Engine\Render\FRenderScene.cpp" />
+    <ClCompile Include="Engine\Render\FRenderHistory.cpp" />
+    <ClCompile Include="Engine\Render\URayEffectsReconstruction.cpp" />
     <ClCompile Include="Engine\Render\UHardwareGBuffer.cpp" />
     <ClCompile Include="Engine\Render\URasterLightingPass.cpp" />
     <ClCompile Include="Engine\Render\UHybridPresentationPass.cpp" />
@@ -213,6 +215,8 @@
     <ClInclude Include="Engine\Render\FRenderQualitySettings.h" />
     <ClInclude Include="Engine\Render\FRenderOutputs.h" />
     <ClInclude Include="Engine\Render\FRenderScene.h" />
+    <ClInclude Include="Engine\Render\FRenderHistory.h" />
+    <ClInclude Include="Engine\Render\URayEffectsReconstruction.h" />
     <ClInclude Include="Engine\Render\UHardwareGBuffer.h" />
     <ClInclude Include="Engine\Render\URasterLightingPass.h" />
     <ClInclude Include="Engine\Render\UHybridPresentationPass.h" />
@@ -227,6 +231,7 @@
     <ClInclude Include="Engine\Render\Shaders\RasterLightingShaders.h" />
     <ClInclude Include="Engine\Render\Shaders\HybridPresentationShaders.h" />
     <ClInclude Include="Engine\Render\Shaders\RayEffectsFragmentShaders.h" />
+    <ClInclude Include="Engine\Render\Shaders\RayEffectsReconstructionShaders.h" />
     <ClInclude Include="Engine\Render\Shaders\RayEffectsComputeShaders.h" />
     <ClInclude Include="Engine\Render\FRenderTarget.h" />
     <ClInclude Include="Engine\Render\FPixelUnpackGuard.h" />

@@ -475,10 +475,12 @@ bool URasterLightingPass::LoadEnvironmentTexture(
         return true;
     if (path.empty())
     {
+        const bool changed = environmentTexture_ != 0;
         if (environmentTexture_) glDeleteTextures(1, &environmentTexture_);
         environmentTexture_ = 0;
         environmentPath_.clear();
         environmentStamp_ = 0;
+        if (changed) ++environmentRevision_;
         if (diagnostic) diagnostic->clear();
         return true;
     }
@@ -488,6 +490,7 @@ bool URasterLightingPass::LoadEnvironmentTexture(
     float* pixels = stbi_loadf(path.c_str(), &width, &height, &channels, 3);
     if (!pixels)
     {
+        const bool changed = environmentTexture_ != 0;
         const std::string warning = std::string("Raster lighting could not load HDRI '") +
             path + "': " + stbi_failure_reason();
         std::fprintf(stderr, "[Renderer] warning: %s; using the procedural sky\n",
@@ -496,6 +499,7 @@ bool URasterLightingPass::LoadEnvironmentTexture(
         environmentTexture_ = 0;
         environmentPath_ = path;
         environmentStamp_ = stamp;
+        if (changed) ++environmentRevision_;
         if (diagnostic) diagnostic->clear();
         return true; // invalid environment image selects the procedural gradient
     }
@@ -535,6 +539,7 @@ bool URasterLightingPass::LoadEnvironmentTexture(
     environmentTexture_ = candidate;
     environmentPath_ = path;
     environmentStamp_ = stamp;
+    ++environmentRevision_;
     if (previous) glDeleteTextures(1, &previous);
     ++stats_.environmentTextureUploads;
     (void)contextGeneration;
