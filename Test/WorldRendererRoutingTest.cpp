@@ -5,6 +5,7 @@
 #include "FRenderOutputs.h"
 #include "FRenderScene.h"
 #include "FRenderTarget.h"
+#include "FDeprecatedWorldRenderExecutor.h"
 #include "FTransform.h"
 #include "UGBuffer.h"
 #include "URasterizer.h"
@@ -21,8 +22,11 @@
 
 #include <cassert>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <memory>
+#include <sstream>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -51,6 +55,99 @@ static_assert(!THasCameraMember<FWorldRenderRequest>::value,
 bool Near(float lhs, float rhs)
 {
     return std::fabs(lhs - rhs) < 0.0001f;
+}
+
+std::string ReadSource(const char* path)
+{
+    std::ifstream input(path, std::ios::binary);
+    assert(input && "routing topology source is missing");
+    std::ostringstream contents;
+    contents << input.rdbuf();
+    return contents.str();
+}
+
+std::size_t CountOccurrences(const std::string& text, const char* needle)
+{
+    std::size_t count = 0;
+    for (std::size_t offset = 0;
+         (offset = text.find(needle, offset)) != std::string::npos;
+         offset += std::char_traits<char>::length(needle))
+        ++count;
+    return count;
+}
+
+void CheckNormalRouteSourceIsolation()
+{
+    const std::string editor = ReadSource("Engine/Editor/EditorEngine.cpp");
+    const std::string game = ReadSource("Engine/Framework/GameEngine.cpp");
+    const std::string renderer = ReadSource("Engine/Render/UWorldRenderer.cpp");
+    const std::string engine = ReadSource("Engine/Framework/Engine.cpp");
+    const std::string deprecatedHeader =
+        ReadSource("Engine/Render/FDeprecatedWorldRenderExecutor.h");
+    const std::string deprecatedSource =
+        ReadSource("Engine/Render/FDeprecatedWorldRenderExecutor.cpp");
+    const std::string softwareHeader = ReadSource("Engine/Render/URenderer.h");
+    const std::string pureGPUHeader =
+        ReadSource("Engine/RayTracing/UMeshRayTracer.h");
+
+    assert(CountOccurrences(editor, "worldRenderer_.Render(") == 1);
+    assert(CountOccurrences(game, "worldRenderer_.Render(") == 1);
+
+    const char* duplicateRouteSymbols[] = {
+        "RenderWorldGPU", "renderMode_", "vpTex_", "glDrawPixels",
+        "RasterShadedLegacyOutput", "UHybridPass", "FLegacyWorldRenderExecutor",
+        "CPU framebuffer",
+    };
+    for (const char* symbol : duplicateRouteSymbols)
+    {
+        assert(editor.find(symbol) == std::string::npos);
+        assert(game.find(symbol) == std::string::npos);
+        assert(renderer.find(symbol) == std::string::npos);
+    }
+
+    const char* legacyDependencies[] = {
+        "ThreadPool.h", "UGBuffer.h", "URasterizer.h", "URenderer.h",
+        "USkyHDRI.h",
+    };
+    for (const char* dependency : legacyDependencies)
+        assert(renderer.find(dependency) == std::string::npos);
+
+    assert(engine.find("glDrawPixels") == std::string::npos);
+    assert(engine.find("glMatrixMode") == std::string::npos);
+    assert(engine.find("glOrtho") == std::string::npos);
+
+    assert(deprecatedHeader.find("CreateDeprecatedWorldRenderExecutor") !=
+           std::string::npos);
+    assert(deprecatedSource.find("FDeprecatedSoftwareRasterExecutor") !=
+           std::string::npos);
+    assert(deprecatedSource.find("URenderer") != std::string::npos);
+    assert(deprecatedSource.find("FDeprecatedPureGPURayTracerExecutor") !=
+           std::string::npos);
+    assert(deprecatedSource.find("UMeshRayTracer") != std::string::npos);
+    assert(softwareHeader.find("ENGINE_DEPRECATED") != std::string::npos);
+    assert(softwareHeader.find("hardware raster") != std::string::npos);
+    assert(pureGPUHeader.find("ENGINE_DEPRECATED") != std::string::npos);
+    assert(pureGPUHeader.find("hardware raster plus ray-traced effects") !=
+           std::string::npos);
+}
+
+void CheckDeprecatedOverrideFactoryIsExplicitAndLazy()
+{
+    std::unique_ptr<IWorldRenderExecutor> none =
+        CreateDeprecatedWorldRenderExecutor(ELegacyRendererOverride::None);
+    assert(!none);
+
+    std::unique_ptr<IWorldRenderExecutor> software =
+        CreateDeprecatedWorldRenderExecutor(
+            ELegacyRendererOverride::SoftwareRasterizer);
+    std::unique_ptr<IWorldRenderExecutor> pureGPU =
+        CreateDeprecatedWorldRenderExecutor(
+            ELegacyRendererOverride::PureGPURayTracer);
+    assert(software);
+    assert(pureGPU);
+    assert(software.get() != pureGPU.get());
+    assert(software->RequiresOpenGLTargetBinding());
+    assert(pureGPU->RequiresOpenGLTargetBinding());
 }
 
 class FSpyWorldRenderExecutor final : public IWorldRenderExecutor
@@ -530,6 +627,8 @@ void CheckRenderTargetGenerationAwareLifetime()
 
 int main()
 {
+    CheckNormalRouteSourceIsolation();
+    CheckDeprecatedOverrideFactoryIsExplicitAndLazy();
     CheckSceneExtractionAndRouting();
     CheckDefaultLightAndTargetValidation();
     CheckNeutralRayOutputs();

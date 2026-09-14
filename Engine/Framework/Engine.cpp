@@ -216,10 +216,6 @@ void Engine::handleResize(int w, int h)
     width_  = w;
     height_ = h;
     glViewport(0, 0, w, h);
-    // fixed-function ortho kept for the glDrawPixels (CPU buffer) path
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0.0, static_cast<double>(w), 0.0, static_cast<double>(h), 1.0, -1.0);
     OnResize(w, h);
 }
 

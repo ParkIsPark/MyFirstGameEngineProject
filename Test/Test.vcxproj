@@ -105,6 +105,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Render\UGPUMeshCache.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\URenderer.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\UWorldRenderer.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Render\FDeprecatedWorldRenderExecutor.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\USkyHDRI.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\UHybridPass.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Acceleration\BVH.cpp" />
@@ -242,6 +243,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderFeatures.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderPipelinePlan.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\UGPUMeshCache.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\FDeprecatedWorldRenderExecutor.h" />
     <!-- Engine: RayTracing headers -->
     <ClInclude Include="$(EngineRootDir)Engine\RayTracing\UMeshRayTracer.h" />
     <ClInclude Include="$(EngineRootDir)Engine\RayTracing\URay.h" />

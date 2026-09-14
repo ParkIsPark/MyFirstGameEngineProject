@@ -17,6 +17,10 @@
 #include <algorithm>
 #include <cmath>
 
+#if defined(_MSC_VER)
+#pragma warning(disable : 4996) // Legacy adapter forwards to its deprecated snapshot entry.
+#endif
+
 namespace
 {
     // Build the model->view->proj->viewport stack for one actor's mesh.

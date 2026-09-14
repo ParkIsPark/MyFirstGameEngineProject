@@ -106,6 +106,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Render\UGPUMeshCache.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\URenderer.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\UWorldRenderer.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Render\FDeprecatedWorldRenderExecutor.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\USkyHDRI.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\UHybridPass.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Acceleration\BVH.cpp" />
@@ -236,6 +237,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\Render\UGPUMeshCache.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\URenderer.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\UWorldRenderer.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\FDeprecatedWorldRenderExecutor.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\USkyHDRI.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderShowFlag.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\UHybridPass.h" />

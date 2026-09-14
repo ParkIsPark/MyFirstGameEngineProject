@@ -22,6 +22,10 @@
 #include <vector>
 #include <fstream>
 #include <memory>
+
+#if defined(_MSC_VER)
+#pragma warning(disable : 4996) // Regression gates intentionally exercise deprecated renderers.
+#endif
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 

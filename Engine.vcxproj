@@ -94,6 +94,7 @@
     <ClCompile Include="Engine\Render\UGPUMeshCache.cpp" />
     <ClCompile Include="Engine\Render\URenderer.cpp" />
     <ClCompile Include="Engine\Render\UWorldRenderer.cpp" />
+    <ClCompile Include="Engine\Render\FDeprecatedWorldRenderExecutor.cpp" />
     <ClCompile Include="Engine\Render\USkyHDRI.cpp" />
     <ClCompile Include="Engine\Render\UHybridPass.cpp" />
     <!-- Engine: Acceleration -->
@@ -226,6 +227,7 @@
     <ClInclude Include="Engine\Render\UGPUMeshCache.h" />
     <ClInclude Include="Engine\Render\URenderer.h" />
     <ClInclude Include="Engine\Render\UWorldRenderer.h" />
+    <ClInclude Include="Engine\Render\FDeprecatedWorldRenderExecutor.h" />
     <ClInclude Include="Engine\Render\USkyHDRI.h" />
     <ClInclude Include="Engine\Render\FRenderShowFlag.h" />
     <ClInclude Include="Engine\Render\UHybridPass.h" />

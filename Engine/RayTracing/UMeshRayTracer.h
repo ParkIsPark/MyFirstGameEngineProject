@@ -2,6 +2,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <unordered_map>
+#include "FFeatureLifecycle.h"
 #include "Material.h"
 
 class UMesh;
@@ -33,6 +34,7 @@ public:
                      const std::vector<float>& mirrors = {},          // per-instance km (0=matte)
                      const std::vector<const Material*>& mats = {},   // per-instance material (diffuse texture)
                      const std::vector<glm::vec2>& uvTilings = {});   // per-instance texture repeat
+    ENGINE_DEPRECATED("Use hardware raster plus ray-traced effects through UWorldRenderer instead.")
     void RenderFrame(const ACamera& cam, int width, int height) const;
     // Update the light(s) without re-uploading geometry (lights are per-frame
     // uniforms, not baked into the triangle buffer) -- lets callers cache the

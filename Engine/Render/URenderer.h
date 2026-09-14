@@ -6,6 +6,7 @@
 #include "UGBuffer.h"
 #include "ThreadPool.h"
 #include "FRenderShowFlag.h"
+#include "FFeatureLifecycle.h"
 
 class UWorld;
 class UScene;
@@ -40,8 +41,9 @@ public:
     // flag's shading model (Flat/Gouraud/Phong) + Blinn-Phong + gamma, writing
     // scene.outputImage. depthView -> grayscale depth instead.
     void RasterShaded(UWorld& world, const FRenderShowFlag& flag, const USkyHDRI* sky = nullptr);
-    // Narrow compatibility sink used only by FLegacyWorldRenderExecutor. The
-    // common request remains a value snapshot and never exposes UScene/world.
+    // Narrow compatibility sink used only by the deprecated software executor.
+    // The common request remains a value snapshot and never exposes UScene/world.
+    ENGINE_DEPRECATED("Use hardware raster rendering through UWorldRenderer instead.")
     const std::vector<float>& RasterShadedLegacyOutput(
         const FRenderScene& renderScene, int width, int height,
         const FRenderShowFlag& flag, const USkyHDRI* sky = nullptr);
