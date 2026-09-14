@@ -3223,6 +3223,40 @@ public:
         if (computeQualityAvailable)
             check("GL43 sub-epsilon Flat shadow ratio matches GL33",
                   lowEnergy43OK && nearImages(lowEnergy33Pixel, lowEnergy43Pixel));
+
+        // Two equal low-energy red contributions produce a 5e-6 denominator.
+        // The centered light is blocked while the offset light remains visible,
+        // so shadowed energy is 2.5e-6 and the clamped-denominator ratio is .25.
+        controlledScene.pointLights = {
+            {glm::vec3(0.0f, 0.0f, 4.0f),
+                glm::vec3(4.0e-5f, 0.0f, 0.0f)},
+            {glm::vec3(8.0f, 0.0f, 4.0f),
+                glm::vec3(4.472136e-4f, 0.0f, 0.0f)},
+        };
+        FRayEffectOutputs partialLowEnergy33, partialLowEnergy43;
+        const bool partialLowEnergy33OK = controlledRays.RenderEffects(
+            controlledInputs, partialLowEnergy33, &diagnostic);
+        const bool partialLowEnergy43OK = computeQualityAvailable &&
+            computeControlledRays.RenderEffects(
+                controlledInputs, partialLowEnergy43, &diagnostic);
+        const auto partialLowEnergy33Pixel = readTarget(
+            partialLowEnergy33.shadowedDirectTarget, GL_RGBA, 4, 1, 1);
+        const auto partialLowEnergy43Pixel = readComputeTarget(
+            partialLowEnergy43.shadowedDirectTarget, GL_RGBA, 4, 1, 1);
+        check("partial sub-epsilon Flat shadow uses clamped denominator",
+              partialLowEnergy33OK &&
+              std::fabs(partialLowEnergy33Pixel[0] - 0.2f) < 0.02f &&
+              std::fabs(partialLowEnergy33Pixel[1] - 0.6f) < 0.01f &&
+              std::fabs(partialLowEnergy33Pixel[2] - 0.4f) < 0.01f);
+        if (computeQualityAvailable)
+        {
+            check("GL43 partial sub-epsilon Flat shadow uses clamped denominator",
+                  partialLowEnergy43OK &&
+                  std::fabs(partialLowEnergy43Pixel[0] - 0.2f) < 0.02f);
+            check("partial sub-epsilon Flat shadow keeps GL parity",
+                  partialLowEnergy43OK && nearImages(
+                      partialLowEnergy33Pixel, partialLowEnergy43Pixel));
+        }
         controlledLighting.unshadowedDirectTarget = {};
         glDeleteTextures(1, &lowEnergyDirectTexture);
 
