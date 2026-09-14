@@ -120,3 +120,42 @@ Compatible GL3.3 submission path and the optional GL4.3 compute path.
   retain valid CPU texture bytes so the renderer can create compliant storage.
 - Hardware verification again used the available OpenGL 4.6 context; the strict
   Compatible GL3.3 path passed, but a physical 3.3-only driver was unavailable.
+
+## Fix round 2
+
+### Finding and RED
+
+- The raster slow upload path looked up the shared sampling policy before
+  draining pre-existing GL errors. On the first context probe, the probe's
+  `glGetError` consumed a hostile caller error, classified anisotropy as
+  unsupported, and permanently cached a 1x fallback for that context.
+- A new first-upload real-GL probe injects an invalid active-texture enum
+  immediately before geometry submission. Against the prior ordering, the
+  hostile boundary and exact bounded-anisotropy assertions failed, demonstrating
+  that the caller error had poisoned the capability cache.
+
+### GREEN implementation and verification
+
+- Raster cache hits retain their parameter-only fast path because a committed
+  texture proves that the context probe has completed. New/replacement uploads
+  now drain the caller error queue first and only then query the context policy.
+  The policy's `glGetError` therefore classifies only its own capability query;
+  a malformed query remains the intended silent 1x/trilinear fallback.
+- The hostile first upload now succeeds with the actual bounded anisotropy,
+  retains the caller's active texture, and is followed by a transactional failed
+  refresh plus a clean cache reuse. No ray code or policy-cache behavior changed.
+- `MSBuild Engine.sln Debug|Win32 /m:1 /nr:false`: success.
+- `--raster-lighting-selftest`: 72 passed, 0 failed.
+- `RunStandaloneTests.ps1`: 35 sources, 0 failures, including
+  `TextureSamplingPolicyTest`.
+- `--ray-effects-selftest`: 185 passed, 0 failed.
+- `--render-performance-selftest`: 389 passed, 0 failed; production Editor/Game
+  raster-only and ray-enabled hooks pass.
+- The previous quality-only anisotropy and hostile external-handle tests remain
+  green. Runtime revisions, rollback/state guards, Task 7 history, eight-texel
+  packing, 256 MiB budget, and the GL3.3 16-unit limit remain unchanged.
+
+### Fix-round concern
+
+- Verification used the available OpenGL 4.6 context, including the Compatible
+  GL3.3 path; physical GL3.3-only hardware remains unavailable.

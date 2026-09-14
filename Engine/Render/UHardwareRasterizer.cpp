@@ -551,9 +551,6 @@ bool UHardwareRasterizer::ResolveMaterialTexture(
         ++materialTextureHashComputations_;
     }
     const std::uint64_t signature = signatureIt->second;
-    const FTextureSamplingPolicy sampling = TextureSamplingPolicyForContext(
-        contextGeneration, requestedAnisotropy);
-    const float effectiveAnisotropy = sampling.EffectiveAnisotropy();
     auto resourceIt = materialTextures_.find(material);
     if (resourceIt != materialTextures_.end())
     {
@@ -561,6 +558,12 @@ bool UHardwareRasterizer::ResolveMaterialTexture(
         texture = resourceIt->second.texture;
         if (texture && resourceIt->second.signature == signature)
         {
+            // A committed texture implies this context's capability probe has
+            // already completed. Cache hits may therefore update only the
+            // sampler parameter without entering the upload error boundary.
+            const FTextureSamplingPolicy sampling = TextureSamplingPolicyForContext(
+                contextGeneration, requestedAnisotropy);
+            const float effectiveAnisotropy = sampling.EffectiveAnisotropy();
             if (sampling.anisotropySupported &&
                 resourceIt->second.effectiveAnisotropy != effectiveAnisotropy)
             {
@@ -582,6 +585,13 @@ bool UHardwareRasterizer::ResolveMaterialTexture(
         ++materialTextureUploadFailures_;
         return false;
     }
+
+    // Drain caller errors before the first-context capability query. The query
+    // validates only its own glGetFloatv error and cannot consume or cache a
+    // fallback because of unrelated state left by the caller.
+    const FTextureSamplingPolicy sampling = TextureSamplingPolicyForContext(
+        contextGeneration, requestedAnisotropy);
+    const float effectiveAnisotropy = sampling.EffectiveAnisotropy();
 
     FPixelUnpackGuard unpack;
     glActiveTexture(GL_TEXTURE0);

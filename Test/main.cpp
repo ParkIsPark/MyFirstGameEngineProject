@@ -1458,13 +1458,47 @@ public:
         const std::uint64_t textureUploadsBefore = rasterizer.MaterialTextureUploads();
         const std::uint64_t textureFailuresBefore =
             rasterizer.MaterialTextureUploadFailures();
+        cache.BeginFrame();
+        glActiveTexture(GL_TEXTURE0 - 1);
+        const bool hostilePreexistingErrorDrained = rasterizer.RenderGeometry(
+            scene, quality, cache, gbuffer, lighting.EnvironmentTexture(),
+            ContextGeneration(), &diagnostic);
+        cache.ReleaseUnused();
+        GLint activeAfterHostileError = 0;
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &activeAfterHostileError);
+        const GLuint hostileFirstTexture = static_cast<GLuint>(
+            rasterizer.MaterialTextureForTesting(&material));
+        GLfloat hostileFirstAnisotropy = 1.0f;
+        GLfloat hostileFirstMaximum = 1.0f;
+        if (GLEW_EXT_texture_filter_anisotropic)
+        {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, hostileFirstTexture);
+            glGetTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT,
+                &hostileFirstAnisotropy);
+            glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT,
+                &hostileFirstMaximum);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glActiveTexture(GL_TEXTURE5);
+        }
+        check("first material upload drains hostile GL error before capability probe",
+              hostilePreexistingErrorDrained &&
+              rasterizer.MaterialTextureUploads() == textureUploadsBefore + 1u &&
+              rasterizer.MaterialTextureUploadFailures() == textureFailuresBefore &&
+              hostileFirstTexture != 0u &&
+              std::fabs(hostileFirstAnisotropy -
+                  (GLEW_EXT_texture_filter_anisotropic
+                      ? std::min(quality.anisotropy, hostileFirstMaximum)
+                      : 1.0f)) < 0.001f &&
+              activeAfterHostileError == GL_TEXTURE5);
         rasterizer.InjectNextMaterialTextureUploadFailureForTesting();
+        material.texData[0] = 254;
         const auto checkerFailedUpload = renderFrame(scene, quality);
+        material.texData[0] = 255;
         check("failed material texture upload is transactional",
               !checkerFailedUpload.first &&
-              rasterizer.MaterialTextureUploads() == textureUploadsBefore &&
+              rasterizer.MaterialTextureUploads() == textureUploadsBefore + 1u &&
               rasterizer.MaterialTextureUploadFailures() == textureFailuresBefore + 1u);
-        glActiveTexture(GL_TEXTURE0 - 1);
         const auto checkerFirst = renderFrame(scene, quality);
         const std::uint64_t textureUploadsAfterFirst = rasterizer.MaterialTextureUploads();
         const auto checkerSecond = renderFrame(scene, quality);
@@ -1510,8 +1544,10 @@ public:
               rasterMinFilter == GL_LINEAR_MIPMAP_LINEAR &&
               rasterMipWidth == 1 && rasterMipHeight == 1);
         check("raster anisotropy is capability bounded",
-              rasterAnisotropy >= 1.0f &&
-              rasterAnisotropy <= implementationAnisotropy);
+              std::fabs(rasterAnisotropy -
+                  (GLEW_EXT_texture_filter_anisotropic
+                      ? std::min(quality.anisotropy, implementationAnisotropy)
+                      : 1.0f)) < 0.001f);
         FRenderQuality oneXAnisotropy = quality;
         oneXAnisotropy.anisotropy = 1.0f;
         const auto checkerOneX = renderFrame(scene, oneXAnisotropy);
