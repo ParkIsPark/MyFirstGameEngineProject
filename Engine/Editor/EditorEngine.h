@@ -79,7 +79,7 @@ private:
     void DrawBuildLog();                  // background-build output panel
     void DrawProjectSettings();           // set the DefaultWorld (Setting/DefaultEngine.ini)
     void DrawMaterialEditor();            // double-click a .material -> edit the shared asset
-    bool DrawMaterialFields(Material& m, bool snapshotUndo = false); // shared material widgets (returns changed)
+    bool DrawMaterialFields(Material& m, UMeshComponent* componentTarget = nullptr); // shared material widgets
     void DrawRenderSettings();            // AA / GI quality popup (persisted to ini)
     void LoadRenderSettings();            // Config/EditorSettings.ini -> members
     void SaveRenderSettings();            // members -> Config/EditorSettings.ini
@@ -145,6 +145,8 @@ private:
     int  cbRename_ = -1;                     // content entry index being renamed (-1 none)
     char cbBuf_[128] = {};                   // rename / import-path text buffer
     std::string scriptValidation_;           // most recent Script Details validation
+    UMeshComponent* activeMaterialUndoTarget_ = nullptr; // stable key during one ImGui drag
+    bool materialUndoCaptured_ = false;
 
     // editor fly-camera state (applied to editorWorld_'s camera each frame)
     glm::vec3 camEye_   = glm::vec3(0.0f, 0.0f, 0.0f);

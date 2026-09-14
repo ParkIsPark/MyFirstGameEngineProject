@@ -6,6 +6,8 @@
 #include <vector>
 
 class AActor;
+struct Material;
+class UMeshComponent;
 class UScriptComponent;
 
 // Filesystem/editor operations kept independent from ImGui and OpenGL so the
@@ -60,3 +62,11 @@ FEditorScriptAssignment AssignEditorLuaScript(
     const std::filesystem::path& selectedFile,
     const std::filesystem::path& contentRoot,
     const std::function<void()>& beforeChange);
+
+// Commit an already-authored temporary material only after the caller captures
+// its pre-change state. Component edits always become local overrides and never
+// mutate the shared mesh material used to seed the temporary value.
+void CommitEditorMaterialEdit(Material& target, Material edited,
+                              const std::function<void()>& beforeChange);
+void CommitEditorComponentMaterialEdit(UMeshComponent& component, Material edited,
+                                       const std::function<void()>& beforeChange);

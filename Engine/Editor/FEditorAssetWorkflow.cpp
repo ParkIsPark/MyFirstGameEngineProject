@@ -1,4 +1,6 @@
 #include "FEditorAssetWorkflow.h"
+#include "Material.h"
+#include "UMeshComponent.h"
 
 #include <algorithm>
 #include <cctype>
@@ -128,6 +130,25 @@ namespace
         else if (ext == ".lua")                           { category = "Script";   icon = "[Lua]"; }
     }
 
+}
+
+void CommitEditorMaterialEdit(Material& target, Material edited,
+                              const std::function<void()>& beforeChange)
+{
+    if (beforeChange) beforeChange();
+    edited.SanitizeOptics();
+    edited.MarkRuntimeDirty();
+    target = std::move(edited);
+}
+
+void CommitEditorComponentMaterialEdit(UMeshComponent& component, Material edited,
+                                       const std::function<void()>& beforeChange)
+{
+    if (beforeChange) beforeChange();
+    edited.SanitizeOptics();
+    edited.MarkRuntimeDirty();
+    component.materialOverride = std::move(edited);
+    component.hasMaterialOverride = true;
 }
 
 std::vector<FEditorContentAsset> DiscoverEditorContent(const fs::path& contentRoot)

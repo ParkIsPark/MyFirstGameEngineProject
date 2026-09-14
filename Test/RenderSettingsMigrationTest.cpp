@@ -55,12 +55,14 @@ namespace
     bool HasCorrectedQualityDefaults(const FIniFile& ini)
     {
         return ini.Has("Render", "SSAA") && ini.GetInt("Render", "SSAA") == 1 &&
+            ini.Has("Render", "AmbientStrength") && ini.GetFloat("Render", "AmbientStrength") == 1.0f &&
             ini.Has("Render", "ShadowSamples") && ini.GetInt("Render", "ShadowSamples") == 4 &&
             ini.Has("Render", "ShadowSoftness") && ini.GetFloat("Render", "ShadowSoftness") == 0.05f &&
             ini.Has("Render", "GISamples") && ini.GetInt("Render", "GISamples") == 4 &&
             ini.Has("Render", "GIBounces") && ini.GetInt("Render", "GIBounces") == 1 &&
             ini.Has("Render", "GIStrength") && ini.GetFloat("Render", "GIStrength") == 1.0f &&
             ini.Has("Render", "ReflectionStrength") && ini.GetFloat("Render", "ReflectionStrength") == 1.0f &&
+            ini.Has("Render", "Shininess") && ini.GetFloat("Render", "Shininess") == 32.0f &&
             ini.Has("Render", "ExposureEV") && ini.GetFloat("Render", "ExposureEV") == 0.0f &&
             ini.Has("Render", "TemporalFrames") && ini.GetInt("Render", "TemporalFrames") == 32 &&
             ini.Has("Render", "Anisotropy") && ini.GetFloat("Render", "Anisotropy") == 8.0f;

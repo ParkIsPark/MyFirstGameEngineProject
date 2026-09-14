@@ -1118,31 +1118,33 @@ void EditorEngine::ApplyMaterialToSelected(const std::string& path)
 
 // Shared kd/ks/shininess/mirror/texture widgets (Details + Material Editor).
 // Returns true if any field changed this frame.
-bool EditorEngine::DrawMaterialFields(Material& m, bool snapshotUndo)
+bool EditorEngine::DrawMaterialFields(Material& m, UMeshComponent* componentTarget)
 {
+    Material edited = m;
     bool ch = false;
+    bool anyItemActive = false;
     auto track = [&](bool changed)
     {
-        if (snapshotUndo && ImGui::IsItemActivated()) PushUndo();
+        anyItemActive |= ImGui::IsItemActive();
         ch |= changed;
     };
 
-    int blendMode = m.blendMode == EMaterialBlendMode::Translucent ? 1 : 0;
+    int blendMode = edited.blendMode == EMaterialBlendMode::Translucent ? 1 : 0;
     const char* blendModes[] = { "Opaque", "Translucent" };
     const bool blendChanged = ImGui::Combo("Blend Mode", &blendMode, blendModes, 2);
     track(blendChanged);
     if (blendChanged)
-        m.blendMode = blendMode == 1 ? EMaterialBlendMode::Translucent : EMaterialBlendMode::Opaque;
+        edited.blendMode = blendMode == 1 ? EMaterialBlendMode::Translucent : EMaterialBlendMode::Opaque;
 
-    ImGui::BeginDisabled(m.blendMode != EMaterialBlendMode::Translucent);
-    track(ImGui::SliderFloat("Opacity", &m.opacity, 0.0f, 1.0f));
-    track(ImGui::DragFloat("Refraction", &m.refraction, 0.01f, 1.0f, 2.42f, "%.2f"));
-    track(ImGui::ColorEdit3("Transmittance Color", &m.transmittanceColor.x));
-    track(ImGui::DragFloat("Transmittance Distance", &m.transmittanceDistance,
+    ImGui::BeginDisabled(edited.blendMode != EMaterialBlendMode::Translucent);
+    track(ImGui::SliderFloat("Opacity", &edited.opacity, 0.0f, 1.0f));
+    track(ImGui::DragFloat("Refraction", &edited.refraction, 0.01f, 1.0f, 2.42f, "%.2f"));
+    track(ImGui::ColorEdit3("Transmittance Color", &edited.transmittanceColor.x));
+    track(ImGui::DragFloat("Transmittance Distance", &edited.transmittanceDistance,
                            0.05f, 0.0001f, 10000.0f, "%.3f"));
-    track(ImGui::Checkbox("Cast Ray Traced Shadows", &m.castRayTracedShadows));
+    track(ImGui::Checkbox("Cast Ray Traced Shadows", &edited.castRayTracedShadows));
     ImGui::EndDisabled();
-    if (m.blendMode == EMaterialBlendMode::Translucent)
+    if (edited.blendMode == EMaterialBlendMode::Translucent)
     {
         const FRenderFeatures& features = ActiveWorld().GetScene().renderFeatures;
         const bool available = features.rayTracing && features.rayTracedTranslucency &&
@@ -1152,35 +1154,56 @@ bool EditorEngine::DrawMaterialFields(Material& m, bool snapshotUndo)
                 "Ray-traced translucency unavailable: using safe opaque/local fallback.");
     }
 
-    track(ImGui::ColorEdit3("Diffuse",   &m.kd.x));
-    track(ImGui::ColorEdit3("Specular",  &m.ks.x));
-    track(ImGui::DragFloat ("Shininess", &m.shininess, 1.0f, 0.0f, 256.0f));
-    float mir = glm::max(m.km.x, glm::max(m.km.y, m.km.z));
+    track(ImGui::ColorEdit3("Diffuse",   &edited.kd.x));
+    track(ImGui::ColorEdit3("Specular",  &edited.ks.x));
+    track(ImGui::DragFloat ("Shininess", &edited.shininess, 1.0f, 0.0f, 256.0f));
+    float mir = glm::max(edited.km.x, glm::max(edited.km.y, edited.km.z));
     const bool mirrorChanged = ImGui::SliderFloat("Legacy Mirror", &mir, 0.0f, 1.0f);
     track(mirrorChanged);
-    if (mirrorChanged) m.km = glm::vec3(mir);
+    if (mirrorChanged) edited.km = glm::vec3(mir);
     ImGui::TextDisabled("Legacy control; future PBR migration uses Metallic/Roughness.");
 
-    const std::string tex = m.diffuseTexPath.empty() ? "(none)" : m.diffuseTexPath;
+    const std::string tex = edited.diffuseTexPath.empty() ? "(none)" : edited.diffuseTexPath;
     ImGui::Text("Texture: %s", tex.c_str());
     ImGui::Button("Set Diffuse Texture  (drop image / click)", ImVec2(-1, 0));
     if (ImGui::BeginDragDropTarget())
     {
         if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_TEX"))
-        { if (snapshotUndo) PushUndo(); m.diffuseTexPath = CopyToContent(std::string((const char*)pl->Data)); UMaterial::LoadTexture(m); content_.clear(); ScanContent(); ch = true; }
+        { edited.diffuseTexPath = CopyToContent(std::string((const char*)pl->Data)); UMaterial::LoadTexture(edited); content_.clear(); ScanContent(); ch = true; }
         ImGui::EndDragDropTarget();
     }
     if (ImGui::IsItemClicked())
     {
         std::string p = FFileDialog::OpenAsset();
-        if (!p.empty()) { if (snapshotUndo) PushUndo(); m.diffuseTexPath = CopyToContent(p); UMaterial::LoadTexture(m); content_.clear(); ScanContent(); ch = true; }
+        if (!p.empty()) { edited.diffuseTexPath = CopyToContent(p); UMaterial::LoadTexture(edited); content_.clear(); ScanContent(); ch = true; }
     }
-    if (!m.diffuseTexPath.empty() && ImGui::SmallButton("Clear Texture"))
-    { if (snapshotUndo) PushUndo(); m.texData.clear(); m.texWidth = m.texHeight = m.texChannels = 0; m.diffuseTexPath.clear(); ch = true; }
+    if (!edited.diffuseTexPath.empty() && ImGui::SmallButton("Clear Texture"))
+    { edited.texData.clear(); edited.texWidth = edited.texHeight = edited.texChannels = 0; edited.diffuseTexPath.clear(); ch = true; }
+
+    if (componentTarget && activeMaterialUndoTarget_ != componentTarget)
+    {
+        activeMaterialUndoTarget_ = componentTarget;
+        materialUndoCaptured_ = false;
+    }
     if (ch)
     {
-        m.SanitizeOptics();
-        m.MarkRuntimeDirty();
+        auto captureUndo = [&]
+        {
+            if (!materialUndoCaptured_)
+            {
+                PushUndo();
+                materialUndoCaptured_ = true;
+            }
+        };
+        if (componentTarget)
+            CommitEditorComponentMaterialEdit(*componentTarget, std::move(edited), captureUndo);
+        else
+            CommitEditorMaterialEdit(m, std::move(edited), {});
+    }
+    if (componentTarget && !anyItemActive)
+    {
+        activeMaterialUndoTarget_ = nullptr;
+        materialUndoCaptured_ = false;
     }
     return ch;
 }
@@ -1674,8 +1697,8 @@ void EditorEngine::DrawDetails()
             }
             else                      // per-instance override (or the mesh's own default)
             {
-                Material& m = mc->hasMaterialOverride ? mc->materialOverride : mc->mesh->material;
-                DrawMaterialFields(m, true);
+                Material& displayed = mc->hasMaterialOverride ? mc->materialOverride : mc->mesh->material;
+                DrawMaterialFields(displayed, mc);
             }
         }
     }
