@@ -1,6 +1,8 @@
 #pragma once
 
 #include "HardwareRasterShaders.h"
+#include "RayEffectsComputeShaders.h"
+#include "RayEffectsFragmentShaders.h"
 #include "RasterLightingShaders.h"
 
 #include <string>
@@ -39,5 +41,17 @@ inline std::string BuildRasterLightingFragmentShader()
 {
     return std::string(RasterLightingShaders::LightingBeforePointLight) +
         PointLightFunctions() + RasterLightingShaders::LightingAfterPointLight;
+}
+
+inline std::string BuildRayEffectsFragmentShader()
+{
+    return std::string(RayEffectsFragmentShaders::EffectsBeforePointLight) +
+        PointLightFunctions() + RayEffectsFragmentShaders::EffectsAfterPointLight;
+}
+
+inline std::string BuildRayEffectsComputeShader()
+{
+    return std::string(RayEffectsComputeShaders::EffectsBeforePointLight) +
+        PointLightFunctions() + RayEffectsComputeShaders::EffectsAfterPointLight;
 }
 }

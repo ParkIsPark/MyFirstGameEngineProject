@@ -44,7 +44,7 @@ private:
     unsigned program_ = 0;
     unsigned fullscreenVAO_ = 0;
     unsigned framebuffer_ = 0;
-    unsigned shadowTexture_ = 0;
+    unsigned shadowedDirectTexture_ = 0;
     unsigned giTexture_ = 0;
     unsigned reflectionTexture_ = 0;
     unsigned triangleBuffer_ = 0, triangleTexture_ = 0;

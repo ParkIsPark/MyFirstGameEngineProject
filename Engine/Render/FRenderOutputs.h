@@ -63,18 +63,9 @@ struct FRasterLightingOutput
 
 struct FRayEffectOutputs
 {
-    std::optional<float> shadows;
-    std::optional<glm::vec3> globalIllumination;
-    std::optional<glm::vec3> reflections;
-    std::optional<FRenderOutputView> shadowVisibilityTarget;
+    std::optional<FRenderOutputView> shadowedDirectTarget;
     std::optional<FRenderOutputView> globalIlluminationTarget;
     std::optional<FRenderOutputView> reflectionTarget;
-
-    float ShadowVisibilityOrNeutral() const { return shadows.value_or(1.0f); }
-    glm::vec3 GlobalIlluminationOrNeutral() const
-    { return globalIllumination.value_or(glm::vec3(0.0f)); }
-    glm::vec3 ReflectionOrNeutral() const
-    { return reflections.value_or(glm::vec3(0.0f)); }
 };
 
 struct FCompositeInput

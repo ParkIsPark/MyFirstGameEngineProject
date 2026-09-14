@@ -3,6 +3,7 @@
 #include "FRenderScene.h"
 #include "FRenderTarget.h"
 #include "Shaders/RayEffectsComputeShaders.h"
+#include "Shaders/SharedLightingShaderSource.h"
 #include "UHardwareGBuffer.h"
 
 #define GLFW_DLL
@@ -55,7 +56,9 @@ bool CompileComputeProgram(GLuint& program, std::string& diagnostic, FRayTracing
 {
     GLuint shader = glCreateShader(ComputeShader);
     stats.resourceAllocations += shader ? 1u : 0u;
-    const char* source = RayEffectsComputeShaders::EffectsCompute;
+    const std::string assembledSource =
+        SharedLightingShaderSource::BuildRayEffectsComputeShader();
+    const char* source = assembledSource.c_str();
     glShaderSource(shader, 1, &source, nullptr);
     glCompileShader(shader);
     GLint compiled = GL_FALSE;
@@ -430,9 +433,9 @@ bool UGL43RayTracingBackend::Init(std::uint64_t contextGeneration,
     maxLights_ = MaxShaderLights;
 
     glUseProgram(program_);
-    const char* names[] = {"uPositionCoverage", "uGeometricNormal",
-        "uShadingNormalModel", "uAlbedoShininess", "uSpecularMirror",
-        "uIdentity", "uSky", "uMaterialAtlas"};
+    const char* names[] = {"uPositionCoverage", "uShadingNormalModel",
+        "uAlbedoShininess", "uSpecularMirror", "uIdentity",
+        "uUnshadowedDirect", "uSky", "uMaterialAtlas"};
     for (int unit = 0; unit < UsedTextureUnits; ++unit)
         glUniform1i(glGetUniformLocation(program_, names[unit]), unit);
     if (!CollectError("GL43 ray-effects sampler setup", diagnostic))
@@ -449,7 +452,7 @@ bool UGL43RayTracingBackend::Init(std::uint64_t contextGeneration,
 
 std::size_t UGL43RayTracingBackend::OwnedOutputTextureCount() const
 {
-    return (shadowTexture_ ? 1u : 0u) + (giTexture_ ? 1u : 0u) +
+    return (shadowedDirectTexture_ ? 1u : 0u) + (giTexture_ ? 1u : 0u) +
         (reflectionTexture_ ? 1u : 0u);
 }
 
@@ -487,7 +490,7 @@ bool UGL43RayTracingBackend::ResizeOutputs(int width, int height, unsigned mask,
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     };
-    if (mask & ShadowBit) makeTexture(candidateShadow, GL_R16F, GL_RED);
+    if (mask & ShadowBit) makeTexture(candidateShadow, GL_RGBA16F, GL_RGBA);
     if (mask & GIBit) makeTexture(candidateGI, GL_RGBA16F, GL_RGBA);
     if (mask & ReflectionBit)
         makeTexture(candidateReflection, GL_RGBA16F, GL_RGBA);
@@ -502,10 +505,10 @@ bool UGL43RayTracingBackend::ResizeOutputs(int width, int height, unsigned mask,
         if (candidateReflection) { glDeleteTextures(1, &candidateReflection); ++stats.releasedResources; }
         return false;
     }
-    if (shadowTexture_) { glDeleteTextures(1, &shadowTexture_); ++stats.releasedResources; }
+    if (shadowedDirectTexture_) { glDeleteTextures(1, &shadowedDirectTexture_); ++stats.releasedResources; }
     if (giTexture_) { glDeleteTextures(1, &giTexture_); ++stats.releasedResources; }
     if (reflectionTexture_) { glDeleteTextures(1, &reflectionTexture_); ++stats.releasedResources; }
-    shadowTexture_ = candidateShadow;
+    shadowedDirectTexture_ = candidateShadow;
     giTexture_ = candidateGI;
     reflectionTexture_ = candidateReflection;
     width_ = width;
@@ -696,11 +699,11 @@ bool UGL43RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
     glUseProgram(program_);
     const GLuint textures2D[] = {
         inputs.gbuffer->Texture(EHardwareGBufferSemantic::PositionCoverage),
-        inputs.gbuffer->Texture(EHardwareGBufferSemantic::GeometricNormal),
         inputs.gbuffer->Texture(EHardwareGBufferSemantic::ShadingNormalModel),
         inputs.gbuffer->Texture(EHardwareGBufferSemantic::AlbedoShininess),
         inputs.gbuffer->Texture(EHardwareGBufferSemantic::SpecularMirror),
         inputs.gbuffer->Texture(EHardwareGBufferSemantic::Identity),
+        static_cast<GLuint>(inputs.rasterLighting->unshadowedDirectTarget.identity),
         inputs.environmentTexture,
     };
     for (int unit = 0; unit < 7; ++unit)
@@ -718,7 +721,7 @@ bool UGL43RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
         instanceIdentityBuffer_, materialBuffer_};
     for (int binding = 0; binding < UsedSSBOBindings; ++binding)
         glBindBufferBase(ShaderStorageBuffer, binding, buffers[binding]);
-    glBindImageTexture(0, shadowTexture_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R16F);
+    glBindImageTexture(0, shadowedDirectTexture_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
     glBindImageTexture(1, giTexture_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
     glBindImageTexture(2, reflectionTexture_, 0, GL_FALSE, 0,
                        GL_WRITE_ONLY, GL_RGBA16F);
@@ -765,9 +768,9 @@ bool UGL43RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
         glUniform3fv(glGetUniformLocation(program_, positionName.c_str()), 1,
             glm::value_ptr(inputs.scene->pointLights[static_cast<std::size_t>(i)]
                                .worldPosition));
-        const std::string radianceName =
-            "uLightRadiances[" + std::to_string(i) + "]";
-        glUniform3fv(glGetUniformLocation(program_, radianceName.c_str()), 1,
+        const std::string sourceName =
+            "uLightSources[" + std::to_string(i) + "]";
+        glUniform3fv(glGetUniformLocation(program_, sourceName.c_str()), 1,
             glm::value_ptr(inputs.scene->pointLights[static_cast<std::size_t>(i)]
                                .sourceIntensity));
     }
@@ -781,8 +784,8 @@ bool UGL43RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
     ++stats_.memoryBarriers;
     if (!CollectError("GL43 ray-effects dispatch", diagnostic)) return false;
     ++stats_.renderCalls;
-    if (shadowTexture_) outputs.shadowVisibilityTarget = FRenderOutputView{
-        shadowTexture_, width_, height_, true};
+    if (shadowedDirectTexture_) outputs.shadowedDirectTarget = FRenderOutputView{
+        shadowedDirectTexture_, width_, height_, true};
     if (giTexture_) outputs.globalIlluminationTarget = FRenderOutputView{
         giTexture_, width_, height_, true};
     if (reflectionTexture_) outputs.reflectionTarget = FRenderOutputView{
@@ -803,7 +806,7 @@ void UGL43RayTracingBackend::Shutdown() noexcept
 void UGL43RayTracingBackend::DeleteCurrentResources() noexcept
 {
     auto& stats = stats_;
-    if (shadowTexture_) { glDeleteTextures(1, &shadowTexture_); ++stats.releasedResources; }
+    if (shadowedDirectTexture_) { glDeleteTextures(1, &shadowedDirectTexture_); ++stats.releasedResources; }
     if (giTexture_) { glDeleteTextures(1, &giTexture_); ++stats.releasedResources; }
     if (reflectionTexture_) { glDeleteTextures(1, &reflectionTexture_); ++stats.releasedResources; }
     DeleteBuffer(triangleBuffer_, stats); DeleteBuffer(blasNodeBuffer_, stats);
@@ -828,7 +831,7 @@ void UGL43RayTracingBackend::ForgetCurrentResources() noexcept
         contextGeneration_ != ActiveRenderTargetContextGeneration())
         stats_.abandonedResources += abandoned;
     program_ = 0;
-    shadowTexture_ = giTexture_ = reflectionTexture_ = 0;
+    shadowedDirectTexture_ = giTexture_ = reflectionTexture_ = 0;
     triangleBuffer_ = blasNodeBuffer_ = blasIndexBuffer_ = 0;
     instanceBuffer_ = tlasNodeBuffer_ = tlasIndexBuffer_ = 0;
     instanceIdentityBuffer_ = materialBuffer_ = materialAtlasTexture_ = 0;

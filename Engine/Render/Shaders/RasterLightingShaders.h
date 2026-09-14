@@ -134,23 +134,19 @@ inline constexpr const char* CompositeFragment = R"GLSL(#version 330 core
 in vec2 vUV;
 layout(location = 0) out vec4 oColor;
 uniform sampler2D uEnvironmentAmbient;
-uniform sampler2D uUnshadowedDirect;
-uniform sampler2D uShadowVisibility;
+uniform sampler2D uSelectedDirect;
 uniform sampler2D uGIRadiance;
 uniform sampler2D uReflectionRadiance;
-uniform bool uHasShadowVisibility;
 uniform bool uHasGIRadiance;
 uniform bool uHasReflectionRadiance;
 void main()
 {
     vec3 environmentAmbient = max(texture(uEnvironmentAmbient, vUV).rgb, vec3(0.0));
-    vec3 direct = max(texture(uUnshadowedDirect, vUV).rgb, vec3(0.0));
-    float visibility = uHasShadowVisibility
-        ? clamp(texture(uShadowVisibility, vUV).r, 0.0, 1.0) : 1.0;
+    vec3 direct = max(texture(uSelectedDirect, vUV).rgb, vec3(0.0));
     vec3 gi = uHasGIRadiance ? texture(uGIRadiance, vUV).rgb : vec3(0.0);
     vec3 reflection = uHasReflectionRadiance
         ? texture(uReflectionRadiance, vUV).rgb : vec3(0.0);
-    vec3 linearColor = max(environmentAmbient + direct * visibility + gi + reflection,
+    vec3 linearColor = max(environmentAmbient + direct + gi + reflection,
                            vec3(0.0));
     vec3 displayColor = pow(clamp(linearColor, 0.0, 1.0), vec3(1.0 / 2.2));
     oColor = vec4(displayColor, 1.0);

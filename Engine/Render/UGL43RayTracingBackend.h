@@ -45,7 +45,7 @@ private:
     FGL43ComputeApi api_;
     FRaySceneCache sceneCache_;
     unsigned program_ = 0;
-    unsigned shadowTexture_ = 0;
+    unsigned shadowedDirectTexture_ = 0;
     unsigned giTexture_ = 0;
     unsigned reflectionTexture_ = 0;
     unsigned triangleBuffer_ = 0;

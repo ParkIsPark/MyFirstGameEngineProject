@@ -54,10 +54,16 @@ int main()
     const std::string shared = SharedLightingShaderSource::PointLightFunctions();
     const std::string hardware = SharedLightingShaderSource::BuildHardwareGeometryShader();
     const std::string raster = SharedLightingShaderSource::BuildRasterLightingFragmentShader();
+    const std::string rayFragment =
+        SharedLightingShaderSource::BuildRayEffectsFragmentShader();
+    const std::string rayCompute =
+        SharedLightingShaderSource::BuildRayEffectsComputeShader();
 
     assert(CountDefinitions(shared) == 1u);
     assert(CountDefinitions(hardware) == 1u);
     assert(CountDefinitions(raster) == 1u);
+    assert(CountDefinitions(rayFragment) == 1u);
+    assert(CountDefinitions(rayCompute) == 1u);
 
     const float atOne = DiffuseEnergyAtDistance(1.0f);
     const float atTwo = DiffuseEnergyAtDistance(2.0f);

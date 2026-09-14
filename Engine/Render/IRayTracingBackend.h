@@ -16,6 +16,8 @@ struct FRayEffectInputs
 {
     const UHardwareGBuffer* gbuffer = nullptr;
     const FRenderScene* scene = nullptr;
+    // Supplies precomputed Flat/Gouraud direct radiance for contribution-
+    // weighted per-channel shadow preservation.
     const FRasterLightingOutput* rasterLighting = nullptr;
     FRenderFeatures features;
     FRenderQuality quality;

@@ -40,9 +40,12 @@ public:
             if (diagnostic) *diagnostic = "injected render failure";
             return false;
         }
-        if (inputs.features.rayTracedShadows) outputs.shadows = 0.5f;
-        if (inputs.features.rayTracedGI) outputs.globalIllumination = glm::vec3(0.25f);
-        if (inputs.features.rayTracedReflections) outputs.reflections = glm::vec3(0.75f);
+        if (inputs.features.rayTracedShadows)
+            outputs.shadowedDirectTarget = FRenderOutputView{1, 64, 64, true};
+        if (inputs.features.rayTracedGI)
+            outputs.globalIlluminationTarget = FRenderOutputView{2, 64, 64, true};
+        if (inputs.features.rayTracedReflections)
+            outputs.reflectionTarget = FRenderOutputView{3, 64, 64, true};
         return true;
     }
     void Shutdown() noexcept override {}
@@ -157,7 +160,7 @@ void CheckNoWorkCombinations()
     assert(factory.renderCalls == 0);
     assert(scheduler.Stats().resourceAllocations == 0);
     assert(scheduler.Stats().sceneUploads == 0);
-    assert(!outputs.shadowVisibilityTarget);
+    assert(!outputs.shadowedDirectTarget);
     assert(!outputs.globalIlluminationTarget);
     assert(!outputs.reflectionTarget);
 }
@@ -188,9 +191,9 @@ void CheckExactChildMasksUseOneCall()
         assert(factory.observed.rayTracedShadows == mask[0]);
         assert(factory.observed.rayTracedGI == mask[1]);
         assert(factory.observed.rayTracedReflections == mask[2]);
-        assert(outputs.shadows.has_value() == mask[0]);
-        assert(outputs.globalIllumination.has_value() == mask[1]);
-        assert(outputs.reflections.has_value() == mask[2]);
+        assert(outputs.shadowedDirectTarget.has_value() == mask[0]);
+        assert(outputs.globalIlluminationTarget.has_value() == mask[1]);
+        assert(outputs.reflectionTarget.has_value() == mask[2]);
     }
 }
 
@@ -257,7 +260,7 @@ void CheckPermanentInitFailureIsNeutralWarnedAndLatched()
         ERayTracingBackend::CompatibleGL33, ERayTracingBackend::CompatibleGL33);
 
     assert(scheduler.Execute(Inputs(features), selection, outputs));
-    assert(!outputs.shadowVisibilityTarget && !outputs.shadows);
+    assert(!outputs.shadowedDirectTarget);
     assert(factory.initCalls == 1 && factory.renderCalls == 0);
     assert(warnings.messages.size() == 1);
     CheckStatus(scheduler, features, "Disabled", "injected initialization failure");
@@ -297,7 +300,7 @@ void CheckAvailabilityChangeInvalidatesPermanentFailureLatch()
         ERayTracingBackend::CompatibleGL33, ERayTracingBackend::CompatibleGL33);
     assert(scheduler.Execute(Inputs(features), available, outputs));
     assert(factory.calls == 1 && factory.initCalls == 1 && factory.renderCalls == 1);
-    assert(outputs.shadowVisibilityTarget || outputs.shadows);
+    assert(outputs.shadowedDirectTarget);
 }
 
 void CheckTransientRenderFailureRetriesNextFrame()
@@ -314,7 +317,7 @@ void CheckTransientRenderFailureRetriesNextFrame()
         ERayTracingBackend::CompatibleGL33, ERayTracingBackend::CompatibleGL33);
 
     assert(scheduler.Execute(Inputs(features), selection, outputs));
-    assert(!outputs.shadowVisibilityTarget && !outputs.shadows);
+    assert(!outputs.shadowedDirectTarget);
     assert(factory.renderCalls == 1 && warnings.messages.size() == 1);
     assert(scheduler.ActiveKind() == ERayTracingBackend::Auto);
     const auto failureReason = scheduler.BackendReason();
@@ -330,7 +333,7 @@ void CheckTransientRenderFailureRetriesNextFrame()
     assert(factory.renderCalls == 3);
     display.activeRayBackend = scheduler.ActiveKind();
     assert(DescribeRayTracingStatus(features, display).find("On (Compatible)") != std::string::npos);
-    assert(outputs.shadowVisibilityTarget || outputs.shadows);
+    assert(outputs.shadowedDirectTarget);
     assert(warnings.messages.size() == 1);
 }
 } // namespace

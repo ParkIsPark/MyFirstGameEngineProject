@@ -390,10 +390,9 @@ bool URasterLightingPass::Init(std::uint64_t contextGeneration,
         glUniform1i(glGetUniformLocation(lightingProgram_, samplers[unit]), unit);
     glUseProgram(compositeProgram_);
     glUniform1i(glGetUniformLocation(compositeProgram_, "uEnvironmentAmbient"), 0);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uUnshadowedDirect"), 1);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uShadowVisibility"), 2);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uGIRadiance"), 3);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uReflectionRadiance"), 4);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uSelectedDirect"), 1);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uGIRadiance"), 2);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uReflectionRadiance"), 3);
     if (diagnostic) diagnostic->clear();
     return CollectError("Raster lighting initialization", diagnostic);
 }
@@ -706,23 +705,23 @@ bool URasterLightingPass::Composite(const FRenderTarget& target,
         return view.has_value() && view->valid && view->identity != 0 &&
             view->width == target.Width() && view->height == target.Height();
     };
-    const bool hasShadow = validEffectTarget(rayEffects.shadowVisibilityTarget);
+    const bool hasShadowedDirect = validEffectTarget(rayEffects.shadowedDirectTarget);
     const bool hasGI = validEffectTarget(rayEffects.globalIlluminationTarget);
     const bool hasReflection = validEffectTarget(rayEffects.reflectionTarget);
     const unsigned textures[] = {
         environmentAmbientTexture_,
-        unshadowedDirectTexture_,
-        hasShadow ? static_cast<unsigned>(rayEffects.shadowVisibilityTarget->identity) : 0u,
+        hasShadowedDirect
+            ? static_cast<unsigned>(rayEffects.shadowedDirectTarget->identity)
+            : unshadowedDirectTexture_,
         hasGI ? static_cast<unsigned>(rayEffects.globalIlluminationTarget->identity) : 0u,
         hasReflection ? static_cast<unsigned>(rayEffects.reflectionTarget->identity) : 0u,
     };
-    for (int unit = 2; unit < 5; ++unit)
+    for (int unit = 1; unit < 4; ++unit)
     {
         glActiveTexture(GL_TEXTURE0 + unit);
         glBindTexture(GL_TEXTURE_2D, textures[unit]);
         glBindSampler(unit, 0);
     }
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uHasShadowVisibility"), hasShadow ? 1 : 0);
     glUniform1i(glGetUniformLocation(compositeProgram_, "uHasGIRadiance"), hasGI ? 1 : 0);
     glUniform1i(glGetUniformLocation(compositeProgram_, "uHasReflectionRadiance"), hasReflection ? 1 : 0);
     glDrawArrays(GL_TRIANGLES, 0, 3);

@@ -145,7 +145,8 @@ public:
                        std::string*) override
     {
         ++renderCalls_;
-        if (inputs.features.rayTracedShadows) outputs.shadows = 0.5f;
+        if (inputs.features.rayTracedShadows)
+            outputs.shadowedDirectTarget = FRenderOutputView{1, 64, 64, true};
         return true;
     }
     void Shutdown() noexcept override {}
@@ -273,7 +274,7 @@ void CheckSchedulerFallbackAndLazyWork()
         assert(scheduler.Execute(Inputs(true, true), forced, outputs));
         assert(factory.computeCreates == 1 && factory.computeInits == 1);
         assert(factory.compatibleCreates == 0 && factory.compatibleRenders == 0);
-        assert(!outputs.shadowVisibilityTarget && !outputs.shadows);
+        assert(!outputs.shadowedDirectTarget);
         assert(scheduler.ActiveKind() == ERayTracingBackend::Auto);
         assert(warnings.messages.size() == 1);
     }

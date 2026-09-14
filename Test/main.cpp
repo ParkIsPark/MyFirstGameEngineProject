@@ -2293,6 +2293,13 @@ public:
         check("RT off preserves raster-only bytes", rasterOnlyA.first &&
               rasterOnlyB.first && rasterOnlyA.second == rasterOnlyB.second &&
               rays.Stats().resourceAllocations == 0 && rays.Stats().renderCalls == 0);
+        FRayEffectOutputs invalidShadowedDirect;
+        invalidShadowedDirect.shadowedDirectTarget =
+            FRenderOutputView{999999u, 1, 1, true};
+        const auto invalidShadowFallback = composite(invalidShadowedDirect);
+        check("invalid shadowed-direct output falls back to raster direct bytes",
+              invalidShadowFallback.first &&
+              invalidShadowFallback.second == rasterOnlyA.second);
 
         auto execute = [&](bool shadows, bool gi, bool reflections,
                            FRayEffectOutputs& outputs)
@@ -2356,20 +2363,24 @@ public:
         FRayEffectOutputs shadow;
         const std::uint64_t beforeShadowDraws = rays.Stats().rayDraws;
         const bool shadowOK = execute(true, false, false, shadow);
-        std::vector<float> shadowPixels(64u * 64u, 1.0f);
-        if (shadowOK && shadow.shadowVisibilityTarget)
+        std::vector<float> shadowPixels(64u * 64u * 4u, 0.0f);
+        GLint shadowInternalFormat = 0;
+        if (shadowOK && shadow.shadowedDirectTarget)
         {
             glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             glBindTexture(GL_TEXTURE_2D,
-                static_cast<unsigned>(shadow.shadowVisibilityTarget->identity));
-            glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_FLOAT, shadowPixels.data());
+                static_cast<unsigned>(shadow.shadowedDirectTarget->identity));
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, shadowPixels.data());
+            glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT,
+                &shadowInternalFormat);
             glBindTexture(GL_TEXTURE_2D, 0);
         }
         const auto shadowMinMax = std::minmax_element(
             shadowPixels.begin(), shadowPixels.end());
         check("shadows-only allocates and draws only shadow output", shadowOK &&
-              shadow.shadowVisibilityTarget && !shadow.globalIlluminationTarget &&
+              shadow.shadowedDirectTarget && !shadow.globalIlluminationTarget &&
               !shadow.reflectionTarget && rays.OwnedOutputTextureCount() == 1u &&
+              shadowInternalFormat == GL_RGBA16F &&
               rays.Stats().rayDraws == beforeShadowDraws + 1u &&
               *shadowMinMax.first < 0.75f && *shadowMinMax.second > 0.95f);
         check("exact object/material identity avoids near self-hit acne",
@@ -2397,7 +2408,7 @@ public:
                 giEnergy += std::fabs(value);
             }
         check("GI-only allocates finite non-neutral GI", giOK &&
-              !gi.shadowVisibilityTarget && gi.globalIlluminationTarget &&
+              !gi.shadowedDirectTarget && gi.globalIlluminationTarget &&
               !gi.reflectionTarget && rays.OwnedOutputTextureCount() == 1u &&
               giFinite && giEnergy > 0.01);
 
@@ -2421,7 +2432,7 @@ public:
                 reflectionEnergy += std::fabs(value);
             }
         check("reflections-only allocates finite non-neutral reflection", reflectionOK &&
-              !reflection.shadowVisibilityTarget && !reflection.globalIlluminationTarget &&
+              !reflection.shadowedDirectTarget && !reflection.globalIlluminationTarget &&
               reflection.reflectionTarget && rays.OwnedOutputTextureCount() == 1u &&
               reflectionFinite && reflectionEnergy > 0.01);
 
@@ -2507,7 +2518,7 @@ public:
         const GLenum rayRestoreError = glGetError();
         const auto combined = composite(all);
         check("all effects share one backend draw", allOK && rayRestoreError == GL_NO_ERROR &&
-              all.shadowVisibilityTarget && all.globalIlluminationTarget &&
+              all.shadowedDirectTarget && all.globalIlluminationTarget &&
               all.reflectionTarget && rays.OwnedOutputTextureCount() == 3u);
         check("all effect targets composite", combined.first);
 
@@ -2567,7 +2578,7 @@ public:
             const bool parityGL33ShadowOK = execute(
                 true, false, false, parityGL33Shadow);
             const std::vector<float> gl33Shadow = readTarget(
-                parityGL33Shadow.shadowVisibilityTarget, GL_RED, 1);
+                parityGL33Shadow.shadowedDirectTarget, GL_RGBA, 4);
             const bool parityGL33GIOK = execute(
                 false, true, false, parityGL33GI);
             const std::vector<float> gl33GI = readTarget(
@@ -2579,7 +2590,7 @@ public:
             const bool parityGL33AllOK = execute(
                 true, true, true, parityGL33All);
             const std::vector<float> gl33AllShadow = readTarget(
-                parityGL33All.shadowVisibilityTarget, GL_RED, 1);
+                parityGL33All.shadowedDirectTarget, GL_RGBA, 4);
             const std::vector<float> gl33AllGI = readTarget(
                 parityGL33All.globalIlluminationTarget, GL_RGBA, 4);
             const std::vector<float> gl33AllReflection = readTarget(
@@ -2590,7 +2601,7 @@ public:
             const bool computeShadowOK = executeCompute(
                 true, false, false, computeShadow);
             const std::vector<float> gl43Shadow = readComputeTarget(
-                computeShadow.shadowVisibilityTarget, GL_RED, 1);
+                computeShadow.shadowedDirectTarget, GL_RGBA, 4);
             const bool computeGIOK = executeCompute(
                 false, true, false, computeGI);
             const std::vector<float> gl43GI = readComputeTarget(
@@ -2605,7 +2616,7 @@ public:
             // test-only CPU texture-transfer barrier is issued.
             const auto computeComposite = composite(computeAll);
             const std::vector<float> gl43AllShadow = readComputeTarget(
-                computeAll.shadowVisibilityTarget, GL_RED, 1);
+                computeAll.shadowedDirectTarget, GL_RGBA, 4);
             const std::vector<float> gl43AllGI = readComputeTarget(
                 computeAll.globalIlluminationTarget, GL_RGBA, 4);
             const std::vector<float> gl43AllReflection = readComputeTarget(
@@ -2613,23 +2624,23 @@ public:
 
             check("GL43 shadows-only mask and values match GL33 tolerance",
                   parityGL33ShadowOK && computeShadowOK &&
-                  computeShadow.shadowVisibilityTarget &&
+                  computeShadow.shadowedDirectTarget &&
                   !computeShadow.globalIlluminationTarget &&
                   !computeShadow.reflectionTarget &&
                   nearImages(gl33Shadow, gl43Shadow));
             check("GL43 GI-only mask and values match GL33 tolerance",
-                  parityGL33GIOK && computeGIOK && !computeGI.shadowVisibilityTarget &&
+                  parityGL33GIOK && computeGIOK && !computeGI.shadowedDirectTarget &&
                   computeGI.globalIlluminationTarget &&
                   !computeGI.reflectionTarget && nearImages(gl33GI, gl43GI));
             check("GL43 reflections-only mask and values match GL33 tolerance",
                   parityGL33ReflectionOK && computeReflectionOK &&
-                  !computeReflection.shadowVisibilityTarget &&
+                  !computeReflection.shadowedDirectTarget &&
                   !computeReflection.globalIlluminationTarget &&
                   computeReflection.reflectionTarget &&
                   nearImages(gl33Reflection, gl43Reflection));
             check("GL43 all-effects outputs match GL33 tolerance",
                   parityGL33AllOK && computeAllOK &&
-                  computeAll.shadowVisibilityTarget &&
+                  computeAll.shadowedDirectTarget &&
                   computeAll.globalIlluminationTarget &&
                   computeAll.reflectionTarget &&
                   nearImages(gl33AllShadow, gl43AllShadow) &&
@@ -2905,15 +2916,15 @@ public:
         const bool computeMaximumQualityOK = computeQualityAvailable &&
             executeComputeQuality(true, true, false, computeMaximumQuality);
         check("GL33 honors GI 32x4 shadows 16 and point lights 9 through 16",
-              maximumQualityOK && maximumQuality.shadowVisibilityTarget &&
+              maximumQualityOK && maximumQuality.shadowedDirectTarget &&
               maximumQuality.globalIlluminationTarget && glGetError() == GL_NO_ERROR);
         if (computeQualityAvailable)
             check("GL43 honors maximum quality and all 16 lights with GL33 parity",
                   computeMaximumQualityOK &&
-                  nearImages(readTarget(maximumQuality.shadowVisibilityTarget,
-                                        GL_RED, 1),
-                              readComputeTarget(computeMaximumQuality.shadowVisibilityTarget,
-                                        GL_RED, 1)) &&
+                  nearImages(readTarget(maximumQuality.shadowedDirectTarget,
+                                        GL_RGBA, 4),
+                              readComputeTarget(computeMaximumQuality.shadowedDirectTarget,
+                                        GL_RGBA, 4)) &&
                   nearImages(readTarget(maximumQuality.globalIlluminationTarget,
                                         GL_RGBA, 4),
                               readComputeTarget(computeMaximumQuality.globalIlluminationTarget,
@@ -3014,6 +3025,87 @@ public:
         controlledInputs.quality = controlledQuality;
         controlledInputs.width = controlledInputs.height = 1;
         controlledInputs.contextGeneration = ContextGeneration();
+
+        // The centered triangle blocks only the red light. The green light is
+        // far enough to the side that its segment misses the triangle. An
+        // averaged scalar visibility would leave both channels non-zero;
+        // per-light shadowed direct radiance removes red while preserving green.
+        controlledScene.pointLights = {
+            {glm::vec3(0.0f, 0.0f, 4.0f), glm::vec3(16.0f, 0.0f, 0.0f)},
+            {glm::vec3(8.0f, 0.0f, 4.0f), glm::vec3(0.0f, 180.0f, 0.0f)},
+        };
+        controlledInputs.features.rayTracedReflections = false;
+        controlledInputs.features.rayTracedShadows = true;
+        controlledInputs.quality.shadowSamples = 4;
+        controlledInputs.quality.shadowSoftness = 0.0f;
+        FRayEffectOutputs coloredShadow;
+        glm::vec4 coloredShadowPixel(0.0f);
+        const bool coloredShadowOK = controlledGBufferOK &&
+            controlledRays.RenderEffects(controlledInputs, coloredShadow,
+                &diagnostic);
+        if (coloredShadowOK && coloredShadow.shadowedDirectTarget)
+        {
+            glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(
+                coloredShadow.shadowedDirectTarget->identity));
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT,
+                &coloredShadowPixel[0]);
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
+        check("per-light colored shadow removes only the blocked light",
+              coloredShadowOK && coloredShadow.shadowedDirectTarget &&
+              coloredShadowPixel.r < 0.01f && coloredShadowPixel.g > 0.1f &&
+              coloredShadowPixel.b < 0.01f &&
+              std::fabs(coloredShadowPixel.a - 1.0f) < 0.001f);
+
+        GLuint precomputedDirectTexture = 0;
+        const GLfloat precomputedDirect[4] = {0.8f, 0.6f, 0.4f, 1.0f};
+        glGenTextures(1, &precomputedDirectTexture);
+        glBindTexture(GL_TEXTURE_2D, precomputedDirectTexture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, 1, 1, 0, GL_RGBA,
+            GL_FLOAT, precomputedDirect);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        controlledLighting.unshadowedDirectTarget =
+            FRenderOutputView{precomputedDirectTexture, 1, 1, true};
+        bool interpolatedModelsPreserved = true;
+        for (float model : {0.0f, 1.0f})
+        {
+            if (controlledGBuffer.BindForGeometry())
+            {
+                const GLfloat shadingNormal[4] = {0.0f, 0.0f, 1.0f, model};
+                glClearBufferfv(GL_COLOR, 2, shadingNormal);
+                controlledGBuffer.EndGeometry();
+            }
+            FRayEffectOutputs interpolatedShadow;
+            glm::vec4 interpolatedPixel(0.0f);
+            const bool okay = controlledRays.RenderEffects(
+                controlledInputs, interpolatedShadow, &diagnostic);
+            if (okay && interpolatedShadow.shadowedDirectTarget)
+            {
+                glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(
+                    interpolatedShadow.shadowedDirectTarget->identity));
+                glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT,
+                    &interpolatedPixel[0]);
+            }
+            interpolatedModelsPreserved = interpolatedModelsPreserved && okay &&
+                interpolatedPixel.r < 0.01f &&
+                std::fabs(interpolatedPixel.g - 0.6f) < 0.01f &&
+                std::fabs(interpolatedPixel.b - 0.4f) < 0.01f;
+        }
+        check("Flat and Gouraud preserve precomputed direct with per-channel shadow ratios",
+              interpolatedModelsPreserved);
+        if (controlledGBuffer.BindForGeometry())
+        {
+            const GLfloat phongNormal[4] = {0.0f, 0.0f, 1.0f, 2.0f};
+            glClearBufferfv(GL_COLOR, 2, phongNormal);
+            controlledGBuffer.EndGeometry();
+        }
+        controlledLighting.unshadowedDirectTarget = {};
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDeleteTextures(1, &precomputedDirectTexture);
+        controlledScene.pointLights.clear();
+        controlledInputs.features.rayTracedShadows = false;
+        controlledInputs.features.rayTracedReflections = true;
         FRayEffectOutputs controlledReflection;
         glm::vec4 controlledPixel(0.0f);
         const bool controlledReflectionOK = controlledGBufferOK &&
@@ -3096,20 +3188,21 @@ public:
             for (int light = 0; light < lightCount; ++light)
                 controlledScene.pointLights.push_back({
                     light < 8 ? glm::vec3(0.0f, 0.0f, 4.0f)
-                              : glm::vec3(0.0f, 0.0f, -4.0f),
-                    glm::vec3(1.0f)});
+                              : glm::vec3(8.0f, 0.0f, 4.0f),
+                    light < 8 ? glm::vec3(1.0f, 0.0f, 0.0f)
+                              : glm::vec3(0.0f, 1.0f, 0.0f)});
             controlledInputs.features.rayTracedReflections = false;
             controlledInputs.features.rayTracedShadows = true;
             controlledInputs.quality.shadowSamples = samples;
             controlledInputs.quality.shadowSoftness = softness;
             FRayEffectOutputs output;
-            float pixel = -1.0f;
+            glm::vec4 pixel(-1.0f);
             if (controlledRays.RenderEffects(controlledInputs, output, &diagnostic) &&
-                output.shadowVisibilityTarget)
+                output.shadowedDirectTarget)
             {
                 glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(
-                    output.shadowVisibilityTarget->identity));
-                glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_FLOAT, &pixel);
+                    output.shadowedDirectTarget->identity));
+                glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, &pixel);
                 glBindTexture(GL_TEXTURE_2D, 0);
             }
             return pixel;
@@ -3121,59 +3214,60 @@ public:
             for (int light = 0; light < lightCount; ++light)
                 controlledScene.pointLights.push_back({
                     light < 8 ? glm::vec3(0.0f, 0.0f, 4.0f)
-                              : glm::vec3(0.0f, 0.0f, -4.0f),
-                    glm::vec3(1.0f)});
+                              : glm::vec3(8.0f, 0.0f, 4.0f),
+                    light < 8 ? glm::vec3(1.0f, 0.0f, 0.0f)
+                              : glm::vec3(0.0f, 1.0f, 0.0f)});
             controlledInputs.features.rayTracedReflections = false;
             controlledInputs.features.rayTracedShadows = true;
             controlledInputs.quality.shadowSamples = samples;
             controlledInputs.quality.shadowSoftness = softness;
             FRayEffectOutputs output;
-            float pixel = -1.0f;
+            glm::vec4 pixel(-1.0f);
             if (computeControlledRays.RenderEffects(
                     controlledInputs, output, &diagnostic) &&
-                output.shadowVisibilityTarget)
+                output.shadowedDirectTarget)
             {
                 glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
                 glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(
-                    output.shadowVisibilityTarget->identity));
-                glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_FLOAT, &pixel);
+                    output.shadowedDirectTarget->identity));
+                glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, &pixel);
                 glBindTexture(GL_TEXTURE_2D, 0);
             }
             return pixel;
         };
-        const float firstEightVisibility = readControlledShadow(8, 1, 0.0f);
-        const float allSixteenVisibility = readControlledShadow(16, 1, 0.0f);
-        check("shadow output measurably consumes point lights 9 through 16",
-              firstEightVisibility >= 0.0f && firstEightVisibility < 0.05f &&
-              allSixteenVisibility > 0.45f && allSixteenVisibility < 0.55f);
+        const glm::vec4 firstEightDirect = readControlledShadow(8, 1, 0.0f);
+        const glm::vec4 allSixteenDirect = readControlledShadow(16, 1, 0.0f);
+        check("shadow output accumulates unblocked lights 9 through 16 per channel",
+              glm::length(glm::vec3(firstEightDirect)) < 0.001f &&
+              allSixteenDirect.r < 0.001f && allSixteenDirect.g > 0.01f);
         if (computeQualityAvailable)
         {
-            const float computeFirstEightVisibility =
+            const glm::vec4 computeFirstEightDirect =
                 readComputeControlledShadow(8, 1, 0.0f);
-            const float computeAllSixteenVisibility =
+            const glm::vec4 computeAllSixteenDirect =
                 readComputeControlledShadow(16, 1, 0.0f);
             check("GL43 shadow contribution from lights 9 through 16 matches GL33",
-                  std::fabs(firstEightVisibility - computeFirstEightVisibility) <
+                  glm::length(glm::vec3(firstEightDirect - computeFirstEightDirect)) <
                       0.015f &&
-                  std::fabs(allSixteenVisibility - computeAllSixteenVisibility) <
+                  glm::length(glm::vec3(allSixteenDirect - computeAllSixteenDirect)) <
                       0.015f);
         }
         controlledSurface.vertices[0].position = glm::vec3(-0.35f, -0.3f, 2.0f);
         controlledSurface.vertices[1].position = glm::vec3( 0.35f, -0.3f, 2.0f);
         controlledSurface.vertices[2].position = glm::vec3( 0.0f,   0.4f, 2.0f);
         controlledSurface.MarkGeometryDirty();
-        const float oneShadowSample = readControlledShadow(1, 1, 0.2f);
-        const float sixteenShadowSamples = readControlledShadow(1, 16, 0.2f);
+        const float oneShadowSample = readControlledShadow(1, 1, 0.2f).r;
+        const float sixteenShadowSamples = readControlledShadow(1, 16, 0.2f).r;
         check("maximum shadow samples change controlled soft-shadow visibility",
               oneShadowSample >= 0.0f && sixteenShadowSamples > 0.0f &&
-              sixteenShadowSamples < 1.0f &&
-              std::fabs(oneShadowSample - sixteenShadowSamples) > 0.05f);
+              sixteenShadowSamples < 0.07f &&
+              std::fabs(oneShadowSample - sixteenShadowSamples) > 0.001f);
         if (computeQualityAvailable)
         {
             const float computeOneShadowSample =
-                readComputeControlledShadow(1, 1, 0.2f);
+                readComputeControlledShadow(1, 1, 0.2f).r;
             const float computeSixteenShadowSamples =
-                readComputeControlledShadow(1, 16, 0.2f);
+                readComputeControlledShadow(1, 16, 0.2f).r;
             check("GL43 maximum shadow samples match GL33 controlled visibility",
                   std::fabs(oneShadowSample - computeOneShadowSample) < 0.015f &&
                   std::fabs(sixteenShadowSamples -
@@ -3377,7 +3471,7 @@ public:
             glGetIntegerv(GL_UNPACK_SKIP_IMAGES,
                 &computeRestoredUnpackSkipImages);
             check("GL43 restores hostile indexed SSBO image and pixel-store state",
-                  computeHostileOK && computeHostileOutput.shadowVisibilityTarget &&
+                  computeHostileOK && computeHostileOutput.shadowedDirectTarget &&
                   restoredGenericSSBO == static_cast<GLint>(hostileSSBOs[1]) &&
                   restoredIndexedSSBO == static_cast<GLint>(hostileSSBOs[0]) &&
                   restoredIndexedSSBOStart == 0 &&
@@ -3420,7 +3514,7 @@ public:
                 &computeRestoredUnpackSkipImages);
             check("failed GL43 upload is transactional and restores hostile state",
                   computeHostileFailed &&
-                  !computeHostileFailure.shadowVisibilityTarget &&
+                  !computeHostileFailure.shadowedDirectTarget &&
                   restoredGenericSSBO == static_cast<GLint>(hostileSSBOs[1]) &&
                   restoredImageName == static_cast<GLint>(hostileImageTexture) &&
                   computeRestoredUnpackAlignment == 8 &&
@@ -3455,7 +3549,7 @@ public:
         glGetIntegeri_v(GL_SAMPLER_BINDING, hostileUnit, &failedSampler);
         glGetIntegerv(GL_UNPACK_ALIGNMENT, &failedUnpackAlignment);
         check("failed ray upload restores high texture-unit and pixel-store state",
-              hostileFailure && !hostileFailureOutput.shadowVisibilityTarget &&
+              hostileFailure && !hostileFailureOutput.shadowedDirectTarget &&
               failedActiveTexture == GL_TEXTURE0 + hostileUnit &&
               failedTexture2D == static_cast<GLint>(hostileTextures[0]) &&
               failedTextureArray == static_cast<GLint>(hostileTextures[1]) &&
@@ -3493,8 +3587,8 @@ public:
         const bool uploadFailed = !execute(true, false, false, failedUpload);
         const bool uploadRetried = execute(true, false, false, retriedUpload);
         check("failed scene upload is transactional and retries", uploadFailed &&
-              !failedUpload.shadowVisibilityTarget && uploadRetried &&
-              retriedUpload.shadowVisibilityTarget &&
+              !failedUpload.shadowedDirectTarget && uploadRetried &&
+              retriedUpload.shadowedDirectTarget &&
               rays.Stats().sceneUploads == uploadsBeforeFailure + 1u);
 
         class FFailOnceGLFactory final : public IRayTracingBackendFactory
@@ -3552,8 +3646,8 @@ public:
         const bool schedulerRecovered = retryScheduler.Execute(
             retryInputs, retrySelection, schedulerRetry);
         check("scheduler retries a transactional real-GL upload failure next frame",
-              schedulerNeutral && !schedulerFailure.shadowVisibilityTarget &&
-              schedulerRecovered && schedulerRetry.shadowVisibilityTarget &&
+              schedulerNeutral && !schedulerFailure.shadowedDirectTarget &&
+              schedulerRecovered && schedulerRetry.shadowedDirectTarget &&
               schedulerWarnings.count == 1 &&
               retryScheduler.Stats().backendCalls == 2u);
         check("GL33 retry performs a second real upload and commits only once",
@@ -3597,8 +3691,8 @@ public:
                 retryInputs, autoComputeSelection, autoFallbackSecond);
             check("Auto GL43 init failure falls back to GL33 exactly once",
                   autoFallbackFirstOK && autoFallbackSecondOK &&
-                  autoFallbackFirst.shadowVisibilityTarget &&
-                  autoFallbackSecond.shadowVisibilityTarget &&
+                  autoFallbackFirst.shadowedDirectTarget &&
+                  autoFallbackSecond.shadowedDirectTarget &&
                   autoComputeCreates == 1 && autoCompatibleCreates == 1 &&
                   autoWarnings.count == 1 &&
                   dynamic_cast<UGL33RayTracingBackend*>(
@@ -3635,8 +3729,8 @@ public:
                 retryInputs, forcedComputeSelection, forcedFailureSecond);
             check("forced GL43 init failure remains neutral and never calls GL33",
                   forcedFirstOK && forcedSecondOK &&
-                  !forcedFailureFirst.shadowVisibilityTarget &&
-                  !forcedFailureSecond.shadowVisibilityTarget &&
+                  !forcedFailureFirst.shadowedDirectTarget &&
+                  !forcedFailureSecond.shadowedDirectTarget &&
                   forcedComputeCreates == 1 && forcedCompatibleCreates == 0 &&
                   forcedWarnings.count == 1 &&
                   forcedFailureScheduler.ActiveBackend() == nullptr);
@@ -3674,8 +3768,8 @@ public:
                 retryInputs, forcedComputeSelection, computeRetrySecond);
             check("scheduler retries transactional GL43 upload failure next frame",
                   computeRetryFirstOK && computeRetrySecondOK &&
-                  !computeRetryFirst.shadowVisibilityTarget &&
-                  computeRetrySecond.shadowVisibilityTarget &&
+                  !computeRetryFirst.shadowedDirectTarget &&
+                  computeRetrySecond.shadowedDirectTarget &&
                   retryComputeCreates == 1 &&
                   computeRetryWarnings.count == 1 &&
                   computeRetryScheduler.Stats().backendCalls == 2u);
@@ -3721,13 +3815,13 @@ public:
             FRayEffectOutputs prior, rejected, recovered;
             check("fault telemetry fixture commits initial scene", backend.RenderEffects(faultInputs, prior, &diagnostic));
             const auto beforeOutput = backend.Stats();
-            const auto oldTexture = static_cast<GLuint>(prior.shadowVisibilityTarget->identity);
+            const auto oldTexture = static_cast<GLuint>(prior.shadowedDirectTarget->identity);
             faultInputs.width = 96;
             glEnable(0xffffffffu); // Real GL error rejected after real candidate output allocation.
             const bool outputFailed = !backend.RenderEffects(faultInputs, rejected, &diagnostic);
             const auto outputFailure = backend.Stats();
             check("failed output transaction counts allocations and rollback without changing live output",
-                  outputFailed && !rejected.shadowVisibilityTarget && glIsTexture(oldTexture) &&
+                  outputFailed && !rejected.shadowedDirectTarget && glIsTexture(oldTexture) &&
                   outputFailure.outputAllocationAttempts == beforeOutput.outputAllocationAttempts + 1 &&
                   outputFailure.outputAllocations == beforeOutput.outputAllocations &&
                   outputFailure.textureUploadCalls == beforeOutput.textureUploadCalls + 3 &&
@@ -3925,7 +4019,7 @@ public:
                 FRayEffectOutputs maskOutputs;
                 const bool maskOkay = maskRays.RenderEffects(maskInputs, maskOutputs, &diagnostic);
                 check(("GL33 baseline read-buffer rule effect mask " + std::to_string(mask)).c_str(),
-                      maskOkay && bool(maskOutputs.shadowVisibilityTarget) == bool(mask & 1) &&
+                      maskOkay && bool(maskOutputs.shadowedDirectTarget) == bool(mask & 1) &&
                       bool(maskOutputs.globalIlluminationTarget) == bool(mask & 2) &&
                       bool(maskOutputs.reflectionTarget) == bool(mask & 4));
             }

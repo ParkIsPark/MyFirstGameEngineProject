@@ -373,12 +373,9 @@ void CheckDefaultLightAndTargetValidation()
 void CheckNeutralRayOutputs()
 {
     const FRayEffectOutputs outputs;
-    assert(!outputs.shadows.has_value());
-    assert(!outputs.globalIllumination.has_value());
-    assert(!outputs.reflections.has_value());
-    assert(outputs.ShadowVisibilityOrNeutral() == 1.0f);
-    assert(outputs.GlobalIlluminationOrNeutral() == glm::vec3(0.0f));
-    assert(outputs.ReflectionOrNeutral() == glm::vec3(0.0f));
+    assert(!outputs.shadowedDirectTarget.has_value());
+    assert(!outputs.globalIlluminationTarget.has_value());
+    assert(!outputs.reflectionTarget.has_value());
 
     FLogicalGBufferSample sample;
     sample.valid = true;
