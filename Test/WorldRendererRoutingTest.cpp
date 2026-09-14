@@ -315,7 +315,7 @@ void CheckSceneExtractionAndRouting()
     assert(observed->scene.pointLights.size() == 1);
     assert(!observed->scene.usesDefaultPointLight);
     assert(observed->scene.pointLights[0].worldPosition == glm::vec3(7.0f, 8.0f, 9.0f));
-    assert(observed->scene.pointLights[0].radiance == glm::vec3(2.0f, 1.0f, 3.0f));
+    assert(observed->scene.pointLights[0].sourceIntensity == glm::vec3(2.0f, 1.0f, 3.0f));
     assert(observed->scene.environment.skyPath == "Content/Sky/Actor.hdr");
     assert(observed->scene.environment.tint == glm::vec3(1.6f, 1.4f, 1.2f));
     assert(Near(observed->scene.environment.exponent, 1.75f));

@@ -679,7 +679,7 @@ bool UGL33RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
             glm::value_ptr(inputs.scene->pointLights[static_cast<std::size_t>(i)].worldPosition));
         const std::string radianceName = "uLightRadiances[" + std::to_string(i) + "]";
         glUniform3fv(glGetUniformLocation(program_, radianceName.c_str()), 1,
-            glm::value_ptr(inputs.scene->pointLights[static_cast<std::size_t>(i)].radiance));
+            glm::value_ptr(inputs.scene->pointLights[static_cast<std::size_t>(i)].sourceIntensity));
     }
     glDrawArrays(GL_TRIANGLES, 0, 3);
     ++stats_.rayDraws;

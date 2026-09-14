@@ -239,6 +239,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\RayTracing\FRaySceneCache.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\UHardwareRasterizer.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\HardwareRasterShaders.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\SharedLightingShaderSource.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\RasterLightingShaders.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\RayEffectsFragmentShaders.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\RayEffectsComputeShaders.h" />

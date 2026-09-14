@@ -140,9 +140,10 @@ FRenderScene ExtractRenderScene(const UWorld& world, const ACamera& camera)
         if (!light || !light->lightComp) continue;
         if (const auto* point = dynamic_cast<const PointLightComponent*>(light->lightComp))
         {
-            result.pointLights.push_back({
-                point->GetWorldLocation(), point->LightColor * point->LightIntensity,
-            });
+            FRenderPointLight renderLight;
+            renderLight.worldPosition = point->GetWorldLocation();
+            renderLight.sourceIntensity = point->LightColor * point->LightIntensity;
+            result.pointLights.push_back(renderLight);
         }
         else
         {
@@ -175,7 +176,10 @@ FRenderScene ExtractRenderScene(const UWorld& world, const ACamera& camera)
     if (result.pointLights.empty())
     {
         result.usesDefaultPointLight = true;
-        result.pointLights.push_back({glm::vec3(6.0f, 8.0f, 2.0f), glm::vec3(1.0f)});
+        FRenderPointLight renderLight;
+        renderLight.worldPosition = glm::vec3(6.0f, 8.0f, 2.0f);
+        renderLight.sourceIntensity = glm::vec3(1.0f);
+        result.pointLights.push_back(renderLight);
     }
     return result;
 }

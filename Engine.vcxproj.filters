@@ -236,6 +236,7 @@
     <ClInclude Include="Engine\RayTracing\FRaySceneCache.h"><Filter>Engine\RayTracing</Filter></ClInclude>
     <ClInclude Include="Engine\Render\UHardwareRasterizer.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\Shaders\HardwareRasterShaders.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="Engine\Render\Shaders\SharedLightingShaderSource.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\Shaders\RasterLightingShaders.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\Shaders\RayEffectsFragmentShaders.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\Shaders\RayEffectsComputeShaders.h"><Filter>Engine\Render</Filter></ClInclude>

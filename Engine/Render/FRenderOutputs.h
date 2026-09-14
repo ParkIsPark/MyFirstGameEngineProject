@@ -57,8 +57,8 @@ struct FRenderOutputView
 struct FRasterLightingOutput
 {
     bool valid = false;
-    FRenderOutputView colorTarget;
-    glm::vec3 hdrColor = glm::vec3(0.0f);
+    FRenderOutputView environmentAmbientTarget;
+    FRenderOutputView unshadowedDirectTarget;
 };
 
 struct FRayEffectOutputs

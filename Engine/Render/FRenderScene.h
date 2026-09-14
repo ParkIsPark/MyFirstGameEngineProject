@@ -85,7 +85,8 @@ struct FRenderMeshInstance
 struct FRenderPointLight
 {
     glm::vec3 worldPosition = glm::vec3(0.0f);
-    glm::vec3 radiance = glm::vec3(1.0f);
+    // Unattenuated lightColor * lightIntensity. Consumers apply distance.
+    glm::vec3 sourceIntensity = glm::vec3(1.0f);
 };
 
 struct FRenderEnvironment

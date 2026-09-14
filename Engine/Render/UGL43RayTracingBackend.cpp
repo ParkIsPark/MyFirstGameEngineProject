@@ -769,7 +769,7 @@ bool UGL43RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
             "uLightRadiances[" + std::to_string(i) + "]";
         glUniform3fv(glGetUniformLocation(program_, radianceName.c_str()), 1,
             glm::value_ptr(inputs.scene->pointLights[static_cast<std::size_t>(i)]
-                               .radiance));
+                               .sourceIntensity));
     }
     if (!CollectError("GL43 ray-effects pre-dispatch setup", diagnostic))
         return false;

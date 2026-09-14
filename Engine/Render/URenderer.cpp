@@ -204,7 +204,7 @@ const std::vector<float>& URenderer::RasterShadedLegacyOutput(
     std::vector<std::pair<glm::vec3, glm::vec3>> lights;   // (pos, final radiance)
     if (!renderScene.usesDefaultPointLight)
         for (const FRenderPointLight& light : renderScene.pointLights)
-            lights.emplace_back(light.worldPosition, light.radiance);
+            lights.emplace_back(light.worldPosition, light.sourceIntensity);
     sp.skyHorizon = renderScene.environment.horizon;
     sp.skyZenith = renderScene.environment.zenith;
     sp.skyExp = renderScene.environment.exponent;

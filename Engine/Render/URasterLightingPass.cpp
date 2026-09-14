@@ -5,6 +5,7 @@
 #include "FRenderTarget.h"
 #include "FPixelUnpackGuard.h"
 #include "Shaders/RasterLightingShaders.h"
+#include "Shaders/SharedLightingShaderSource.h"
 #include "UHardwareGBuffer.h"
 
 #include <GL/glew.h>
@@ -343,7 +344,9 @@ bool URasterLightingPass::Init(std::uint64_t contextGeneration,
 
     FStateGuard restore;
     std::string error;
-    if (!LinkProgram(RasterLightingShaders::LightingFragment, "lighting fragment",
+    const std::string lightingSource =
+        SharedLightingShaderSource::BuildRasterLightingFragmentShader();
+    if (!LinkProgram(lightingSource.c_str(), "lighting fragment",
                      lightingProgram_, error) ||
         !LinkProgram(RasterLightingShaders::CompositeFragment, "composite fragment",
                      compositeProgram_, error))
@@ -386,10 +389,11 @@ bool URasterLightingPass::Init(std::uint64_t contextGeneration,
     for (int unit = 0; unit < TextureUnitCount; ++unit)
         glUniform1i(glGetUniformLocation(lightingProgram_, samplers[unit]), unit);
     glUseProgram(compositeProgram_);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uRasterLighting"), 0);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uShadowVisibility"), 1);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uGIRadiance"), 2);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uReflectionRadiance"), 3);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uEnvironmentAmbient"), 0);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uUnshadowedDirect"), 1);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uShadowVisibility"), 2);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uGIRadiance"), 3);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uReflectionRadiance"), 4);
     if (diagnostic) diagnostic->clear();
     return CollectError("Raster lighting initialization", diagnostic);
 }
@@ -410,12 +414,6 @@ bool URasterLightingPass::Resize(int width, int height,
         return true;
 
     FStateGuard restore;
-    if (framebuffer_)
-    {
-        glDeleteTextures(1, &colorTexture_);
-        glDeleteFramebuffers(1, &framebuffer_);
-        colorTexture_ = framebuffer_ = 0;
-    }
     GLint maxTextureSize = 0;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
     if (width > maxTextureSize || height > maxTextureSize)
@@ -425,35 +423,56 @@ bool URasterLightingPass::Resize(int width, int height,
     }
     FPixelUnpackGuard unpack;
     glActiveTexture(GL_TEXTURE0); // Captured by FStateGuard; never touch caller unit 10+.
-    glGenFramebuffers(1, &framebuffer_);
-    glGenTextures(1, &colorTexture_);
-    glBindTexture(GL_TEXTURE_2D, colorTexture_);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0,
-                 GL_RGBA, GL_FLOAT, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
+    unsigned candidateFramebuffer = 0;
+    unsigned candidateTextures[2] = {};
+    glGenFramebuffers(1, &candidateFramebuffer);
+    glGenTextures(2, candidateTextures);
+    for (unsigned texture : candidateTextures)
+    {
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0,
+                     GL_RGBA, GL_FLOAT, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, candidateFramebuffer);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                           GL_TEXTURE_2D, colorTexture_, 0);
-    glDrawBuffer(GL_COLOR_ATTACHMENT0);
-    const bool complete = framebuffer_ && colorTexture_ &&
+                           GL_TEXTURE_2D, candidateTextures[0], 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
+                           GL_TEXTURE_2D, candidateTextures[1], 0);
+    const GLenum candidateDrawBuffers[2] = {
+        GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+    glDrawBuffers(2, candidateDrawBuffers);
+    const bool complete = candidateFramebuffer && candidateTextures[0] &&
+        candidateTextures[1] &&
         glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
     if (!complete)
     {
-        if (colorTexture_) glDeleteTextures(1, &colorTexture_);
-        if (framebuffer_) glDeleteFramebuffers(1, &framebuffer_);
-        colorTexture_ = framebuffer_ = 0;
+        glDeleteTextures(2, candidateTextures);
+        if (candidateFramebuffer) glDeleteFramebuffers(1, &candidateFramebuffer);
         if (diagnostic) *diagnostic = "Raster lighting HDR framebuffer is incomplete";
         return false;
     }
+    if (!CollectError("Raster lighting resize", diagnostic))
+    {
+        glDeleteTextures(2, candidateTextures);
+        glDeleteFramebuffers(1, &candidateFramebuffer);
+        return false;
+    }
+    if (environmentAmbientTexture_) glDeleteTextures(1, &environmentAmbientTexture_);
+    if (unshadowedDirectTexture_) glDeleteTextures(1, &unshadowedDirectTexture_);
+    if (framebuffer_) glDeleteFramebuffers(1, &framebuffer_);
+    framebuffer_ = candidateFramebuffer;
+    environmentAmbientTexture_ = candidateTextures[0];
+    unshadowedDirectTexture_ = candidateTextures[1];
     width_ = width;
     height_ = height;
     ++resourceRevision_;
     ++stats_.outputAllocations;
     if (diagnostic) diagnostic->clear();
-    return CollectError("Raster lighting resize", diagnostic);
+    return true;
 }
 
 bool URasterLightingPass::LoadEnvironmentTexture(
@@ -558,7 +577,9 @@ bool URasterLightingPass::Render(const FRenderScene& scene,
     FStateGuard restore;
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
     glViewport(0, 0, width_, height_);
-    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    const GLenum lightingDrawBuffers[2] = {
+        GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+    glDrawBuffers(2, lightingDrawBuffers);
     ConfigureFullscreenState();
     glUseProgram(lightingProgram_);
     glBindVertexArray(fullscreenVAO_);
@@ -625,17 +646,20 @@ bool URasterLightingPass::Render(const FRenderScene& scene,
     for (int i = 0; i < lightCount; ++i)
     {
         const std::string positionName = "uPointLightPositions[" + std::to_string(i) + "]";
-        const std::string radianceName = "uPointLightRadiances[" + std::to_string(i) + "]";
+        const std::string sourceName = "uPointLightSources[" + std::to_string(i) + "]";
         glUniform3fv(glGetUniformLocation(lightingProgram_, positionName.c_str()), 1,
                      glm::value_ptr(scene.pointLights[static_cast<std::size_t>(i)].worldPosition));
-        glUniform3fv(glGetUniformLocation(lightingProgram_, radianceName.c_str()), 1,
-                     glm::value_ptr(scene.pointLights[static_cast<std::size_t>(i)].radiance));
+        glUniform3fv(glGetUniformLocation(lightingProgram_, sourceName.c_str()), 1,
+                     glm::value_ptr(scene.pointLights[static_cast<std::size_t>(i)].sourceIntensity));
     }
     glDrawArrays(GL_TRIANGLES, 0, 3);
     if (!CollectError("Raster lighting pass", diagnostic)) return false;
     ++stats_.lightingPasses;
     output.valid = true;
-    output.colorTarget = {static_cast<std::uint64_t>(colorTexture_), width_, height_, true};
+    output.environmentAmbientTarget = {
+        static_cast<std::uint64_t>(environmentAmbientTexture_), width_, height_, true};
+    output.unshadowedDirectTarget = {
+        static_cast<std::uint64_t>(unshadowedDirectTexture_), width_, height_, true};
     // A missing/invalid HDRI is a recoverable warning: the frame completed with
     // the procedural sky, so callers must not mistake the warning for failure.
     if (diagnostic) diagnostic->clear();
@@ -652,8 +676,14 @@ bool URasterLightingPass::Composite(const FRenderTarget& target,
     output = {};
     if (!IsReady() || contextGeneration_ != contextGeneration ||
         !target.IsValidForContext(contextGeneration) || !rasterLighting.valid ||
-        !rasterLighting.colorTarget.valid ||
-        rasterLighting.colorTarget.identity != colorTexture_)
+        !rasterLighting.environmentAmbientTarget.valid ||
+        !rasterLighting.unshadowedDirectTarget.valid ||
+        rasterLighting.environmentAmbientTarget.identity != environmentAmbientTexture_ ||
+        rasterLighting.unshadowedDirectTarget.identity != unshadowedDirectTexture_ ||
+        rasterLighting.environmentAmbientTarget.width != width_ ||
+        rasterLighting.environmentAmbientTarget.height != height_ ||
+        rasterLighting.unshadowedDirectTarget.width != width_ ||
+        rasterLighting.unshadowedDirectTarget.height != height_)
     {
         if (diagnostic) *diagnostic = "Raster composite rejected invalid inputs/context";
         return false;
@@ -666,8 +696,11 @@ bool URasterLightingPass::Composite(const FRenderTarget& target,
     glUseProgram(compositeProgram_);
     glBindVertexArray(fullscreenVAO_);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, colorTexture_);
+    glBindTexture(GL_TEXTURE_2D, environmentAmbientTexture_);
     glBindSampler(0, 0);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, unshadowedDirectTexture_);
+    glBindSampler(1, 0);
     auto validEffectTarget = [&](const std::optional<FRenderOutputView>& view)
     {
         return view.has_value() && view->valid && view->identity != 0 &&
@@ -677,12 +710,13 @@ bool URasterLightingPass::Composite(const FRenderTarget& target,
     const bool hasGI = validEffectTarget(rayEffects.globalIlluminationTarget);
     const bool hasReflection = validEffectTarget(rayEffects.reflectionTarget);
     const unsigned textures[] = {
-        0u,
+        environmentAmbientTexture_,
+        unshadowedDirectTexture_,
         hasShadow ? static_cast<unsigned>(rayEffects.shadowVisibilityTarget->identity) : 0u,
         hasGI ? static_cast<unsigned>(rayEffects.globalIlluminationTarget->identity) : 0u,
         hasReflection ? static_cast<unsigned>(rayEffects.reflectionTarget->identity) : 0u,
     };
-    for (int unit = 1; unit < 4; ++unit)
+    for (int unit = 2; unit < 5; ++unit)
     {
         glActiveTexture(GL_TEXTURE0 + unit);
         glBindTexture(GL_TEXTURE_2D, textures[unit]);
@@ -712,7 +746,8 @@ void URasterLightingPass::Shutdown() noexcept
 void URasterLightingPass::DeleteCurrentResources() noexcept
 {
     if (environmentTexture_) glDeleteTextures(1, &environmentTexture_);
-    if (colorTexture_) glDeleteTextures(1, &colorTexture_);
+    if (environmentAmbientTexture_) glDeleteTextures(1, &environmentAmbientTexture_);
+    if (unshadowedDirectTexture_) glDeleteTextures(1, &unshadowedDirectTexture_);
     if (framebuffer_) glDeleteFramebuffers(1, &framebuffer_);
     if (fullscreenVAO_) glDeleteVertexArrays(1, &fullscreenVAO_);
     if (lightingProgram_) glDeleteProgram(lightingProgram_);
@@ -726,7 +761,8 @@ void URasterLightingPass::ForgetCurrentResources() noexcept
     compositeProgram_ = 0;
     fullscreenVAO_ = 0;
     framebuffer_ = 0;
-    colorTexture_ = 0;
+    environmentAmbientTexture_ = 0;
+    unshadowedDirectTexture_ = 0;
     environmentTexture_ = 0;
     width_ = height_ = 0;
     contextGeneration_ = 0;

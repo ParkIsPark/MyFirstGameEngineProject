@@ -1014,7 +1014,8 @@ public:
         FRasterLightingOutput lit;
         check("Phong G-buffer shades into HDR output",
               lighting.Render(scene, quality, gbuffer, ContextGeneration(), lit, &diagnostic) &&
-              lit.valid && lit.colorTarget.valid);
+              lit.valid && lit.environmentAmbientTarget.valid &&
+              lit.unshadowedDirectTarget.valid);
 
         glDrawBuffer(GL_NONE);
         glViewport(3, 4, 17, 19);
@@ -1040,6 +1041,8 @@ public:
         glFrontFace(GL_CW);
         glEnablei(GL_BLEND, 0);
         glColorMaski(0, GL_FALSE, GL_TRUE, GL_FALSE, GL_TRUE);
+        glEnablei(GL_BLEND, 1);
+        glColorMaski(1, GL_TRUE, GL_FALSE, GL_TRUE, GL_FALSE);
 
         FRasterLightingOutput hostileLit;
         const bool hostileLightingOK = lighting.Render(
@@ -1048,6 +1051,9 @@ public:
         glBindFramebuffer(GL_READ_FRAMEBUFFER, lighting.Framebuffer());
         glReadBuffer(GL_COLOR_ATTACHMENT0);
         glReadPixels(32, 32, 1, 1, GL_RGBA, GL_FLOAT, hostileLightingPixel);
+        float hostileDirectPixel[4] = {};
+        glReadBuffer(GL_COLOR_ATTACHMENT1);
+        glReadPixels(32, 32, 1, 1, GL_RGBA, GL_FLOAT, hostileDirectPixel);
         glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 
         GLint restoredLightingDrawBuffer = 0;
@@ -1059,6 +1065,7 @@ public:
         GLdouble restoredLightingDepthRange[2] = {};
         GLboolean restoredLightingDepthMask = GL_TRUE;
         GLboolean restoredLightingMask[4] = {};
+        GLboolean restoredLightingMaskOne[4] = {};
         glGetIntegerv(GL_DRAW_BUFFER0, &restoredLightingDrawBuffer);
         glGetIntegerv(GL_VIEWPORT, restoredLightingViewport);
         glGetIntegerv(GL_POLYGON_MODE, restoredLightingPolygon);
@@ -1068,6 +1075,7 @@ public:
         glGetDoublev(GL_DEPTH_RANGE, restoredLightingDepthRange);
         glGetBooleanv(GL_DEPTH_WRITEMASK, &restoredLightingDepthMask);
         glGetBooleani_v(GL_COLOR_WRITEMASK, 0, restoredLightingMask);
+        glGetBooleani_v(GL_COLOR_WRITEMASK, 1, restoredLightingMaskOne);
         const bool hostileStateRestored =
             restoredLightingDrawBuffer == GL_NONE &&
             restoredLightingViewport[0] == 3 && restoredLightingViewport[1] == 4 &&
@@ -1083,15 +1091,20 @@ public:
             std::fabs(restoredLightingDepthRange[1] - 0.8) < 0.000001 &&
             restoredLightingMask[0] == GL_FALSE && restoredLightingMask[1] == GL_TRUE &&
             restoredLightingMask[2] == GL_FALSE && restoredLightingMask[3] == GL_TRUE &&
+            restoredLightingMaskOne[0] == GL_TRUE &&
+            restoredLightingMaskOne[1] == GL_FALSE &&
+            restoredLightingMaskOne[2] == GL_TRUE &&
+            restoredLightingMaskOne[3] == GL_FALSE &&
             glIsEnabled(GL_RASTERIZER_DISCARD) && glIsEnabled(GL_STENCIL_TEST) &&
             glIsEnabled(GL_SAMPLE_ALPHA_TO_COVERAGE) && glIsEnabled(GL_SAMPLE_COVERAGE) &&
             glIsEnabled(GL_DITHER) && glIsEnabled(GL_PRIMITIVE_RESTART) &&
             glIsEnabled(GL_DEPTH_CLAMP) && glIsEnabled(GL_POLYGON_OFFSET_FILL) &&
             glIsEnabled(GL_SCISSOR_TEST) && glIsEnabled(GL_DEPTH_TEST) &&
             glIsEnabled(GL_CULL_FACE) && glIsEnabled(GL_FRAMEBUFFER_SRGB) &&
-            glIsEnabledi(GL_BLEND, 0);
+            glIsEnabledi(GL_BLEND, 0) && glIsEnabledi(GL_BLEND, 1);
         check("lighting pass survives hostile state and restores it exactly",
               hostileLightingOK && hostileLightingPixel[3] > 0.5f &&
+              hostileDirectPixel[3] > 0.5f &&
               hostileLightingPixel[0] + hostileLightingPixel[1] +
                   hostileLightingPixel[2] > 0.01f && hostileStateRestored);
 
@@ -1130,7 +1143,9 @@ public:
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         glFrontFace(GL_CCW);
         glDisablei(GL_BLEND, 0);
+        glDisablei(GL_BLEND, 1);
         glColorMaski(0, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         const std::size_t center = (32u * 64u + 32u) * 3u;
         const std::size_t corner = 0;
         check("lit geometry is non-background and finite",
@@ -1181,6 +1196,93 @@ public:
             for (unsigned char value : image) energy += value;
             return energy;
         };
+
+        struct FSplitLightingProbe
+        {
+            bool valid = false;
+            glm::vec3 environmentAmbient = glm::vec3(0.0f);
+            glm::vec3 unshadowedDirect = glm::vec3(0.0f);
+        };
+        auto renderSplitProbe = [&](FRenderScene& probeScene,
+                                    const FRenderQuality& probeQuality)
+        {
+            FSplitLightingProbe probe;
+            cache.BeginFrame();
+            const bool environmentOK = lighting.PrepareEnvironment(
+                probeScene, ContextGeneration(), &diagnostic);
+            const bool geometryOK = environmentOK && rasterizer.RenderGeometry(
+                probeScene, probeQuality, cache, gbuffer,
+                lighting.EnvironmentTexture(), ContextGeneration(), &diagnostic);
+            cache.ReleaseUnused();
+            FRasterLightingOutput split;
+            probe.valid = geometryOK && lighting.Render(
+                probeScene, probeQuality, gbuffer, ContextGeneration(), split, &diagnostic) &&
+                split.valid && split.environmentAmbientTarget.valid &&
+                split.unshadowedDirectTarget.valid;
+            if (probe.valid)
+            {
+                float pixel[4] = {};
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, lighting.Framebuffer());
+                glReadBuffer(GL_COLOR_ATTACHMENT0);
+                glReadPixels(32, 32, 1, 1, GL_RGBA, GL_FLOAT, pixel);
+                probe.environmentAmbient = glm::vec3(pixel[0], pixel[1], pixel[2]);
+                glReadBuffer(GL_COLOR_ATTACHMENT1);
+                glReadPixels(32, 32, 1, 1, GL_RGBA, GL_FLOAT, pixel);
+                probe.unshadowedDirect = glm::vec3(pixel[0], pixel[1], pixel[2]);
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            }
+            return probe;
+        };
+
+        float centerPositionData[4] = {};
+        float centerNormalData[4] = {};
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, gbuffer.Framebuffer());
+        glReadBuffer(gbuffer.ColorAttachment(EHardwareGBufferSemantic::PositionCoverage));
+        glReadPixels(32, 32, 1, 1, GL_RGBA, GL_FLOAT, centerPositionData);
+        glReadBuffer(gbuffer.ColorAttachment(EHardwareGBufferSemantic::ShadingNormalModel));
+        glReadPixels(32, 32, 1, 1, GL_RGBA, GL_FLOAT, centerNormalData);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        const glm::vec3 centerPosition(centerPositionData[0], centerPositionData[1],
+                                       centerPositionData[2]);
+        const glm::vec3 centerNormal = glm::normalize(glm::vec3(
+            centerNormalData[0], centerNormalData[1], centerNormalData[2]));
+
+        FRenderScene distanceScene = scene;
+        distanceScene.meshes.front().shadingModel = ERenderShadingModel::Phong;
+        distanceScene.meshes.front().materialOverride->ambient = glm::vec3(0.0f);
+        distanceScene.meshes.front().materialOverride->albedo = glm::vec3(1.0f);
+        distanceScene.meshes.front().materialOverride->specularColor = glm::vec3(0.0f);
+        distanceScene.meshes.front().materialOverride->emissive = glm::vec3(0.0f);
+        FRenderQuality directOnlyQuality = quality;
+        directOnlyQuality.ambientStrength = 0.0f;
+        auto distanceProbe = [&](float distance)
+        {
+            distanceScene.pointLights = {{centerPosition + centerNormal * distance,
+                                          glm::vec3(0.25f)}};
+            return renderSplitProbe(distanceScene, directOnlyQuality);
+        };
+        const FSplitLightingProbe atDistanceOne = distanceProbe(1.0f);
+        const FSplitLightingProbe atDistanceTwo = distanceProbe(2.0f);
+        const FSplitLightingProbe atDistanceFour = distanceProbe(4.0f);
+        const float energyOne = atDistanceOne.unshadowedDirect.r;
+        const float energyTwo = atDistanceTwo.unshadowedDirect.r;
+        const float energyFour = atDistanceFour.unshadowedDirect.r;
+        check("point light direct target follows inverse-square distance",
+              atDistanceOne.valid && atDistanceTwo.valid && atDistanceFour.valid &&
+              energyTwo > 0.0f && energyFour > 0.0f &&
+              std::fabs(energyOne / energyTwo - 4.0f) < 0.08f &&
+              std::fabs(energyOne / energyFour - 16.0f) < 0.32f);
+
+        FRenderScene ambientEmissiveScene = distanceScene;
+        ambientEmissiveScene.pointLights.clear();
+        ambientEmissiveScene.meshes.front().materialOverride->ambient = glm::vec3(0.4f);
+        ambientEmissiveScene.meshes.front().materialOverride->emissive = glm::vec3(0.2f);
+        FSplitLightingProbe ambientEmissive = renderSplitProbe(
+            ambientEmissiveScene, quality);
+        check("ambient and emissive stay separate from zero direct light",
+              ambientEmissive.valid &&
+              ambientEmissive.environmentAmbient.r > 0.2f &&
+              glm::length(ambientEmissive.unshadowedDirect) < 0.001f);
 
         scene.meshes.front().shadingModel = ERenderShadingModel::Flat;
         const auto flat = renderFrame(scene, quality);
@@ -1301,8 +1403,10 @@ public:
                   static_cast<GLint>(hostileGeometrySamplers[0]) &&
               restoredGeometrySamplers[1] ==
                   static_cast<GLint>(hostileGeometrySamplers[1]));
+        const std::uint64_t checkerDifference =
+            imageDifference(checkerFirst.second, phong.second);
         check("repeated checker UVs produce alternating surface samples",
-              imageDifference(checkerFirst.second, phong.second) > 1000u);
+              checkerDifference > 500u);
         material.texData[0] = 64;
         rasterizer.InjectNextMaterialTextureUploadFailureForTesting();
         const auto checkerFailedEdit = renderFrame(scene, quality);
@@ -1387,14 +1491,15 @@ public:
         FRenderScene phongHDRIScene = ambientOnlyScene;
         phongHDRIScene.meshes.front().shadingModel = ERenderShadingModel::Phong;
         const auto phongHDRIFrame = renderFrame(phongHDRIScene, quality);
-        check("Gouraud HDRI is complete vertex lighting with no fragment delta",
+        check("Gouraud keeps direct interpolation while fragment lighting supplies ambient",
               gouraudHDRIFrame.first &&
-              std::fabs(gouraudPrecomputed[0] - gouraudLit[0]) < 0.002f &&
-              std::fabs(gouraudPrecomputed[1] - gouraudLit[1]) < 0.002f &&
-              std::fabs(gouraudPrecomputed[2] - gouraudLit[2]) < 0.002f);
-        check("Gouraud HDRI vertex interpolation differs from Phong HDRI",
+              std::fabs(gouraudPrecomputed[0]) < 0.002f &&
+              std::fabs(gouraudPrecomputed[1]) < 0.002f &&
+              std::fabs(gouraudPrecomputed[2]) < 0.002f &&
+              gouraudLit[0] + gouraudLit[1] + gouraudLit[2] > 0.01f);
+        check("ambient-only Gouraud and Phong use the same interpolated shading normal",
               phongHDRIFrame.first &&
-              imageDifference(gouraudHDRIFrame.second, phongHDRIFrame.second) > 100u);
+              imageDifference(gouraudHDRIFrame.second, phongHDRIFrame.second) < 10u);
 
         const char* replacementHDR = "task8_environment_replacement.tmp.hdr";
         {
@@ -1430,10 +1535,26 @@ public:
         scene.environment.skyPath.clear();
 
         const std::uint64_t lightingRevision = lighting.ResourceRevision();
+        const unsigned environmentAmbientBeforeFailedResize =
+            lighting.EnvironmentAmbientTexture();
+        const unsigned unshadowedDirectBeforeFailedResize =
+            lighting.UnshadowedDirectTexture();
+        GLint maximumTextureSize = 0;
+        glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maximumTextureSize);
+        check("failed lighting resize preserves both committed HDR targets",
+              !lighting.Resize(maximumTextureSize + 1, 48, ContextGeneration(),
+                               &diagnostic) &&
+              lighting.EnvironmentAmbientTexture() ==
+                  environmentAmbientBeforeFailedResize &&
+              lighting.UnshadowedDirectTexture() ==
+                  unshadowedDirectBeforeFailedResize &&
+              lighting.Width() == 64 && lighting.Height() == 64 &&
+              lighting.ResourceRevision() == lightingRevision &&
+              lighting.OwnedTextureCount() == 2u);
         check("lighting output resizes 64 to 80x48",
               lighting.Resize(80, 48, ContextGeneration(), &diagnostic) &&
               lighting.Width() == 80 && lighting.Height() == 48 &&
-              lighting.OwnedTextureCount() == 1u);
+              lighting.OwnedTextureCount() == 2u);
         check("lighting output resizes back and idempotently reuses",
               lighting.Resize(64, 64, ContextGeneration(), &diagnostic) &&
               lighting.ResourceRevision() == lightingRevision + 2u &&
@@ -1581,7 +1702,7 @@ public:
               lighting.Stats().truncatedPointLights == 2u);
         check("same overflow condition warns only once",
               lighting.Stats().overflowWarnings == warningsBefore + 1u);
-        overflowScene.pointLights.back().radiance.x += 0.01f;
+        overflowScene.pointLights.back().sourceIntensity.x += 0.01f;
         overflowScene.pointLights.back().worldPosition.x += 0.02f;
         const auto animatedOverflow = renderFrame(overflowScene, quality);
         check("animated overflow scene does not warn every frame",
@@ -1616,10 +1737,10 @@ public:
                     mesh.shadingModel = static_cast<ERenderShadingModel>(mode);
                 parityModes[mode] = renderFrame(modeScene, quality);
             }
-            const float legacyModeProbe[3][4] = {
-                {0.667491f, 0.667491f, 0.777746f, 0.661457f},
-                {0.675586f, 0.655532f, 0.805347f, 0.758981f},
-                {0.676912f, 0.658379f, 0.800226f, 0.658601f},
+            const float inverseSquareModeProbe[3][4] = {
+                {0.234276f, 0.234276f, 0.247161f, 0.223053f},
+                {0.242685f, 0.226984f, 0.253887f, 0.239289f},
+                {0.242402f, 0.227267f, 0.250799f, 0.219965f},
             };
             const int parityProbes[4][2] = {
                 {32, 32}, {22, 31}, {42, 31}, {32, 45},
@@ -1627,12 +1748,14 @@ public:
             bool modeProbesWithinTolerance = true;
             for (int mode = 0; mode < 3; ++mode)
                 for (int probe = 0; probe < 4; ++probe)
+                {
+                    const float measured = byteLuminance(
+                        parityModes[mode].second, parityProbes[probe][0],
+                        parityProbes[probe][1]);
                     modeProbesWithinTolerance = modeProbesWithinTolerance &&
-                        std::fabs(byteLuminance(parityModes[mode].second,
-                                               parityProbes[probe][0],
-                                               parityProbes[probe][1]) -
-                                  legacyModeProbe[mode][probe]) < 0.30f;
-            check("hardware Flat/Gouraud/Phong probes match measured legacy values",
+                        std::fabs(measured - inverseSquareModeProbe[mode][probe]) < 0.08f;
+                }
+            check("hardware Flat/Gouraud/Phong probes match inverse-square baseline",
                   parityModes[0].first && parityModes[1].first &&
                   parityModes[2].first && modeProbesWithinTolerance);
 

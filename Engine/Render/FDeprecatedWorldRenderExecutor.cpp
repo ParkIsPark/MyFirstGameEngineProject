@@ -207,7 +207,7 @@ public:
         for (const FRenderPointLight& light : request.scene.pointLights)
         {
             lightPositions.push_back(light.worldPosition);
-            lightRadiances.push_back(light.radiance);
+            lightRadiances.push_back(light.sourceIntensity);
         }
         if (lightPositions.empty())
         {

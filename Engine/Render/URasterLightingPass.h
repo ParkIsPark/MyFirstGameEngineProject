@@ -53,14 +53,18 @@ public:
     void Shutdown() noexcept;
 
     bool IsReady() const { return lightingProgram_ != 0 && compositeProgram_ != 0; }
-    unsigned ColorTexture() const { return colorTexture_; }
+    unsigned EnvironmentAmbientTexture() const { return environmentAmbientTexture_; }
+    unsigned UnshadowedDirectTexture() const { return unshadowedDirectTexture_; }
     unsigned Framebuffer() const { return framebuffer_; }
     unsigned EnvironmentTexture() const { return environmentTexture_; }
     int Width() const { return width_; }
     int Height() const { return height_; }
     std::uint64_t ContextGeneration() const { return contextGeneration_; }
     std::uint64_t ResourceRevision() const { return resourceRevision_; }
-    std::size_t OwnedTextureCount() const { return colorTexture_ ? 1u : 0u; }
+    std::size_t OwnedTextureCount() const {
+        return (environmentAmbientTexture_ ? 1u : 0u) +
+               (unshadowedDirectTexture_ ? 1u : 0u);
+    }
     const FRasterLightingPassStats& Stats() const { return stats_; }
     void InjectNextEnvironmentTextureUploadFailureForTesting() {
         failNextEnvironmentTextureUploadForTesting_ = true;
@@ -77,7 +81,8 @@ private:
     unsigned compositeProgram_ = 0;
     unsigned fullscreenVAO_ = 0;
     unsigned framebuffer_ = 0;
-    unsigned colorTexture_ = 0;
+    unsigned environmentAmbientTexture_ = 0;
+    unsigned unshadowedDirectTexture_ = 0;
     unsigned environmentTexture_ = 0;
     int width_ = 0;
     int height_ = 0;

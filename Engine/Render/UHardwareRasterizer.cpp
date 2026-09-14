@@ -7,6 +7,7 @@
 #include "FTransform.h"
 #include "Material.h"
 #include "Shaders/HardwareRasterShaders.h"
+#include "Shaders/SharedLightingShaderSource.h"
 #include "UGPUMeshCache.h"
 #include "UHardwareGBuffer.h"
 #include "UMesh.h"
@@ -451,8 +452,10 @@ bool UHardwareRasterizer::Init(std::uint64_t contextGeneration,
     GLuint vertex = 0;
     GLuint geometry = 0;
     GLuint fragment = 0;
+    const std::string geometrySource =
+        SharedLightingShaderSource::BuildHardwareGeometryShader();
     if (!CompileStage(GL_VERTEX_SHADER, HardwareRasterShaders::Vertex, "vertex", vertex, error) ||
-        !CompileStage(GL_GEOMETRY_SHADER, HardwareRasterShaders::Geometry, "geometry", geometry, error) ||
+        !CompileStage(GL_GEOMETRY_SHADER, geometrySource.c_str(), "geometry", geometry, error) ||
         !CompileStage(GL_FRAGMENT_SHADER, HardwareRasterShaders::Fragment, "fragment", fragment, error))
     {
         if (vertex) glDeleteShader(vertex);
@@ -737,11 +740,11 @@ bool UHardwareRasterizer::RenderGeometry(const FRenderScene& scene,
     for (int i = 0; i < lightCount; ++i)
     {
         const std::string positionName = "uPointLightPositions[" + std::to_string(i) + "]";
-        const std::string radianceName = "uPointLightRadiances[" + std::to_string(i) + "]";
+        const std::string sourceName = "uPointLightSources[" + std::to_string(i) + "]";
         glUniform3fv(glGetUniformLocation(program_, positionName.c_str()), 1,
                      glm::value_ptr(scene.pointLights[static_cast<std::size_t>(i)].worldPosition));
-        glUniform3fv(glGetUniformLocation(program_, radianceName.c_str()), 1,
-                     glm::value_ptr(scene.pointLights[static_cast<std::size_t>(i)].radiance));
+        glUniform3fv(glGetUniformLocation(program_, sourceName.c_str()), 1,
+                     glm::value_ptr(scene.pointLights[static_cast<std::size_t>(i)].sourceIntensity));
     }
 
     ACamera camera;

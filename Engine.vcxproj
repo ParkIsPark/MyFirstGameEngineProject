@@ -221,6 +221,7 @@
     <ClInclude Include="Engine\RayTracing\FRaySceneCache.h" />
     <ClInclude Include="Engine\Render\UHardwareRasterizer.h" />
     <ClInclude Include="Engine\Render\Shaders\HardwareRasterShaders.h" />
+    <ClInclude Include="Engine\Render\Shaders\SharedLightingShaderSource.h" />
     <ClInclude Include="Engine\Render\Shaders\RasterLightingShaders.h" />
     <ClInclude Include="Engine\Render\Shaders\RayEffectsFragmentShaders.h" />
     <ClInclude Include="Engine\Render\Shaders\RayEffectsComputeShaders.h" />
