@@ -69,9 +69,14 @@ void CheckSingleDisplayConversion()
     const std::string presentation = HybridPresentationShaders::PresentationFragment;
     assert(composite.find("linearToSRGB") == std::string::npos);
     assert(composite.find("pow(") == std::string::npos);
-    assert(composite.find("clamp(linearColor") == std::string::npos);
+    assert(composite.find("max(") == std::string::npos);
+    assert(composite.find("clamp(") == std::string::npos);
     assert(CountOccurrences(presentation, "vec3 linearToSRGB(") == 1);
     assert(CountOccurrences(presentation, "linearToSRGB(mapped)") == 1);
+    assert(CountOccurrences(presentation, "max(") == 1);
+    assert(CountOccurrences(presentation, "clamp(") == 1);
+    assert(presentation.find(
+        "vec3 linearColor = texture(uHDRInput, vUV).rgb;") != std::string::npos);
 }
 } // namespace
 

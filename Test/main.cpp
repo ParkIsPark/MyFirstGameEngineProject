@@ -1352,6 +1352,24 @@ public:
               hdrFrame.second[center + 1] < 255u &&
               hdrFrame.second[center + 2] < 255u);
 
+        FRenderScene signedHDRScene = distanceScene;
+        signedHDRScene.pointLights.clear();
+        signedHDRScene.meshes.front().materialOverride->ambient = glm::vec3(0.0f);
+        signedHDRScene.meshes.front().materialOverride->albedo = glm::vec3(0.0f);
+        signedHDRScene.meshes.front().materialOverride->specularColor = glm::vec3(0.0f);
+        signedHDRScene.meshes.front().materialOverride->emissive =
+            glm::vec3(-0.25f, 0.5f, 0.25f);
+        FRenderQuality signedHDRQuality = quality;
+        signedHDRQuality.ambientStrength = 0.0f;
+        const auto signedHDRFrame = renderFrame(signedHDRScene, signedHDRQuality);
+        glBindTexture(GL_TEXTURE_2D, presentation.HDRTexture());
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, hdrPixels.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+        check("linear HDR composition preserves signed components",
+              signedHDRFrame.first && hdrPixels[hdrCenter] < -0.2f &&
+              hdrPixels[hdrCenter + 1] > 0.45f &&
+              hdrPixels[hdrCenter + 2] > 0.2f);
+
         scene.meshes.front().shadingModel = ERenderShadingModel::Flat;
         const auto flat = renderFrame(scene, quality);
         scene.meshes.front().shadingModel = ERenderShadingModel::Gouraud;

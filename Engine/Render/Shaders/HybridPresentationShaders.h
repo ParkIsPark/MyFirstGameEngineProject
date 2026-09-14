@@ -25,19 +25,19 @@ uniform bool uHasGIRadiance;
 uniform bool uHasOpticalContribution;
 void main()
 {
-    vec3 environmentAmbient = max(texture(uEnvironmentAmbient, vUV).rgb, vec3(0.0));
+    vec3 environmentAmbient = texture(uEnvironmentAmbient, vUV).rgb;
     if (texture(uPositionCoverage, vUV).a <= 0.5)
     {
         oHDR = vec4(environmentAmbient, 1.0);
         return;
     }
-    vec3 direct = max(texture(uSelectedDirect, vUV).rgb, vec3(0.0));
-    vec3 gi = uHasGIRadiance ? max(texture(uGIRadiance, vUV).rgb, vec3(0.0)) : vec3(0.0);
-    vec3 emissive = max(texture(uEmissive, vUV).rgb, vec3(0.0));
+    vec3 direct = texture(uSelectedDirect, vUV).rgb;
+    vec3 gi = uHasGIRadiance ? texture(uGIRadiance, vUV).rgb : vec3(0.0);
+    vec3 emissive = texture(uEmissive, vUV).rgb;
     vec4 optical = uHasOpticalContribution
         ? texture(uOpticalContribution, vUV) : vec4(0.0, 0.0, 0.0, 1.0);
     oHDR = vec4(emissive + optical.a * (environmentAmbient + direct + gi) +
-                max(optical.rgb, vec3(0.0)), 1.0);
+                optical.rgb, 1.0);
 }
 )GLSL";
 
@@ -65,7 +65,7 @@ vec3 acesFitted(vec3 x)
 }
 void main()
 {
-    vec3 linearColor = max(texture(uHDRInput, vUV).rgb, vec3(0.0));
+    vec3 linearColor = texture(uHDRInput, vUV).rgb;
     vec3 mapped = uDepthView
         ? linearColor
         : acesFitted(linearColor * exp2(uExposureEV));
