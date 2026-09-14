@@ -12,6 +12,9 @@
 #include <vector>
 
 class ACamera;
+class FOpenGLRayTracingBackendFactory;
+class FRayEffectsScheduler;
+class FStderrRayEffectsWarningSink;
 class FOpenGLMeshUploadAdapter;
 class UGPUMeshCache;
 class UHardwareGBuffer;
@@ -84,6 +87,9 @@ private:
     std::unique_ptr<UHardwareGBuffer> hardwareGBuffer_;
     std::unique_ptr<UHardwareRasterizer> hardwareRasterizer_;
     std::unique_ptr<URasterLightingPass> rasterLightingPass_;
+    std::unique_ptr<FOpenGLRayTracingBackendFactory> rayBackendFactory_;
+    std::unique_ptr<FStderrRayEffectsWarningSink> rayWarningSink_;
+    std::unique_ptr<FRayEffectsScheduler> rayEffectsScheduler_;
     bool initialized_ = false;
     FWorldRendererStats stats_;
 };

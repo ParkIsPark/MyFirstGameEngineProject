@@ -386,6 +386,9 @@ bool URasterLightingPass::Init(std::uint64_t contextGeneration,
         glUniform1i(glGetUniformLocation(lightingProgram_, samplers[unit]), unit);
     glUseProgram(compositeProgram_);
     glUniform1i(glGetUniformLocation(compositeProgram_, "uRasterLighting"), 0);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uShadowVisibility"), 1);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uGIRadiance"), 2);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uReflectionRadiance"), 3);
     if (diagnostic) diagnostic->clear();
     return CollectError("Raster lighting initialization", diagnostic);
 }
@@ -660,12 +663,34 @@ bool URasterLightingPass::Composite(const FRenderTarget& target,
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, colorTexture_);
     glBindSampler(0, 0);
+    auto validEffectTarget = [&](const std::optional<FRenderOutputView>& view)
+    {
+        return view.has_value() && view->valid && view->identity != 0 &&
+            view->width == target.Width() && view->height == target.Height();
+    };
+    const bool hasShadow = validEffectTarget(rayEffects.shadowVisibilityTarget);
+    const bool hasGI = validEffectTarget(rayEffects.globalIlluminationTarget);
+    const bool hasReflection = validEffectTarget(rayEffects.reflectionTarget);
+    const unsigned textures[] = {
+        0u,
+        hasShadow ? static_cast<unsigned>(rayEffects.shadowVisibilityTarget->identity) : 0u,
+        hasGI ? static_cast<unsigned>(rayEffects.globalIlluminationTarget->identity) : 0u,
+        hasReflection ? static_cast<unsigned>(rayEffects.reflectionTarget->identity) : 0u,
+    };
+    for (int unit = 1; unit < 4; ++unit)
+    {
+        glActiveTexture(GL_TEXTURE0 + unit);
+        glBindTexture(GL_TEXTURE_2D, textures[unit]);
+        glBindSampler(unit, 0);
+    }
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uHasShadowVisibility"), hasShadow ? 1 : 0);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uHasGIRadiance"), hasGI ? 1 : 0);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uHasReflectionRadiance"), hasReflection ? 1 : 0);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     if (!CollectError("Raster composite pass", diagnostic)) return false;
     ++stats_.compositePasses;
     output.valid = true;
     output.finalColorTarget = {target.Identity(), target.Width(), target.Height(), true};
-    (void)rayEffects; // neutral slots are intentionally consumed in Task 9
     if (diagnostic) diagnostic->clear();
     return true;
 }

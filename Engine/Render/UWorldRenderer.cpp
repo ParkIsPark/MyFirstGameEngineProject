@@ -5,6 +5,7 @@
 
 #include "ACamera.h"
 #include "FRenderShowFlag.h"
+#include "IRayTracingBackend.h"
 #include "FTransform.h"
 #include "Material.h"
 #include "ThreadPool.h"
@@ -13,6 +14,7 @@
 #include "UHardwareGBuffer.h"
 #include "UHardwareRasterizer.h"
 #include "URasterLightingPass.h"
+#include "UGL33RayTracingBackend.h"
 #include "UGPUMeshCache.h"
 #include "UMesh.h"
 #include "URasterizer.h"
@@ -266,9 +268,10 @@ public:
                                  UHardwareGBuffer& gbuffer,
                                  UHardwareRasterizer& rasterizer,
                                  URasterLightingPass& lighting,
+                                 FRayEffectsScheduler& rayEffects,
                                  FWorldRendererStats& stats)
         : meshCache_(meshCache), gbuffer_(gbuffer), rasterizer_(rasterizer),
-          lighting_(lighting), stats_(stats)
+          lighting_(lighting), rayEffects_(rayEffects), stats_(stats)
     {
     }
 
@@ -313,17 +316,26 @@ public:
         }
         ++stats_.rasterLightingPasses;
 
-        FRayEffectOutputs neutralRayEffects;
+        FRayEffectOutputs rayOutputs;
         if (std::find(request.passPlan.begin(), request.passPlan.end(),
-                      ERenderPass::RayTracedEffects) != request.passPlan.end() &&
-            !warnedRayEffectsPending_)
+                      ERenderPass::RayTracedEffects) != request.passPlan.end())
         {
-            std::cerr << "[Renderer] warning: ray effects are not available in this build yet; "
-                         "hardware raster output remains active\n";
-            warnedRayEffectsPending_ = true;
+            FRayEffectInputs rayInputs;
+            rayInputs.gbuffer = &gbuffer_;
+            rayInputs.scene = &request.scene;
+            rayInputs.rasterLighting = &rasterOutput;
+            rayInputs.features = request.features;
+            rayInputs.quality = request.quality;
+            rayInputs.environmentTexture = lighting_.EnvironmentTexture();
+            rayInputs.width = request.target.Width();
+            rayInputs.height = request.target.Height();
+            rayInputs.contextGeneration = generation;
+            rayEffects_.Execute(rayInputs, request.backendSelection, rayOutputs);
+            stats_.rayResourceAllocations = rayEffects_.Stats().resourceAllocations;
+            stats_.rayDispatches = rayEffects_.Stats().backendCalls;
         }
         FCompositeOutput composite;
-        if (!lighting_.Composite(request.target, rasterOutput, neutralRayEffects,
+        if (!lighting_.Composite(request.target, rasterOutput, rayOutputs,
                                  generation, composite, &diagnostic))
         {
             if (!diagnostic.empty())
@@ -339,8 +351,8 @@ private:
     UHardwareGBuffer& gbuffer_;
     UHardwareRasterizer& rasterizer_;
     URasterLightingPass& lighting_;
+    FRayEffectsScheduler& rayEffects_;
     FWorldRendererStats& stats_;
-    bool warnedRayEffectsPending_ = false;
 };
 
 class FTargetRestoreGuard
@@ -358,11 +370,15 @@ UWorldRenderer::UWorldRenderer()
       hardwareMeshCache_(std::make_unique<UGPUMeshCache>(*hardwareUploadAdapter_)),
       hardwareGBuffer_(std::make_unique<UHardwareGBuffer>()),
       hardwareRasterizer_(std::make_unique<UHardwareRasterizer>()),
-      rasterLightingPass_(std::make_unique<URasterLightingPass>())
+      rasterLightingPass_(std::make_unique<URasterLightingPass>()),
+      rayBackendFactory_(std::make_unique<FOpenGLRayTracingBackendFactory>()),
+      rayWarningSink_(std::make_unique<FStderrRayEffectsWarningSink>()),
+      rayEffectsScheduler_(std::make_unique<FRayEffectsScheduler>(
+          *rayBackendFactory_, *rayWarningSink_))
 {
     executor_ = std::make_unique<FHardwareWorldRenderExecutor>(
         *hardwareMeshCache_, *hardwareGBuffer_, *hardwareRasterizer_,
-        *rasterLightingPass_, stats_);
+        *rasterLightingPass_, *rayEffectsScheduler_, stats_);
 }
 
 UWorldRenderer::UWorldRenderer(std::unique_ptr<IWorldRenderExecutor> executor)
@@ -385,6 +401,7 @@ void UWorldRenderer::Init()
 void UWorldRenderer::Shutdown() noexcept
 {
     if (!executor_) return;
+    if (rayEffectsScheduler_) rayEffectsScheduler_->Shutdown();
     if (hardwareMeshCache_) hardwareMeshCache_->Clear();
     if (hardwareGBuffer_) hardwareGBuffer_->Release();
     if (rasterLightingPass_) rasterLightingPass_->Shutdown();

@@ -49,6 +49,8 @@
 #include "UWorldRenderer.h"
 #include "FRenderTarget.h"
 #include "FRenderQuality.h"
+#include "UGL33RayTracingBackend.h"
+#include "FRaySceneCache.h"
 
 // Load a model trying a few candidate directories (working dir varies between
 // running from bin\ and VS's project dir).
@@ -1783,12 +1785,12 @@ public:
                   std::fabs(routedCenter - 0.676912f) < 0.25f &&
                   std::fabs(routedCorner - 0.595910f) < 0.20f);
             const FWorldRendererStats& normalStats = worldRenderer.Stats();
-            check("raster-only/neutral-RT hardware executor performs zero CPU or ray work",
+            check("normal renderer keeps CPU work at zero and schedules one ray backend call",
                   normalStats.hardwareGBufferPasses == 3u &&
                   normalStats.rasterLightingPasses == 3u &&
                   normalStats.compositePasses == 3u &&
-                  normalStats.rayResourceAllocations == 0u &&
-                  normalStats.rayDispatches == 0u &&
+                  normalStats.rayResourceAllocations > 0u &&
+                  normalStats.rayDispatches == 1u &&
                   normalStats.cpuFramebufferGenerations == 0u &&
                   normalStats.cpuReadbacks == 0u &&
                   normalStats.cpuFramebufferUploads == 0u);
@@ -1812,6 +1814,1106 @@ static int RunRasterLightingGates(const std::string& outputPath)
 {
     FRasterLightingSelfTestApp app;
     if (!app.Init(64, 64, "Raster Lighting Self-Test")) return 2;
+    return app.RunGates(outputPath);
+}
+
+class FRayEffectsSelfTestApp final : public Engine
+{
+public:
+    int RunGates(const std::string& outputPath)
+    {
+        glfwHideWindow(window_);
+        int passed = 0, failed = 0;
+        auto check = [&](const char* label, bool result)
+        {
+            std::printf("[%s] %s\n", result ? "PASS" : "FAIL", label);
+            result ? ++passed : ++failed;
+        };
+        std::unique_ptr<UMesh> cube(UMesh::GenerateCube(glm::vec3(0.8f)));
+        std::unique_ptr<UMesh> plane(UMesh::GeneratePlane(glm::vec2(8.0f)));
+        Material cubeMaterial;
+        cubeMaterial.kd = glm::vec3(0.75f, 0.18f, 0.1f);
+        cubeMaterial.ks = glm::vec3(0.8f);
+        cubeMaterial.km = glm::vec3(0.8f);
+        cubeMaterial.shininess = 48.0f;
+        Material planeMaterial;
+        planeMaterial.kd = glm::vec3(0.25f, 0.55f, 0.25f);
+
+        auto resolved = [](Material& material)
+        {
+            FResolvedRenderMaterial result;
+            result.source = &material;
+            result.ambient = material.ka;
+            result.albedo = material.kd;
+            result.specularColor = material.ks;
+            result.shininess = material.shininess;
+            result.mirrorFactor = std::max(material.km.x,
+                std::max(material.km.y, material.km.z));
+            return result;
+        };
+        FRenderScene scene;
+        scene.camera.nearDistance = 0.1f;
+        scene.camera.left = scene.camera.bottom = -0.1f;
+        scene.camera.rightPlane = scene.camera.top = 0.1f;
+        scene.environment.horizon = glm::vec3(0.08f, 0.12f, 0.22f);
+        scene.environment.zenith = glm::vec3(0.55f, 0.7f, 0.95f);
+        scene.pointLights = {{glm::vec3(2.5f, 4.0f, -3.0f), glm::vec3(1.0f)}};
+        FRenderMeshInstance cubeInstance;
+        cubeInstance.mesh = cube.get();
+        cubeInstance.modelTransform = glm::translate(glm::mat4(1.0f),
+            glm::vec3(0.0f, -0.1f, -5.0f));
+        cubeInstance.normalTransform = glm::mat3(1.0f);
+        cubeInstance.materialOverride = resolved(cubeMaterial);
+        cubeInstance.materialOverrideIdentity = 1;
+        cubeInstance.objectIdentity = 1;
+        scene.meshes.push_back(cubeInstance);
+        FRenderMeshInstance planeInstance;
+        planeInstance.mesh = plane.get();
+        planeInstance.modelTransform = glm::translate(glm::mat4(1.0f),
+            glm::vec3(0.0f, -1.0f, -5.0f));
+        planeInstance.normalTransform = glm::mat3(1.0f);
+        planeInstance.materialOverride = resolved(planeMaterial);
+        planeInstance.materialOverrideIdentity = 2;
+        planeInstance.objectIdentity = 2;
+        scene.meshes.push_back(planeInstance);
+
+        FOpenGLMeshUploadAdapter adapter;
+        UGPUMeshCache meshCache(adapter);
+        UHardwareGBuffer gbuffer;
+        UHardwareRasterizer rasterizer;
+        URasterLightingPass lighting;
+        UGL33RayTracingBackend rays;
+        FRenderQuality quality;
+        quality.giSamples = 2;
+        quality.giBounces = 2;
+        quality.shadowSamples = 2;
+        quality.shadowSoftness = 0.03f;
+        std::string diagnostic;
+        auto invalidRayMesh = [&](UMesh& mesh)
+        {
+            FRenderScene invalidScene;
+            FRenderMeshInstance invalidInstance;
+            invalidInstance.mesh = &mesh;
+            invalidScene.meshes.push_back(invalidInstance);
+            FRaySceneCache validationCache;
+            return validationCache.Prepare(invalidScene);
+        };
+        UMesh emptyVertexMesh;
+        emptyVertexMesh.indices = {0, 0, 0};
+        const FPackedRayScene& emptyVertexPacked = invalidRayMesh(emptyVertexMesh);
+        check("ray packing rejects indices with an empty vertex array actionably",
+              !emptyVertexPacked.valid &&
+              emptyVertexPacked.diagnostic.find("vertices") != std::string::npos);
+        UMesh partialTriangleMesh;
+        partialTriangleMesh.vertices.resize(3);
+        partialTriangleMesh.indices = {0, 1};
+        const FPackedRayScene& partialTrianglePacked = invalidRayMesh(partialTriangleMesh);
+        check("ray packing rejects non-triangle index counts actionably",
+              !partialTrianglePacked.valid &&
+              partialTrianglePacked.diagnostic.find("multiple of three") !=
+                  std::string::npos);
+        UMesh outOfBoundsMesh;
+        outOfBoundsMesh.vertices.resize(3);
+        outOfBoundsMesh.indices = {0, 1, 3};
+        const FPackedRayScene& outOfBoundsPacked = invalidRayMesh(outOfBoundsMesh);
+        check("ray packing rejects out-of-bounds indices actionably",
+              !outOfBoundsPacked.valid &&
+              outOfBoundsPacked.diagnostic.find("out of bounds") !=
+                  std::string::npos);
+
+        std::unique_ptr<UMesh> materialMesh(
+            UMesh::GenerateCube(glm::vec3(0.5f)));
+        Material materialSlot0;
+        materialSlot0.kd = glm::vec3(0.9f, 0.05f, 0.05f);
+        Material materialSlot1;
+        materialSlot1.kd = glm::vec3(0.05f, 0.9f, 0.05f);
+        materialSlot1.texWidth = materialSlot1.texHeight = 2;
+        materialSlot1.texChannels = 3;
+        materialSlot1.diffuseTexPath = "memory://ray-secondary-checker";
+        materialSlot1.texData = {
+            20, 40, 255, 20, 40, 255,
+            20, 40, 255, 20, 40, 255,
+        };
+        materialMesh->materials = {materialSlot0, materialSlot1};
+        materialMesh->triMaterial.assign(12, 0u);
+        materialMesh->triMaterial[10] = materialMesh->triMaterial[11] = 1u;
+        FRenderMeshInstance materialInstance;
+        materialInstance.mesh = materialMesh.get();
+        materialInstance.materialSlots = {
+            resolved(materialMesh->materials[0]),
+            resolved(materialMesh->materials[1]),
+        };
+        materialInstance.materialSlotIdentities = {401u, 402u};
+        materialInstance.triangleMaterialSlots = &materialMesh->triMaterial;
+        materialInstance.triangleMaterialSlotCount = materialMesh->triMaterial.size();
+        materialInstance.objectIdentity = 400u;
+        FRenderScene materialScene;
+        materialScene.meshes.push_back(materialInstance);
+        FRaySceneCache materialCache;
+        const FPackedRayScene firstMaterialPack = materialCache.Prepare(materialScene);
+        check("ray packing preserves every slot and textured secondary metadata",
+              firstMaterialPack.valid && firstMaterialPack.materialCount == 2 &&
+              firstMaterialPack.textureLayerCount == 1 &&
+              firstMaterialPack.triangleTexels.size() == 12u * 7u);
+        check("ray atlas preserves logical texture size for GL_LINEAR sampling",
+              firstMaterialPack.textureWidth == 4 &&
+              firstMaterialPack.textureHeight == 4 &&
+              firstMaterialPack.materialTexels.size() == 2u * 6u &&
+              firstMaterialPack.materialTexels[11].x == 2.0f &&
+              firstMaterialPack.materialTexels[11].y == 2.0f);
+        const std::uint64_t materialBLASRevision = firstMaterialPack.blasRevision;
+        const std::uint64_t materialInstanceRevision =
+            firstMaterialPack.instanceRevision;
+        const std::uint64_t materialRevision = firstMaterialPack.materialRevision;
+        materialScene.meshes.front().materialSlots[1].albedo =
+            glm::vec3(0.05f, 0.05f, 0.95f);
+        const FPackedRayScene changedMaterialPack =
+            materialCache.Prepare(materialScene);
+        check("non-first material-slot edits update material data without BLAS rebuild",
+              changedMaterialPack.blasRevision == materialBLASRevision &&
+              changedMaterialPack.instanceRevision == materialInstanceRevision &&
+              changedMaterialPack.materialRevision != materialRevision);
+        materialScene.meshes.front().materialOverride =
+            materialScene.meshes.front().materialSlots[0];
+        materialScene.meshes.front().materialOverrideIdentity = 499u;
+        const FPackedRayScene overrideMaterialPack =
+            materialCache.Prepare(materialScene);
+        check("component override collapses triangle slots to one exact material identity",
+              overrideMaterialPack.materialCount == 1 &&
+              overrideMaterialPack.instanceIdentityTexels.size() == 1u &&
+              overrideMaterialPack.instanceIdentityTexels[0].z == 1u &&
+              overrideMaterialPack.instanceIdentityTexels[0].w == 1u);
+        check("ray effects shader is initially lazy", !rays.Stats().resourceAllocations &&
+              !rays.Stats().renderCalls && !rays.Stats().sceneUploads);
+        check("ray-effects G-buffer allocated",
+              gbuffer.Resize(64, 64, ContextGeneration()));
+        meshCache.BeginFrame();
+        const bool prepared = lighting.PrepareEnvironment(
+            scene, ContextGeneration(), &diagnostic);
+        const bool geometry = prepared && rasterizer.RenderGeometry(
+            scene, quality, meshCache, gbuffer, lighting.EnvironmentTexture(),
+            ContextGeneration(), &diagnostic);
+        meshCache.ReleaseUnused();
+        FRasterLightingOutput lit;
+        const bool litOK = geometry && lighting.Render(scene, quality, gbuffer,
+            ContextGeneration(), lit, &diagnostic);
+        check("ray-effects scene has hardware primary visibility", litOK);
+        std::vector<float> primaryCoverageBefore(64u * 64u * 4u);
+        std::vector<float> primaryDepthBefore(64u * 64u);
+        std::vector<std::uint32_t> primaryIdentityBefore(64u * 64u * 4u);
+        glBindTexture(GL_TEXTURE_2D,
+            gbuffer.Texture(EHardwareGBufferSemantic::PositionCoverage));
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT,
+            primaryCoverageBefore.data());
+        glBindTexture(GL_TEXTURE_2D, gbuffer.DepthTexture());
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, GL_FLOAT,
+            primaryDepthBefore.data());
+        glBindTexture(GL_TEXTURE_2D,
+            gbuffer.Texture(EHardwareGBufferSemantic::Identity));
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA_INTEGER, GL_UNSIGNED_INT,
+            primaryIdentityBefore.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        FRenderTarget target = FRenderTarget::DefaultFramebuffer(
+            64, 64, ContextGeneration());
+        auto composite = [&](const FRayEffectOutputs& effects)
+        {
+            std::vector<unsigned char> pixels(64u * 64u * 3u);
+            FCompositeOutput output;
+            const bool bound = target.Begin();
+            const bool okay = bound && lighting.Composite(target, lit, effects,
+                ContextGeneration(), output, &diagnostic);
+            if (!okay && !diagnostic.empty())
+                std::fprintf(stderr, "ray composite: %s\n", diagnostic.c_str());
+            if (okay) glReadPixels(0, 0, 64, 64, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+            if (bound) target.End();
+            return std::make_pair(okay, pixels);
+        };
+        const auto rasterOnlyA = composite({});
+        const auto rasterOnlyB = composite({});
+        check("RT off preserves raster-only bytes", rasterOnlyA.first &&
+              rasterOnlyB.first && rasterOnlyA.second == rasterOnlyB.second &&
+              rays.Stats().resourceAllocations == 0 && rays.Stats().renderCalls == 0);
+
+        auto execute = [&](bool shadows, bool gi, bool reflections,
+                           FRayEffectOutputs& outputs)
+        {
+            FRayEffectInputs inputs;
+            inputs.gbuffer = &gbuffer;
+            inputs.scene = &scene;
+            inputs.rasterLighting = &lit;
+            inputs.features.rayTracing = true;
+            inputs.features.rayTracedShadows = shadows;
+            inputs.features.rayTracedGI = gi;
+            inputs.features.rayTracedReflections = reflections;
+            inputs.quality = quality;
+            inputs.environmentTexture = lighting.EnvironmentTexture();
+            inputs.width = 64;
+            inputs.height = 64;
+            inputs.contextGeneration = ContextGeneration();
+            return rays.RenderEffects(inputs, outputs, &diagnostic);
+        };
+
+        FRayEffectOutputs shadow;
+        const std::uint64_t beforeShadowDraws = rays.Stats().rayDraws;
+        const bool shadowOK = execute(true, false, false, shadow);
+        std::vector<float> shadowPixels(64u * 64u, 1.0f);
+        if (shadowOK && shadow.shadowVisibilityTarget)
+        {
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+            glBindTexture(GL_TEXTURE_2D,
+                static_cast<unsigned>(shadow.shadowVisibilityTarget->identity));
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_FLOAT, shadowPixels.data());
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
+        const auto shadowMinMax = std::minmax_element(
+            shadowPixels.begin(), shadowPixels.end());
+        check("shadows-only allocates and draws only shadow output", shadowOK &&
+              shadow.shadowVisibilityTarget && !shadow.globalIlluminationTarget &&
+              !shadow.reflectionTarget && rays.OwnedOutputTextureCount() == 1u &&
+              rays.Stats().rayDraws == beforeShadowDraws + 1u &&
+              *shadowMinMax.first < 0.75f && *shadowMinMax.second > 0.95f);
+        check("exact object/material identity avoids near self-hit acne",
+              shadowOK && std::isfinite(*shadowMinMax.first) &&
+              *shadowMinMax.first >= 0.0f && *shadowMinMax.second <= 1.0f &&
+              *shadowMinMax.second > 0.95f);
+
+        FRayEffectOutputs gi;
+        const bool giOK = execute(false, true, false, gi);
+        std::vector<float> giPixels(64u * 64u * 4u, 0.0f);
+        if (giOK && gi.globalIlluminationTarget)
+        {
+            glBindTexture(GL_TEXTURE_2D,
+                static_cast<unsigned>(gi.globalIlluminationTarget->identity));
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, giPixels.data());
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
+        double giEnergy = 0.0;
+        bool giFinite = true;
+        for (std::size_t pixel = 0; pixel < giPixels.size() / 4u; ++pixel)
+            for (int channel = 0; channel < 3; ++channel)
+            {
+                const float value = giPixels[pixel * 4u + static_cast<std::size_t>(channel)];
+                giFinite = giFinite && std::isfinite(value);
+                giEnergy += std::fabs(value);
+            }
+        check("GI-only allocates finite non-neutral GI", giOK &&
+              !gi.shadowVisibilityTarget && gi.globalIlluminationTarget &&
+              !gi.reflectionTarget && rays.OwnedOutputTextureCount() == 1u &&
+              giFinite && giEnergy > 0.01);
+
+        FRayEffectOutputs reflection;
+        const bool reflectionOK = execute(false, false, true, reflection);
+        std::vector<float> reflectionPixels(64u * 64u * 4u, 0.0f);
+        if (reflectionOK && reflection.reflectionTarget)
+        {
+            glBindTexture(GL_TEXTURE_2D,
+                static_cast<unsigned>(reflection.reflectionTarget->identity));
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, reflectionPixels.data());
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
+        double reflectionEnergy = 0.0;
+        bool reflectionFinite = true;
+        for (std::size_t pixel = 0; pixel < reflectionPixels.size() / 4u; ++pixel)
+            for (int channel = 0; channel < 3; ++channel)
+            {
+                const float value = reflectionPixels[pixel * 4u + static_cast<std::size_t>(channel)];
+                reflectionFinite = reflectionFinite && std::isfinite(value);
+                reflectionEnergy += std::fabs(value);
+            }
+        check("reflections-only allocates finite non-neutral reflection", reflectionOK &&
+              !reflection.shadowVisibilityTarget && !reflection.globalIlluminationTarget &&
+              reflection.reflectionTarget && rays.OwnedOutputTextureCount() == 1u &&
+              reflectionFinite && reflectionEnergy > 0.01);
+
+        GLuint controlledHDRI = 0;
+        const float hdriPixels[12] = {
+            0.05f, 3.0f, 0.1f, 0.05f, 3.0f, 0.1f,
+            0.05f, 3.0f, 0.1f, 0.05f, 3.0f, 0.1f,
+        };
+        glGenTextures(1, &controlledHDRI);
+        glBindTexture(GL_TEXTURE_2D, controlledHDRI);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, 2, 2, 0, GL_RGB,
+            GL_FLOAT, hdriPixels);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        FRayEffectInputs hdriInputs;
+        hdriInputs.gbuffer = &gbuffer;
+        hdriInputs.scene = &scene;
+        hdriInputs.rasterLighting = &lit;
+        hdriInputs.features.rayTracing = true;
+        hdriInputs.features.rayTracedReflections = true;
+        hdriInputs.quality = quality;
+        hdriInputs.environmentTexture = controlledHDRI;
+        hdriInputs.width = hdriInputs.height = 64;
+        hdriInputs.contextGeneration = ContextGeneration();
+        FRayEffectOutputs hdriReflection;
+        std::vector<float> hdriReflectionPixels(reflectionPixels.size(), 0.0f);
+        const bool hdriReflectionOK = rays.RenderEffects(
+            hdriInputs, hdriReflection, &diagnostic);
+        if (hdriReflectionOK && hdriReflection.reflectionTarget)
+        {
+            glBindTexture(GL_TEXTURE_2D, static_cast<unsigned>(
+                hdriReflection.reflectionTarget->identity));
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT,
+                hdriReflectionPixels.data());
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+        double hdriDifference = 0.0;
+        for (std::size_t pixel = 0; pixel < reflectionPixels.size() / 4u; ++pixel)
+            for (int channel = 0; channel < 3; ++channel)
+                hdriDifference += std::fabs(reflectionPixels[pixel * 4u + channel] -
+                    hdriReflectionPixels[pixel * 4u + channel]);
+        check("reflection misses and secondary shading consume HDRI radiance",
+              hdriReflectionOK && hdriReflection.reflectionTarget &&
+              hdriDifference > 0.01);
+        glDeleteTextures(1, &controlledHDRI);
+
+        scene.meshes.front().materialOverride->mirrorFactor = 0.0f;
+        meshCache.BeginFrame();
+        const bool matteGeometry = rasterizer.RenderGeometry(scene, quality, meshCache,
+            gbuffer, lighting.EnvironmentTexture(), ContextGeneration(), &diagnostic);
+        meshCache.ReleaseUnused();
+        const bool matteLit = matteGeometry && lighting.Render(scene, quality, gbuffer,
+            ContextGeneration(), lit, &diagnostic);
+        FRayEffectOutputs matteReflection;
+        const bool matteReflectionOK = matteLit &&
+            execute(false, false, true, matteReflection);
+        std::fill(reflectionPixels.begin(), reflectionPixels.end(), 0.0f);
+        if (matteReflectionOK && matteReflection.reflectionTarget)
+        {
+            glBindTexture(GL_TEXTURE_2D,
+                static_cast<unsigned>(matteReflection.reflectionTarget->identity));
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, reflectionPixels.data());
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
+        reflectionEnergy = 0.0;
+        for (std::size_t pixel = 0; pixel < reflectionPixels.size() / 4u; ++pixel)
+            for (int channel = 0; channel < 3; ++channel)
+                reflectionEnergy += std::fabs(reflectionPixels[
+                    pixel * 4u + static_cast<std::size_t>(channel)]);
+        check("zero-mirror surfaces produce neutral reflection radiance",
+              matteReflectionOK && matteReflection.reflectionTarget &&
+              reflectionEnergy < 0.0001);
+        scene.meshes.front().materialOverride->mirrorFactor = 0.8f;
+        meshCache.BeginFrame();
+        const bool restoredGeometry = rasterizer.RenderGeometry(scene, quality, meshCache,
+            gbuffer, lighting.EnvironmentTexture(), ContextGeneration(), &diagnostic);
+        meshCache.ReleaseUnused();
+        const bool restoredLit = restoredGeometry && lighting.Render(scene, quality, gbuffer,
+            ContextGeneration(), lit, &diagnostic);
+
+        FRayEffectOutputs all;
+        const bool allOK = restoredLit && execute(true, true, true, all);
+        const GLenum rayRestoreError = glGetError();
+        const auto combined = composite(all);
+        check("all effects share one backend draw", allOK && rayRestoreError == GL_NO_ERROR &&
+              all.shadowVisibilityTarget && all.globalIlluminationTarget &&
+              all.reflectionTarget && rays.OwnedOutputTextureCount() == 3u);
+        check("all effect targets composite", combined.first);
+        check("primary G-buffer identity remains unchanged",
+              gbuffer.Texture(EHardwareGBufferSemantic::Identity) != 0 &&
+              gbuffer.DepthTexture() != 0 && gbuffer.IsComplete());
+        std::vector<float> primaryCoverageAfter(primaryCoverageBefore.size());
+        std::vector<float> primaryDepthAfter(primaryDepthBefore.size());
+        std::vector<std::uint32_t> primaryIdentityAfter(primaryIdentityBefore.size());
+        glBindTexture(GL_TEXTURE_2D,
+            gbuffer.Texture(EHardwareGBufferSemantic::PositionCoverage));
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT,
+            primaryCoverageAfter.data());
+        glBindTexture(GL_TEXTURE_2D, gbuffer.DepthTexture());
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, GL_FLOAT,
+            primaryDepthAfter.data());
+        glBindTexture(GL_TEXTURE_2D,
+            gbuffer.Texture(EHardwareGBufferSemantic::Identity));
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA_INTEGER, GL_UNSIGNED_INT,
+            primaryIdentityAfter.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+        check("ray effects preserve G-buffer coverage depth object and material identity",
+              primaryCoverageAfter == primaryCoverageBefore &&
+              primaryDepthAfter == primaryDepthBefore &&
+              primaryIdentityAfter == primaryIdentityBefore);
+
+        const int savedGISamples = quality.giSamples;
+        quality.giSamples = 0;
+        FRayEffectOutputs zeroGI;
+        const std::uint64_t drawsBeforeZeroGI = rays.Stats().rayDraws;
+        const bool zeroGIOK = execute(false, true, false, zeroGI);
+        check("zero-sample GI is absent with no ray draw", zeroGIOK &&
+              !zeroGI.globalIlluminationTarget &&
+              rays.Stats().rayDraws == drawsBeforeZeroGI);
+        quality.giSamples = savedGISamples;
+
+        std::vector<double> bounceEnergy;
+        quality.giSamples = 4;
+        for (int bounces = 0; bounces <= 4; ++bounces)
+        {
+            quality.giBounces = bounces;
+            FRayEffectOutputs bounced;
+            std::vector<float> pixels(64u * 64u * 4u, 0.0f);
+            if (execute(false, true, false, bounced) &&
+                bounced.globalIlluminationTarget)
+            {
+                glBindTexture(GL_TEXTURE_2D, static_cast<unsigned>(
+                    bounced.globalIlluminationTarget->identity));
+                glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, pixels.data());
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+            double rgb = 0.0;
+            for (std::size_t pixel = 0; pixel < pixels.size() / 4u; ++pixel)
+                rgb += std::fabs(pixels[pixel * 4u]) +
+                    std::fabs(pixels[pixel * 4u + 1]) +
+                    std::fabs(pixels[pixel * 4u + 2]);
+            bounceEnergy.push_back(rgb);
+        }
+        int differentBouncePairs = 0;
+        for (std::size_t i = 1; i < bounceEnergy.size(); ++i)
+            if (std::fabs(bounceEnergy[i] - bounceEnergy[i - 1]) > 0.001)
+                ++differentBouncePairs;
+        check("GI bounce counts 0 through 4 have observable iterative semantics",
+              differentBouncePairs >= 2);
+
+        auto readGIConfiguration = [&](int samples, int bounces)
+        {
+            quality.giSamples = samples;
+            quality.giBounces = bounces;
+            FRayEffectOutputs output;
+            std::vector<float> pixels(64u * 64u * 4u, 0.0f);
+            if (execute(false, true, false, output) &&
+                output.globalIlluminationTarget)
+            {
+                glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(
+                    output.globalIlluminationTarget->identity));
+                glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, pixels.data());
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+            return pixels;
+        };
+        const std::vector<float> giEightByFour = readGIConfiguration(8, 4);
+        const std::vector<float> giThirtyTwoByFour = readGIConfiguration(32, 4);
+        const std::vector<float> giThirtyTwoByTwo = readGIConfiguration(32, 2);
+        double maximumSampleDifference = 0.0;
+        double maximumBounceDifference = 0.0;
+        for (std::size_t pixel = 0; pixel < giEightByFour.size() / 4u; ++pixel)
+            for (int channel = 0; channel < 3; ++channel)
+            {
+                const std::size_t index = pixel * 4u +
+                    static_cast<std::size_t>(channel);
+                maximumSampleDifference += std::fabs(
+                    giEightByFour[index] - giThirtyTwoByFour[index]);
+                maximumBounceDifference += std::fabs(
+                    giThirtyTwoByTwo[index] - giThirtyTwoByFour[index]);
+            }
+        check("GI consumes the maximum 32-sample configuration",
+              maximumSampleDifference > 0.01);
+        check("GI consumes the maximum four-bounce configuration",
+              maximumBounceDifference > 0.01);
+
+        Material secondaryPlain;
+        secondaryPlain.kd = glm::vec3(0.9f, 0.05f, 0.05f);
+        secondaryPlain.ka = glm::vec3(1.0f);
+        Material secondaryTextured;
+        secondaryTextured.kd = glm::vec3(1.0f);
+        secondaryTextured.ka = glm::vec3(1.0f);
+        secondaryTextured.texWidth = secondaryTextured.texHeight = 2;
+        secondaryTextured.texChannels = 3;
+        secondaryTextured.diffuseTexPath = "memory://secondary-hit-blue";
+        secondaryTextured.texData = {
+            0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 0, 255,
+        };
+        plane->triMaterial = {0u, 1u};
+        const auto savedPlaneOverride = scene.meshes[1].materialOverride;
+        scene.meshes[1].materialOverride.reset();
+        scene.meshes[1].materialSlots = {
+            resolved(secondaryPlain), resolved(secondaryTextured)};
+        scene.meshes[1].materialSlotIdentities = {810u, 811u};
+        scene.meshes[1].triangleMaterialSlots = &plane->triMaterial;
+        scene.meshes[1].triangleMaterialSlotCount = plane->triMaterial.size();
+        plane->MarkGeometryDirty();
+        quality.giSamples = 16;
+        quality.giBounces = 1;
+        auto readSecondaryGI = [&]()
+        {
+            FRayEffectOutputs output;
+            std::vector<float> pixels(64u * 64u * 4u, 0.0f);
+            if (execute(false, true, false, output) &&
+                output.globalIlluminationTarget)
+            {
+                glBindTexture(GL_TEXTURE_2D, static_cast<unsigned>(
+                    output.globalIlluminationTarget->identity));
+                glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, pixels.data());
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+            return pixels;
+        };
+        const std::vector<float> blueSecondary = readSecondaryGI();
+        const std::uint64_t secondaryBLASBefore = rays.Stats().blasUploads;
+        const std::uint64_t secondaryMaterialsBefore = rays.Stats().materialUploads;
+        std::fill(secondaryTextured.texData.begin(), secondaryTextured.texData.end(), 0u);
+        for (std::size_t byte = 0; byte < secondaryTextured.texData.size(); byte += 3u)
+            secondaryTextured.texData[byte] = 255u;
+        const std::vector<float> redSecondary = readSecondaryGI();
+        double secondaryDifference = 0.0;
+        for (std::size_t pixel = 0; pixel < blueSecondary.size() / 4u; ++pixel)
+            for (int channel = 0; channel < 3; ++channel)
+                secondaryDifference += std::fabs(blueSecondary[pixel * 4u + channel] -
+                    redSecondary[pixel * 4u + channel]);
+        check("multi-slot textured secondary hits use actual UV material and revision",
+              secondaryDifference > 0.01 &&
+              rays.Stats().blasUploads == secondaryBLASBefore &&
+              rays.Stats().materialUploads == secondaryMaterialsBefore + 1u);
+        scene.meshes[1].materialOverride = savedPlaneOverride;
+        scene.meshes[1].materialSlots.clear();
+        scene.meshes[1].materialSlotIdentities.clear();
+        scene.meshes[1].triangleMaterialSlots = nullptr;
+        scene.meshes[1].triangleMaterialSlotCount = 0;
+
+        const auto savedLights = scene.pointLights;
+        for (int light = 1; light < 16; ++light)
+            scene.pointLights.push_back({
+                glm::vec3(float((light % 4) - 2), 2.0f + float(light % 3),
+                          -3.0f - float(light / 4)),
+                light >= 8 ? glm::vec3(4.0f, 2.0f, 1.0f) : glm::vec3(0.1f)});
+        quality.giSamples = 32;
+        quality.giBounces = 4;
+        quality.shadowSamples = 16;
+        FRayEffectOutputs maximumQuality;
+        const bool maximumQualityOK = execute(true, true, false, maximumQuality);
+        check("GL33 honors GI 32x4 shadows 16 and point lights 9 through 16",
+              maximumQualityOK && maximumQuality.shadowVisibilityTarget &&
+              maximumQuality.globalIlluminationTarget && glGetError() == GL_NO_ERROR);
+        scene.pointLights = savedLights;
+        quality.giSamples = savedGISamples;
+        quality.giBounces = 2;
+        quality.shadowSamples = 2;
+
+        // One hardware-primary pixel reflects into a known secondary triangle.
+        // The literal expected value follows HardwareRasterShaders: GL_LINEAR
+        // samples the stored UNORM RGB first, pow(2.2) decodes it, then the
+        // result is multiplied by the non-white material base albedo.
+        UHardwareGBuffer controlledGBuffer;
+        const bool controlledGBufferOK = controlledGBuffer.Resize(
+            1, 1, ContextGeneration());
+        if (controlledGBufferOK && controlledGBuffer.BindForGeometry())
+        {
+            const GLfloat positionCoverage[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            const GLfloat geometricNormal[4] = {0.0f, 0.0f, 1.0f, 0.0f};
+            const GLfloat shadingNormal[4] = {0.0f, 0.0f, 1.0f, 2.0f};
+            const GLfloat primaryAlbedo[4] = {1.0f, 1.0f, 1.0f, 8.0f};
+            const GLfloat primarySpecular[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            const GLuint primaryIdentity[4] = {71u, 72u, 0u, 0u};
+            const GLfloat black[4] = {};
+            const GLfloat depth = 0.5f;
+            glClearBufferfv(GL_COLOR, 0, positionCoverage);
+            glClearBufferfv(GL_COLOR, 1, geometricNormal);
+            glClearBufferfv(GL_COLOR, 2, shadingNormal);
+            glClearBufferfv(GL_COLOR, 3, primaryAlbedo);
+            glClearBufferfv(GL_COLOR, 4, primarySpecular);
+            glClearBufferuiv(GL_COLOR, 5, primaryIdentity);
+            glClearBufferfv(GL_COLOR, 6, black);
+            glClearBufferfv(GL_COLOR, 7, black);
+            glClearBufferfv(GL_DEPTH, 0, &depth);
+            controlledGBuffer.EndGeometry();
+        }
+        UMesh controlledSurface;
+        controlledSurface.vertices = {
+            {glm::vec3(-2.0f, -2.0f, 2.0f), glm::vec3(0.0f, 0.0f, -1.0f),
+             glm::vec2(0.0f, 0.0f)},
+            {glm::vec3( 2.0f, -2.0f, 2.0f), glm::vec3(0.0f, 0.0f, -1.0f),
+             glm::vec2(0.8f, 0.4f)},
+            {glm::vec3( 0.0f,  2.0f, 2.0f), glm::vec3(0.0f, 0.0f, -1.0f),
+             glm::vec2(0.4f, 1.0f)},
+        };
+        controlledSurface.indices = {0u, 1u, 2u};
+        controlledSurface.FinalizeGeometry();
+        Material controlledMaterial;
+        controlledMaterial.kd = glm::vec3(0.5f, 0.25f, 0.75f);
+        controlledMaterial.ka = glm::vec3(1.0f);
+        controlledMaterial.texWidth = 3;
+        controlledMaterial.texHeight = 2;
+        controlledMaterial.texChannels = 3;
+        controlledMaterial.wrapMode = EWrapMode::Clamp;
+        controlledMaterial.diffuseTexPath = "memory://linear-parity-3x2";
+        controlledMaterial.texData = {
+              0,   0,   0, 100,  40,  20, 240,  80,  40,
+             20, 120,  60, 140, 200, 100, 255, 240, 180,
+        };
+        FRenderMeshInstance controlledInstance;
+        controlledInstance.mesh = &controlledSurface;
+        controlledInstance.materialOverride = resolved(controlledMaterial);
+        controlledInstance.materialOverrideIdentity = 902u;
+        controlledInstance.objectIdentity = 901u;
+        Material largerAtlasMaterial;
+        largerAtlasMaterial.kd = glm::vec3(1.0f);
+        largerAtlasMaterial.texWidth = 7;
+        largerAtlasMaterial.texHeight = 5;
+        largerAtlasMaterial.texChannels = 3;
+        largerAtlasMaterial.diffuseTexPath = "memory://larger-atlas-neighbor";
+        largerAtlasMaterial.texData.assign(7u * 5u * 3u, 255u);
+        FRenderMeshInstance largerAtlasInstance = controlledInstance;
+        largerAtlasInstance.modelTransform = glm::translate(glm::mat4(1.0f),
+            glm::vec3(100.0f, 0.0f, 0.0f));
+        largerAtlasInstance.materialOverride = resolved(largerAtlasMaterial);
+        largerAtlasInstance.materialOverrideIdentity = 904u;
+        largerAtlasInstance.objectIdentity = 903u;
+        FRenderScene controlledScene;
+        controlledScene.camera.eye = glm::vec3(0.0f, 0.0f, 1.0f);
+        controlledScene.environment.tint = glm::vec3(0.0f);
+        controlledScene.environment.horizon = glm::vec3(0.0f);
+        controlledScene.environment.zenith = glm::vec3(0.0f);
+        controlledScene.meshes.push_back(controlledInstance);
+        controlledScene.meshes.push_back(largerAtlasInstance);
+        FRasterLightingOutput controlledLighting;
+        controlledLighting.valid = true;
+        FRenderQuality controlledQuality;
+        controlledQuality.reflStrength = 1.0f;
+        UGL33RayTracingBackend controlledRays;
+        FRayEffectInputs controlledInputs;
+        controlledInputs.gbuffer = &controlledGBuffer;
+        controlledInputs.scene = &controlledScene;
+        controlledInputs.rasterLighting = &controlledLighting;
+        controlledInputs.features.rayTracing = true;
+        controlledInputs.features.rayTracedReflections = true;
+        controlledInputs.quality = controlledQuality;
+        controlledInputs.width = controlledInputs.height = 1;
+        controlledInputs.contextGeneration = ContextGeneration();
+        FRayEffectOutputs controlledReflection;
+        glm::vec4 controlledPixel(0.0f);
+        const bool controlledReflectionOK = controlledGBufferOK &&
+            controlledRays.RenderEffects(controlledInputs, controlledReflection,
+                &diagnostic);
+        if (controlledReflectionOK && controlledReflection.reflectionTarget)
+        {
+            glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(
+                controlledReflection.reflectionTarget->identity));
+            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT,
+                &controlledPixel[0]);
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
+        const glm::vec3 expectedStoredRGB(93.8f / 255.0f,
+            131.6f / 255.0f, 65.8f / 255.0f);
+        const glm::vec3 expectedSecondary = controlledMaterial.kd *
+            glm::pow(expectedStoredRGB, glm::vec3(2.2f));
+        const glm::vec3 controlledError = glm::abs(
+            glm::vec3(controlledPixel) - expectedSecondary);
+        check("secondary textured albedo matches raster GL_LINEAR decode and base color",
+              controlledReflectionOK && controlledReflection.reflectionTarget &&
+              controlledError.x < 0.003f && controlledError.y < 0.003f &&
+              controlledError.z < 0.003f);
+
+        auto readControlledShadow = [&](int lightCount, int samples,
+                                        float softness)
+        {
+            controlledScene.pointLights.clear();
+            for (int light = 0; light < lightCount; ++light)
+                controlledScene.pointLights.push_back({
+                    light < 8 ? glm::vec3(0.0f, 0.0f, 4.0f)
+                              : glm::vec3(0.0f, 0.0f, -4.0f),
+                    glm::vec3(1.0f)});
+            controlledInputs.features.rayTracedReflections = false;
+            controlledInputs.features.rayTracedShadows = true;
+            controlledInputs.quality.shadowSamples = samples;
+            controlledInputs.quality.shadowSoftness = softness;
+            FRayEffectOutputs output;
+            float pixel = -1.0f;
+            if (controlledRays.RenderEffects(controlledInputs, output, &diagnostic) &&
+                output.shadowVisibilityTarget)
+            {
+                glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(
+                    output.shadowVisibilityTarget->identity));
+                glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_FLOAT, &pixel);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+            return pixel;
+        };
+        const float firstEightVisibility = readControlledShadow(8, 1, 0.0f);
+        const float allSixteenVisibility = readControlledShadow(16, 1, 0.0f);
+        check("shadow output measurably consumes point lights 9 through 16",
+              firstEightVisibility >= 0.0f && firstEightVisibility < 0.05f &&
+              allSixteenVisibility > 0.45f && allSixteenVisibility < 0.55f);
+        controlledSurface.vertices[0].position = glm::vec3(-0.35f, -0.3f, 2.0f);
+        controlledSurface.vertices[1].position = glm::vec3( 0.35f, -0.3f, 2.0f);
+        controlledSurface.vertices[2].position = glm::vec3( 0.0f,   0.4f, 2.0f);
+        controlledSurface.MarkGeometryDirty();
+        const float oneShadowSample = readControlledShadow(1, 1, 0.2f);
+        const float sixteenShadowSamples = readControlledShadow(1, 16, 0.2f);
+        check("maximum shadow samples change controlled soft-shadow visibility",
+              oneShadowSample >= 0.0f && sixteenShadowSamples > 0.0f &&
+              sixteenShadowSamples < 1.0f &&
+              std::fabs(oneShadowSample - sixteenShadowSamples) > 0.05f);
+        controlledRays.Shutdown();
+        controlledGBuffer.Release();
+
+        glDrawBuffer(GL_NONE);
+        glViewport(3, 4, 17, 19);
+        glEnable(GL_RASTERIZER_DISCARD);
+        glEnable(GL_STENCIL_TEST);
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(7, 8, 1, 1);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_GREATER);
+        glDepthMask(GL_FALSE);
+        glEnable(GL_CULL_FACE);
+        glEnable(GL_FRAMEBUFFER_SRGB);
+        glDepthRange(0.2, 0.8);
+        glPolygonMode(GL_FRONT, GL_LINE);
+        glPolygonMode(GL_BACK, GL_POINT);
+        glFrontFace(GL_CW);
+        glEnablei(GL_BLEND, 0);
+        glColorMaski(0, GL_FALSE, GL_TRUE, GL_FALSE, GL_TRUE);
+        GLuint hostileTBO = 0;
+        glGenBuffers(1, &hostileTBO);
+        glBindBuffer(GL_TEXTURE_BUFFER, hostileTBO);
+        const float hostileSentinel = 19.0f;
+        glBufferData(GL_TEXTURE_BUFFER, sizeof(hostileSentinel), &hostileSentinel,
+            GL_STATIC_DRAW);
+        GLint combinedTextureUnits = 0;
+        glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &combinedTextureUnits);
+        const int hostileUnit = combinedTextureUnits > 16 ? combinedTextureUnits - 1 : 15;
+        GLuint hostileTextures[3] = {}, hostileSampler = 0;
+        glGenTextures(3, hostileTextures);
+        glGenSamplers(1, &hostileSampler);
+        glActiveTexture(GL_TEXTURE0 + hostileUnit);
+        const unsigned char hostilePixel[4] = {17u, 43u, 91u, 255u};
+        glBindTexture(GL_TEXTURE_2D, hostileTextures[0]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA,
+            GL_UNSIGNED_BYTE, hostilePixel);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, hostileTextures[1]);
+        glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, 1, 1, 1, 0, GL_RGBA,
+            GL_UNSIGNED_BYTE, hostilePixel);
+        glBindTexture(GL_TEXTURE_BUFFER, hostileTextures[2]);
+        glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, hostileTBO);
+        glBindSampler(hostileUnit, hostileSampler);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 8);
+        scene.meshes.front().materialOverride->ambient.x += 0.001f;
+        FRayEffectOutputs hostile;
+        UGL33RayTracingBackend hostileRays;
+        FRayEffectInputs hostileInputs;
+        hostileInputs.gbuffer = &gbuffer;
+        // Reuse the controlled 3x2 + 7x5 material scene so unpack=8 would
+        // corrupt its odd-width padded atlas unless the backend normalizes it.
+        hostileInputs.scene = &controlledScene;
+        hostileInputs.rasterLighting = &lit;
+        hostileInputs.features.rayTracing = true;
+        hostileInputs.features.rayTracedShadows = true;
+        hostileInputs.quality = quality;
+        hostileInputs.width = hostileInputs.height = 3;
+        hostileInputs.contextGeneration = ContextGeneration();
+        const bool hostileOK = hostileRays.RenderEffects(
+            hostileInputs, hostile, &diagnostic);
+        GLint restoredDrawBuffer = 0, restoredViewport[4] = {}, restoredPolygon[2] = {};
+        GLint restoredFrontFace = 0, restoredDepthFunction = 0;
+        GLint restoredTBO = 0, restoredActiveTexture = 0, restoredTexture2D = 0;
+        GLint restoredTextureArray = 0, restoredTextureBuffer = 0;
+        GLint restoredSampler = 0, restoredUnpackAlignment = 0;
+        GLdouble restoredDepthRange[2] = {};
+        GLboolean restoredDepthMask = GL_TRUE, restoredColorMask[4] = {};
+        glGetIntegerv(GL_DRAW_BUFFER0, &restoredDrawBuffer);
+        glGetIntegerv(GL_VIEWPORT, restoredViewport);
+        glGetIntegerv(GL_POLYGON_MODE, restoredPolygon);
+        glGetIntegerv(GL_FRONT_FACE, &restoredFrontFace);
+        glGetIntegerv(GL_DEPTH_FUNC, &restoredDepthFunction);
+        glGetDoublev(GL_DEPTH_RANGE, restoredDepthRange);
+        glGetBooleanv(GL_DEPTH_WRITEMASK, &restoredDepthMask);
+        glGetBooleani_v(GL_COLOR_WRITEMASK, 0, restoredColorMask);
+        glGetIntegerv(0x8C2A, &restoredTBO);
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &restoredActiveTexture);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &restoredTexture2D);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D_ARRAY, &restoredTextureArray);
+        glGetIntegerv(GL_TEXTURE_BINDING_BUFFER, &restoredTextureBuffer);
+        glGetIntegeri_v(GL_SAMPLER_BINDING, hostileUnit, &restoredSampler);
+        glGetIntegerv(GL_UNPACK_ALIGNMENT, &restoredUnpackAlignment);
+        unsigned char restoredHostilePixel[4] = {};
+        glBindTexture(GL_TEXTURE_2D, hostileTextures[0]);
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+            restoredHostilePixel);
+        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(restoredTexture2D));
+        check("ray pass normalizes hostile state and restores it", hostileOK &&
+              restoredDrawBuffer == GL_NONE && restoredViewport[0] == 3 &&
+              restoredViewport[1] == 4 && restoredViewport[2] == 17 &&
+              restoredViewport[3] == 19 && restoredPolygon[0] == GL_LINE &&
+              restoredPolygon[1] == GL_POINT && restoredFrontFace == GL_CW &&
+              restoredDepthFunction == GL_GREATER && restoredDepthMask == GL_FALSE &&
+              std::fabs(restoredDepthRange[0] - 0.2) < 0.000001 &&
+              std::fabs(restoredDepthRange[1] - 0.8) < 0.000001 &&
+              restoredColorMask[0] == GL_FALSE && restoredColorMask[1] == GL_TRUE &&
+              restoredColorMask[2] == GL_FALSE && restoredColorMask[3] == GL_TRUE &&
+              glIsEnabled(GL_RASTERIZER_DISCARD) && glIsEnabled(GL_STENCIL_TEST) &&
+              glIsEnabled(GL_SCISSOR_TEST) && glIsEnabled(GL_DEPTH_TEST) &&
+              glIsEnabled(GL_CULL_FACE) && glIsEnabled(GL_FRAMEBUFFER_SRGB) &&
+              glIsEnabledi(GL_BLEND, 0) &&
+              restoredTBO == static_cast<GLint>(hostileTBO) &&
+              restoredActiveTexture == GL_TEXTURE0 + hostileUnit &&
+              restoredTexture2D == static_cast<GLint>(hostileTextures[0]) &&
+              restoredTextureArray == static_cast<GLint>(hostileTextures[1]) &&
+              restoredTextureBuffer == static_cast<GLint>(hostileTextures[2]) &&
+              restoredSampler == static_cast<GLint>(hostileSampler) &&
+              restoredUnpackAlignment == 8 &&
+              std::equal(std::begin(hostilePixel), std::end(hostilePixel),
+                         std::begin(restoredHostilePixel)));
+        UGL33RayTracingBackend hostileFailureRays;
+        hostileFailureRays.InjectNextUploadFailureForTesting();
+        FRayEffectOutputs hostileFailureOutput;
+        const bool hostileFailure = !hostileFailureRays.RenderEffects(
+            hostileInputs, hostileFailureOutput, &diagnostic);
+        GLint failedActiveTexture = 0, failedTexture2D = 0;
+        GLint failedTextureArray = 0, failedTextureBuffer = 0;
+        GLint failedSampler = 0, failedUnpackAlignment = 0;
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &failedActiveTexture);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &failedTexture2D);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D_ARRAY, &failedTextureArray);
+        glGetIntegerv(GL_TEXTURE_BINDING_BUFFER, &failedTextureBuffer);
+        glGetIntegeri_v(GL_SAMPLER_BINDING, hostileUnit, &failedSampler);
+        glGetIntegerv(GL_UNPACK_ALIGNMENT, &failedUnpackAlignment);
+        check("failed ray upload restores high texture-unit and pixel-store state",
+              hostileFailure && !hostileFailureOutput.shadowVisibilityTarget &&
+              failedActiveTexture == GL_TEXTURE0 + hostileUnit &&
+              failedTexture2D == static_cast<GLint>(hostileTextures[0]) &&
+              failedTextureArray == static_cast<GLint>(hostileTextures[1]) &&
+              failedTextureBuffer == static_cast<GLint>(hostileTextures[2]) &&
+              failedSampler == static_cast<GLint>(hostileSampler) &&
+              failedUnpackAlignment == 8);
+        glDrawBuffer(GL_BACK); glViewport(0, 0, 64, 64);
+        glDisable(GL_RASTERIZER_DISCARD); glDisable(GL_STENCIL_TEST);
+        glDisable(GL_SCISSOR_TEST); glDisable(GL_DEPTH_TEST); glDepthFunc(GL_LESS);
+        glDepthMask(GL_TRUE); glDisable(GL_CULL_FACE); glDisable(GL_FRAMEBUFFER_SRGB);
+        glDepthRange(0.0, 1.0); glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        glFrontFace(GL_CCW); glDisablei(GL_BLEND, 0);
+        glColorMaski(0, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glBindBuffer(GL_TEXTURE_BUFFER, 0);
+        hostileFailureRays.Shutdown();
+        hostileRays.Shutdown();
+        glBindSampler(hostileUnit, 0);
+        glDeleteSamplers(1, &hostileSampler);
+        glDeleteTextures(3, hostileTextures);
+        glDeleteBuffers(1, &hostileTBO);
+        glActiveTexture(GL_TEXTURE0);
+
+        scene.meshes.front().modelTransform[3].x += 0.125f;
+        rays.InjectNextUploadFailureForTesting();
+        FRayEffectOutputs failedUpload, retriedUpload;
+        const std::uint64_t uploadsBeforeFailure = rays.Stats().sceneUploads;
+        const bool uploadFailed = !execute(true, false, false, failedUpload);
+        const bool uploadRetried = execute(true, false, false, retriedUpload);
+        check("failed scene upload is transactional and retries", uploadFailed &&
+              !failedUpload.shadowVisibilityTarget && uploadRetried &&
+              retriedUpload.shadowVisibilityTarget &&
+              rays.Stats().sceneUploads == uploadsBeforeFailure + 1u);
+
+        class FFailOnceGLFactory final : public IRayTracingBackendFactory
+        {
+        public:
+            std::unique_ptr<IRayTracingBackend> Create(
+                ERayTracingBackend backend, std::string* error) override
+            {
+                if (backend != ERayTracingBackend::CompatibleGL33)
+                {
+                    if (error) *error = "only GL33 is expected by this probe";
+                    return {};
+                }
+                auto result = std::make_unique<UGL33RayTracingBackend>();
+                result->InjectNextUploadFailureForTesting();
+                return result;
+            }
+        } failOnceFactory;
+        class FCountingWarnings final : public IRayEffectsWarningSink
+        {
+        public:
+            void Warn(const std::string&) override { ++count; }
+            int count = 0;
+        } schedulerWarnings;
+        FRayEffectsScheduler retryScheduler(failOnceFactory, schedulerWarnings);
+        FBackendSelection retrySelection;
+        retrySelection.requested = ERayTracingBackend::CompatibleGL33;
+        retrySelection.selected = ERayTracingBackend::CompatibleGL33;
+        retrySelection.available = true;
+        retrySelection.rayTracingEnabled = true;
+        FRayEffectInputs retryInputs;
+        retryInputs.gbuffer = &gbuffer;
+        retryInputs.scene = &scene;
+        retryInputs.rasterLighting = &lit;
+        retryInputs.features.rayTracing = true;
+        retryInputs.features.rayTracedShadows = true;
+        retryInputs.quality = quality;
+        retryInputs.width = retryInputs.height = 64;
+        retryInputs.contextGeneration = ContextGeneration();
+        FRayEffectOutputs schedulerFailure, schedulerRetry;
+        const bool schedulerNeutral = retryScheduler.Execute(
+            retryInputs, retrySelection, schedulerFailure);
+        const bool schedulerRecovered = retryScheduler.Execute(
+            retryInputs, retrySelection, schedulerRetry);
+        check("scheduler retries a transactional real-GL upload failure next frame",
+              schedulerNeutral && !schedulerFailure.shadowVisibilityTarget &&
+              schedulerRecovered && schedulerRetry.shadowVisibilityTarget &&
+              schedulerWarnings.count == 1 &&
+              retryScheduler.Stats().backendCalls == 2u);
+        retryScheduler.Shutdown();
+
+        FRenderScene sharedScene;
+        sharedScene.meshes.push_back(cubeInstance);
+        UGL33RayTracingBackend scaleRays;
+        FRayEffectInputs scaleInputs;
+        scaleInputs.gbuffer = &gbuffer;
+        scaleInputs.scene = &sharedScene;
+        scaleInputs.rasterLighting = &lit;
+        scaleInputs.features.rayTracing = true;
+        scaleInputs.features.rayTracedShadows = true;
+        scaleInputs.quality = quality;
+        scaleInputs.contextGeneration = ContextGeneration();
+        // This is an upload/cache invariant probe. A single fragment keeps the
+        // traversal bounded while the real GL backend still creates every TBO.
+        scaleInputs.width = scaleInputs.height = 1;
+        auto uploadScaleScene = [&]()
+        {
+            FRayEffectOutputs ignored;
+            return scaleRays.RenderEffects(scaleInputs, ignored, &diagnostic);
+        };
+        bool scaleUploadsOK = uploadScaleScene();
+        const std::uint64_t unchangedBLASUploads = scaleRays.Stats().blasUploads;
+        const std::uint64_t unchangedInstanceUploads = scaleRays.Stats().instanceUploads;
+        const std::uint64_t unchangedSceneUploads = scaleRays.Stats().sceneUploads;
+        const bool unchangedUploadOK = uploadScaleScene();
+        check("unchanged ray scene performs zero GL TBO uploads",
+              unchangedUploadOK &&
+              scaleRays.Stats().blasUploads == unchangedBLASUploads &&
+              scaleRays.Stats().instanceUploads == unchangedInstanceUploads &&
+              scaleRays.Stats().sceneUploads == unchangedSceneUploads);
+        for (int count : {100, 1000})
+        {
+            sharedScene.meshes.resize(static_cast<std::size_t>(count), cubeInstance);
+            for (int i = 0; i < count; ++i)
+            {
+                sharedScene.meshes[static_cast<std::size_t>(i)].objectIdentity =
+                    static_cast<std::uint32_t>(i + 1);
+                sharedScene.meshes[static_cast<std::size_t>(i)].modelTransform =
+                    glm::translate(glm::mat4(1.0f), glm::vec3(float(i), 0.0f, -5.0f));
+            }
+            scaleUploadsOK = uploadScaleScene() && scaleUploadsOK;
+        }
+        check("1/100/1000 shared cubes upload one GL BLAS TBO set",
+              scaleUploadsOK && scaleRays.Stats().blasUploads == 1u &&
+              scaleRays.Stats().instanceUploads == 3u &&
+              scaleRays.Stats().residentBLAS == 1u);
+        const std::uint64_t blasUploadsBeforeTransform =
+            scaleRays.Stats().blasUploads;
+        const std::uint64_t instanceUploadsBeforeTransform =
+            scaleRays.Stats().instanceUploads;
+        sharedScene.meshes.front().modelTransform[3].y += 1.0f;
+        const bool transformedUploadOK = uploadScaleScene();
+        check("transform-only edit uploads instances but not GL BLAS TBOs",
+              transformedUploadOK &&
+              scaleRays.Stats().blasUploads == blasUploadsBeforeTransform &&
+              scaleRays.Stats().instanceUploads == instanceUploadsBeforeTransform + 1u);
+        const std::uint64_t blasUploadsBeforeRevision =
+            scaleRays.Stats().blasUploads;
+        cube->MarkGeometryDirty();
+        const bool revisedUploadOK = uploadScaleScene();
+        check("geometry revision uploads exactly one replacement GL BLAS TBO set",
+              revisedUploadOK &&
+              scaleRays.Stats().blasUploads == blasUploadsBeforeRevision + 1u &&
+              scaleRays.Stats().residentBLAS == 1u);
+        scaleRays.Shutdown();
+
+        FRaySceneCache cache;
+        cache.Prepare(sharedScene);
+        FRenderScene replacement;
+        cache.Prepare(replacement);
+        check("world replacement releases unused BLAS",
+              cache.Stats().residentBLAS == 0u && cache.Stats().blasReleases == 1u);
+
+        FRayEffectInputs resizeInputs;
+        resizeInputs.gbuffer = &gbuffer;
+        resizeInputs.scene = &scene;
+        resizeInputs.rasterLighting = &lit;
+        resizeInputs.features.rayTracing = true;
+        resizeInputs.features.rayTracedShadows = true;
+        resizeInputs.features.rayTracedGI = resizeInputs.features.rayTracedReflections = false;
+        resizeInputs.quality = quality;
+        resizeInputs.contextGeneration = ContextGeneration();
+        resizeInputs.width = resizeInputs.height = 64;
+        FRayEffectOutputs resizeOutput;
+        const bool first64 = rays.RenderEffects(resizeInputs, resizeOutput, &diagnostic);
+        const std::uint64_t allocations64 = rays.Stats().outputAllocations;
+        const bool same64 = rays.RenderEffects(resizeInputs, resizeOutput, &diagnostic);
+        resizeInputs.width = 80; resizeInputs.height = 48;
+        const bool wide = rays.RenderEffects(resizeInputs, resizeOutput, &diagnostic);
+        resizeInputs.width = resizeInputs.height = 64;
+        const bool back64 = rays.RenderEffects(resizeInputs, resizeOutput, &diagnostic);
+        check("64->80x48->64 resize is bounded and idempotent", first64 && same64 &&
+              wide && back64 && rays.Stats().outputAllocations == allocations64 + 2u &&
+              rays.OwnedOutputTextureCount() == 1u);
+
+        const std::uint64_t originalGeneration = ContextGeneration();
+        const std::uint64_t nextGeneration = originalGeneration + 101u;
+        const std::uint64_t abandonedBefore = rays.Stats().abandonedResources;
+        SetActiveRenderTargetContextGeneration(nextGeneration);
+        const bool recreated = rays.Init(nextGeneration, &diagnostic);
+        check("context transition abandons stale names and recreates lazily", recreated &&
+              rays.ContextGeneration() == nextGeneration &&
+              rays.Stats().abandonedResources > abandonedBefore);
+        const std::uint64_t releasedBefore = rays.Stats().releasedResources;
+        rays.Shutdown();
+        check("same-generation shutdown deletes current names",
+              rays.Stats().releasedResources > releasedBefore &&
+              rays.ContextGeneration() == 0);
+        SetActiveRenderTargetContextGeneration(originalGeneration);
+
+        std::unique_ptr<UWorld> routedWorld = LoadRenderParityFixture();
+        bool routedRayEffects = false;
+        if (routedWorld)
+        {
+            ACamera& routedCamera = routedWorld->GetCamera();
+            routedCamera.SetOrientation(routedCamera.yaw, routedCamera.pitch);
+            routedCamera.SetFOV(routedCamera.fov, 1.0f);
+            UWorldRenderer worldRenderer;
+            worldRenderer.Init();
+            FRenderTarget routedTarget = FRenderTarget::TextureViewport(
+                64, 64, ContextGeneration());
+            FRenderFeatures routedFeatures = routedWorld->GetScene().renderFeatures;
+            routedFeatures.rayTracing = true;
+            routedFeatures.rayTracedShadows = true;
+            routedFeatures.rayTracedGI = true;
+            routedFeatures.rayTracedReflections = true;
+            FBackendSelection routedSelection;
+            routedSelection.requested = ERayTracingBackend::CompatibleGL33;
+            routedSelection.selected = ERayTracingBackend::CompatibleGL33;
+            routedSelection.available = true;
+            routedSelection.rayTracingEnabled = true;
+            FRenderQuality routedQuality = quality;
+            routedQuality.giSamples = 2;
+            routedQuality.giBounces = 2;
+            routedRayEffects = worldRenderer.Render(*routedWorld, routedCamera,
+                routedTarget, routedFeatures, routedQuality, routedSelection,
+                ContextGeneration()) && worldRenderer.Stats().rayDispatches == 1u &&
+                worldRenderer.Stats().rayResourceAllocations > 0u &&
+                worldRenderer.Stats().cpuReadbacks == 0u;
+            worldRenderer.Shutdown();
+        }
+        check("UWorldRenderer factory scheduler executes the real GL33 ray path",
+              routedWorld != nullptr && routedRayEffects);
+
+        {
+            std::ofstream ppm(outputPath, std::ios::binary);
+            ppm << "P6\n64 64\n255\n";
+            for (int y = 63; y >= 0; --y)
+                ppm.write(reinterpret_cast<const char*>(combined.second.data() + y * 64 * 3), 64 * 3);
+            check("ray-effects PPM written", static_cast<bool>(ppm));
+        }
+        check("ray-effects pass leaves no GL error", glGetError() == GL_NO_ERROR);
+        rays.Shutdown();
+        lighting.Shutdown();
+        gbuffer.Release();
+        meshCache.Clear();
+        std::printf("=== ray-effects gates: %d passed, %d failed ===\n", passed, failed);
+        if (failed && !diagnostic.empty()) std::fprintf(stderr, "%s\n", diagnostic.c_str());
+        return failed == 0 ? 0 : 1;
+    }
+};
+
+static int RunRayEffectsGates(const std::string& outputPath)
+{
+    FRayEffectsSelfTestApp app;
+    if (!app.Init(64, 64, "Ray Effects Self-Test")) return 2;
     return app.RunGates(outputPath);
 }
 
@@ -1844,6 +2946,18 @@ int main(int argc, char** argv)
             return 2;
         }
         return RunRasterLightingGates(outputPath);
+    }
+
+    const std::string rayEffectsPrefix = "--ray-effects-selftest=";
+    if (arg.rfind(rayEffectsPrefix, 0) == 0)
+    {
+        const std::string outputPath = arg.substr(rayEffectsPrefix.size());
+        if (outputPath.empty())
+        {
+            std::fprintf(stderr, "--ray-effects-selftest requires an output .ppm path\n");
+            return 2;
+        }
+        return RunRayEffectsGates(outputPath);
     }
 
     if (arg == "--fbxtest")

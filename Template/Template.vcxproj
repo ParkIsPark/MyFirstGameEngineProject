@@ -95,6 +95,9 @@
     <ClCompile Include="$(EngineRootDir)Engine\Render\FRenderScene.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\UHardwareGBuffer.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\URasterLightingPass.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Render\IRayTracingBackend.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Render\UGL33RayTracingBackend.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\RayTracing\FRaySceneCache.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\UHardwareRasterizer.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\FRenderTarget.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\FRenderPipelinePlan.cpp" />
@@ -214,9 +217,13 @@
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderScene.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\UHardwareGBuffer.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\URasterLightingPass.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\IRayTracingBackend.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\UGL33RayTracingBackend.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\RayTracing\FRaySceneCache.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\UHardwareRasterizer.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\HardwareRasterShaders.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\RasterLightingShaders.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\RayEffectsFragmentShaders.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderTarget.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\FGPUMeshResource.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderFeatures.h" />

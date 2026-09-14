@@ -1,0 +1,82 @@
+#pragma once
+
+#include <glm/glm.hpp>
+
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+struct FRenderScene;
+
+struct FPackedRayScene
+{
+    bool valid = true;
+    std::string diagnostic;
+    std::vector<glm::vec4> triangleTexels;
+    std::vector<glm::vec4> blasNodeTexels;
+    std::vector<float> blasTriangleIndices;
+    std::vector<glm::vec4> instanceTexels;
+    std::vector<glm::uvec4> instanceIdentityTexels;
+    std::vector<glm::vec4> tlasNodeTexels;
+    std::vector<float> tlasInstanceIndices;
+    // Six texels per deterministic material record: diffuse/mirror,
+    // ambient/shininess, specular/exact identity bits, emissive/atlas layer,
+    // combined UV tiling/wrap metadata, and logical source texture size.
+    std::vector<glm::vec4> materialTexels;
+    std::vector<unsigned char> textureArrayRGBA;
+    int textureWidth = 0;
+    int textureHeight = 0;
+    int textureLayerCount = 0;
+    int materialCount = 0;
+    int triangleCount = 0;
+    int instanceCount = 0;
+    int maximumBLASDepth = 0;
+    int tlasDepth = 0;
+    std::uint64_t blasRevision = 0;
+    std::uint64_t instanceRevision = 0;
+    std::uint64_t materialRevision = 0;
+    bool blasChanged = false;
+    bool instancesChanged = false;
+    bool materialsChanged = false;
+};
+
+struct FRaySceneCacheStats
+{
+    std::uint64_t blasBuilds = 0;
+    std::uint64_t blasRebuilds = 0;
+    std::uint64_t blasReleases = 0;
+    std::size_t residentBLAS = 0;
+};
+
+// CPU-side deterministic two-level acceleration packing shared by GL backends.
+// BLAS entries are keyed by stable mesh asset id + geometry revision; instance
+// transforms and the TLAS are independently repacked when their hash changes.
+class FRaySceneCache
+{
+public:
+    const FPackedRayScene& Prepare(const FRenderScene& scene);
+    void Clear();
+    const FRaySceneCacheStats& Stats() const { return stats_; }
+
+private:
+    struct FBLAS
+    {
+        std::uint64_t revision = 0;
+        std::vector<glm::vec4> triangleTexels;
+        std::vector<glm::vec4> nodeTexels;
+        std::vector<float> triangleIndices;
+        int depth = 0;
+        glm::vec3 minimum = glm::vec3(0.0f);
+        glm::vec3 maximum = glm::vec3(0.0f);
+    };
+    std::unordered_map<std::uint64_t, FBLAS> blas_;
+    FPackedRayScene packed_;
+    std::uint64_t blasSetHash_ = 0;
+    std::uint64_t instanceHash_ = 0;
+    std::uint64_t materialHash_ = 0;
+    std::uint64_t nextBLASRevision_ = 1;
+    std::uint64_t nextInstanceRevision_ = 1;
+    std::uint64_t nextMaterialRevision_ = 1;
+    FRaySceneCacheStats stats_;
+};
