@@ -1,12 +1,13 @@
 #pragma once
 
+#include "Material.h"
+
 #include <filesystem>
 #include <functional>
 #include <string>
 #include <vector>
 
 class AActor;
-struct Material;
 class UMeshComponent;
 class UScriptComponent;
 
@@ -63,10 +64,35 @@ FEditorScriptAssignment AssignEditorLuaScript(
     const std::filesystem::path& contentRoot,
     const std::function<void()>& beforeChange);
 
-// Commit an already-authored temporary material only after the caller captures
-// its pre-change state. Component edits always become local overrides and never
-// mutate the shared mesh material used to seed the temporary value.
-void CommitEditorMaterialEdit(Material& target, Material edited,
-                              const std::function<void()>& beforeChange);
-void CommitEditorComponentMaterialEdit(UMeshComponent& component, Material edited,
+// Payload-free authoring state used by the inspector. Material owns potentially
+// large decoded texture pixels, which must not be copied simply to draw widgets.
+struct FEditorMaterialDraft
+{
+    glm::vec3 ka = glm::vec3(0.2f);
+    glm::vec3 kd = glm::vec3(1.0f);
+    glm::vec3 ks = glm::vec3(0.0f);
+    float shininess = 0.0f;
+    glm::vec3 km = glm::vec3(0.0f);
+    glm::vec3 emissive = glm::vec3(0.0f);
+    std::string diffuseTexPath;
+    EWrapMode wrapMode = EWrapMode::Repeat;
+    glm::vec2 uvTiling = glm::vec2(1.0f);
+    EMaterialBlendMode blendMode = EMaterialBlendMode::Opaque;
+    float opacity = 1.0f;
+    float refraction = 1.52f;
+    glm::vec3 transmittanceColor = glm::vec3(1.0f);
+    float transmittanceDistance = 1.0f;
+    bool castRayTracedShadows = true;
+};
+
+FEditorMaterialDraft MakeEditorMaterialDraft(const Material& source);
+
+// Commit authoring fields only after the caller captures pre-change state.
+// Existing runtime texture payload remains resident unless reloadTexture is set.
+// Component edits always become local overrides and never mutate their seed.
+void CommitEditorMaterialEdit(Material& target, const FEditorMaterialDraft& edited,
+                              bool reloadTexture, const std::function<void()>& beforeChange);
+void CommitEditorComponentMaterialEdit(UMeshComponent& component,
+                                       const FEditorMaterialDraft& edited,
+                                       bool reloadTexture,
                                        const std::function<void()>& beforeChange);

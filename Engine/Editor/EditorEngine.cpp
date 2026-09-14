@@ -1120,8 +1120,9 @@ void EditorEngine::ApplyMaterialToSelected(const std::string& path)
 // Returns true if any field changed this frame.
 bool EditorEngine::DrawMaterialFields(Material& m, UMeshComponent* componentTarget)
 {
-    Material edited = m;
+    FEditorMaterialDraft edited = MakeEditorMaterialDraft(m);
     bool ch = false;
+    bool reloadTexture = false;
     bool anyItemActive = false;
     auto track = [&](bool changed)
     {
@@ -1169,16 +1170,16 @@ bool EditorEngine::DrawMaterialFields(Material& m, UMeshComponent* componentTarg
     if (ImGui::BeginDragDropTarget())
     {
         if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_TEX"))
-        { edited.diffuseTexPath = CopyToContent(std::string((const char*)pl->Data)); UMaterial::LoadTexture(edited); content_.clear(); ScanContent(); ch = true; }
+        { edited.diffuseTexPath = CopyToContent(std::string((const char*)pl->Data)); reloadTexture = true; content_.clear(); ScanContent(); ch = true; }
         ImGui::EndDragDropTarget();
     }
     if (ImGui::IsItemClicked())
     {
         std::string p = FFileDialog::OpenAsset();
-        if (!p.empty()) { edited.diffuseTexPath = CopyToContent(p); UMaterial::LoadTexture(edited); content_.clear(); ScanContent(); ch = true; }
+        if (!p.empty()) { edited.diffuseTexPath = CopyToContent(p); reloadTexture = true; content_.clear(); ScanContent(); ch = true; }
     }
     if (!edited.diffuseTexPath.empty() && ImGui::SmallButton("Clear Texture"))
-    { edited.texData.clear(); edited.texWidth = edited.texHeight = edited.texChannels = 0; edited.diffuseTexPath.clear(); ch = true; }
+    { edited.diffuseTexPath.clear(); reloadTexture = true; ch = true; }
 
     if (componentTarget && activeMaterialUndoTarget_ != componentTarget)
     {
@@ -1196,9 +1197,9 @@ bool EditorEngine::DrawMaterialFields(Material& m, UMeshComponent* componentTarg
             }
         };
         if (componentTarget)
-            CommitEditorComponentMaterialEdit(*componentTarget, std::move(edited), captureUndo);
+            CommitEditorComponentMaterialEdit(*componentTarget, edited, reloadTexture, captureUndo);
         else
-            CommitEditorMaterialEdit(m, std::move(edited), {});
+            CommitEditorMaterialEdit(m, edited, reloadTexture, {});
     }
     if (componentTarget && !anyItemActive)
     {

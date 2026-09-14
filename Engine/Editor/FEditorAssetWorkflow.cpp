@@ -1,5 +1,6 @@
 #include "FEditorAssetWorkflow.h"
 #include "Material.h"
+#include "UMaterial.h"
 #include "UMeshComponent.h"
 
 #include <algorithm>
@@ -132,23 +133,77 @@ namespace
 
 }
 
-void CommitEditorMaterialEdit(Material& target, Material edited,
-                              const std::function<void()>& beforeChange)
+namespace
 {
-    if (beforeChange) beforeChange();
-    edited.SanitizeOptics();
-    edited.MarkRuntimeDirty();
-    target = std::move(edited);
+    void ApplyEditorMaterialDraft(Material& target, const FEditorMaterialDraft& edited,
+                                  bool reloadTexture)
+    {
+        target.ka = edited.ka;
+        target.kd = edited.kd;
+        target.ks = edited.ks;
+        target.shininess = edited.shininess;
+        target.km = edited.km;
+        target.emissive = edited.emissive;
+        target.diffuseTexPath = edited.diffuseTexPath;
+        target.wrapMode = edited.wrapMode;
+        target.uvTiling = edited.uvTiling;
+        target.blendMode = edited.blendMode;
+        target.opacity = edited.opacity;
+        target.refraction = edited.refraction;
+        target.transmittanceColor = edited.transmittanceColor;
+        target.transmittanceDistance = edited.transmittanceDistance;
+        target.castRayTracedShadows = edited.castRayTracedShadows;
+        target.SanitizeOptics();
+        if (reloadTexture) UMaterial::LoadTexture(target);
+        else target.MarkRuntimeDirty();
+    }
 }
 
-void CommitEditorComponentMaterialEdit(UMeshComponent& component, Material edited,
+FEditorMaterialDraft MakeEditorMaterialDraft(const Material& source)
+{
+    FEditorMaterialDraft draft;
+    draft.ka = source.ka;
+    draft.kd = source.kd;
+    draft.ks = source.ks;
+    draft.shininess = source.shininess;
+    draft.km = source.km;
+    draft.emissive = source.emissive;
+    draft.diffuseTexPath = source.diffuseTexPath;
+    draft.wrapMode = source.wrapMode;
+    draft.uvTiling = source.uvTiling;
+    draft.blendMode = source.blendMode;
+    draft.opacity = source.opacity;
+    draft.refraction = source.refraction;
+    draft.transmittanceColor = source.transmittanceColor;
+    draft.transmittanceDistance = source.transmittanceDistance;
+    draft.castRayTracedShadows = source.castRayTracedShadows;
+    return draft;
+}
+
+void CommitEditorMaterialEdit(Material& target, const FEditorMaterialDraft& edited,
+                              bool reloadTexture, const std::function<void()>& beforeChange)
+{
+    if (beforeChange) beforeChange();
+    ApplyEditorMaterialDraft(target, edited, reloadTexture);
+}
+
+void CommitEditorComponentMaterialEdit(UMeshComponent& component,
+                                       const FEditorMaterialDraft& edited,
+                                       bool reloadTexture,
                                        const std::function<void()>& beforeChange)
 {
     if (beforeChange) beforeChange();
-    edited.SanitizeOptics();
-    edited.MarkRuntimeDirty();
-    component.materialOverride = std::move(edited);
-    component.hasMaterialOverride = true;
+    if (!component.hasMaterialOverride)
+    {
+        // The first real edit pays for exactly one copy into component ownership;
+        // idle inspector frames and subsequent scalar edits never copy pixels.
+        Material localOverride = component.GetMaterial();
+        ApplyEditorMaterialDraft(localOverride, edited, reloadTexture);
+        component.materialOverride = std::move(localOverride);
+        component.hasMaterialOverride = true;
+        return;
+    }
+    ApplyEditorMaterialDraft(component.materialOverride, edited, reloadTexture);
 }
 
 std::vector<FEditorContentAsset> DiscoverEditorContent(const fs::path& contentRoot)
