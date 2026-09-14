@@ -127,7 +127,7 @@ Content/Scripts/ExampleActor.lua
 
 The path must name a file strictly beneath `Content/Scripts`. Absolute/rooted/drive paths, `..`, control characters, directory-only paths, alternate-data-stream spellings, and paths that physically escape through a symlink, junction, or other reparse point are rejected. Source is opened and validated by its physical file identity before it is read. Backslashes accepted at assignment are normalized before storage and diagnostics.
 
-World format 2 serializes stable configuration only:
+World format 3 serializes stable configuration only (legacy format 2 loads remain supported):
 
 ```text
   [Component]

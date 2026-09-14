@@ -1,5 +1,7 @@
+// Build: Engine.sln Debug|Win32 /m:1 /nr:false with _CL_=/FS.
+// Bounded current gate: bin/Test.exe --render-performance-selftest (see README for all gates).
 // ---------------------------------------------------------------------------
-// Mesh demo driven by the Engine framework.
+// Historical educational mesh demo (--demo), driven by the Engine framework.
 //   Key 1 = CPU software rasterizer  (flat white silhouette, Q1)
 //   Key 2 = GPU mesh ray tracer      (Blinn-Phong shaded sphere)   [default]
 //   Key 3 = depth-buffer debug view  (grayscale, nearer = brighter; Q1 deliverable)
@@ -22,6 +24,8 @@
 #include <vector>
 #include <fstream>
 #include <memory>
+#include <filesystem>
+#include <chrono>
 
 #if defined(_MSC_VER)
 #pragma warning(disable : 4996) // Regression gates intentionally exercise deprecated renderers.
@@ -64,7 +68,7 @@
 // running from bin\ and VS's project dir).
 static std::vector<UMesh*> LoadFbxAny(const char* name)
 {
-    const char* dirs[] = { "", "bin/", "Test/models/", "models/", "../Test/models/" };
+    const char* dirs[] = { "", "bin/", "Test/Fixtures/", "Test/models/", "models/", "../Test/models/" };
     for (const char* d : dirs)
     {
         std::vector<UMesh*> v = UFbxImporter::Load((std::string(d) + name).c_str());
@@ -4160,9 +4164,244 @@ static int RunComputeInitGate()
     return app.RunGate();
 }
 
+// Structural performance contract: no timing thresholds and no frame readback.
+class FRenderPerformanceSelfTestApp final : public Engine
+{
+public:
+    int RunGates()
+    {
+        glfwHideWindow(window_);
+        int passed = 0, failed = 0;
+        auto check = [&](bool condition, const char* name) {
+            std::printf("[%s] %s\n", condition ? "PASS" : "FAIL", name);
+            condition ? ++passed : ++failed;
+        };
+        for (int count : {1, 100, 1000})
+        {
+            std::printf("--- performance scene: %d shared cubes ---\n", count);
+            std::unique_ptr<UMesh> cube(UMesh::GenerateCube(glm::vec3(0.03f)));
+            cube->material.texWidth = cube->material.texHeight = 1;
+            cube->material.texChannels = 3;
+            cube->material.texData = {180, 120, 80};
+            UWorld world;
+            const char* environmentPath = "task13_performance.tmp.hdr";
+            {
+                std::ofstream hdr(environmentPath, std::ios::binary);
+                hdr << "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 1\n";
+                const unsigned char pixel[4] = {160, 100, 80, 129};
+                hdr.write(reinterpret_cast<const char*>(pixel), sizeof(pixel));
+            }
+            world.GetScene().skyHDRI = environmentPath;
+            world.GetCamera().eye = glm::vec3(0);
+            world.GetCamera().SetOrientation(0, 0);
+            world.GetCamera().SetFOV(60, 1);
+            for (int i = 0; i < count; ++i)
+            {
+                auto* actor = new AActor(); auto* component = new UMeshComponent();
+                component->mesh = cube.get(); actor->SetMesh(component);
+                actor->SetActorLocation(glm::vec3((float(i % 32) - 15.5f) * .09f,
+                    (float(i / 32) - 15.5f) * .09f, -5));
+                world.Spawn(actor);
+            }
+            UWorldRenderer renderer; renderer.Init();
+            FRenderTarget target = FRenderTarget::TextureViewport(64, 64, ContextGeneration());
+            FRenderFeatures features;
+            FRenderQuality quality; quality.giSamples = 1; quality.giBounces = 1;
+            auto selection = SelectRayTracingBackend(ERayTracingBackend::Auto, GraphicsCapabilities());
+            auto render = [&]() {
+                const auto before = renderer.Stats();
+                const bool ok = renderer.Render(world, world.GetCamera(), target,
+                    features, quality, selection, ContextGeneration());
+                const auto after = renderer.Stats();
+                check(ok && after.hardwareDrawCalls - before.hardwareDrawCalls == std::uint64_t(count),
+                    "successful primary frame submits exactly one indexed draw per cube");
+                check(after.cpuFramebufferGenerations == 0 && after.cpuReadbacks == 0 &&
+                    after.cpuFramebufferUploads == 0, "normal frame has zero CPU bridge work");
+                return after;
+            };
+            for (int frame = 0; frame != 4; ++frame)
+            {
+                if (frame == 2) world.GetScene().Actors[0]->SetActorLocation(glm::vec3(0, 0, -5));
+                if (frame == 3) { cube->vertices[0].position.x += .001f; cube->MarkGeometryDirty(); }
+                const auto stats = render();
+                check(stats.geometryUploads == 1 && stats.geometryReuploads == (frame == 3 ? 1u : 0u) &&
+                    stats.residentGeometryResources == 1, "shared geometry uploads 1/0/0/one revision only");
+                check(stats.rayFactoryCalls == 0 && stats.rayBackendInitializations == 0 &&
+                    stats.rayBackendCalls == 0 && stats.rayResourceAllocations == 0 &&
+                    stats.raySceneUploads == 0 && stats.rayDraws == 0 && stats.rayDispatches == 0 &&
+                    stats.rayMemoryBarriers == 0 && stats.liveRayOutputTextures == 0 && stats.liveRayBLAS == 0,
+                    "RT-off real route performs zero factory/init/allocation/upload/draw/dispatch/barrier work");
+            }
+            for (auto requested : {ERayTracingBackend::CompatibleGL33, ERayTracingBackend::Auto})
+            {
+                features.rayTracing = true;
+                selection = SelectRayTracingBackend(requested, GraphicsCapabilities());
+                const auto before = renderer.Stats();
+                const auto first = render();
+                const auto expected = requested == ERayTracingBackend::Auto && GraphicsCapabilities().SupportsComputeBackend()
+                    ? ERayTracingBackend::ComputeGL43 : ERayTracingBackend::CompatibleGL33;
+                check(first.activeRayBackend == expected && !first.backendReason.empty(),
+                    "Auto/explicit Compatible reports actual selected backend and reason");
+                std::printf("backend=%s reason=%s draws=%llu dispatches=%llu barriers=%llu\n",
+                    first.activeRayBackend == ERayTracingBackend::ComputeGL43 ? "ComputeGL43" : "CompatibleGL33",
+                    first.backendReason.c_str(), first.rayDraws, first.rayDispatches, first.rayMemoryBarriers);
+                check(first.rayDispatches - before.rayDispatches == (expected == ERayTracingBackend::ComputeGL43 ? 1u : 0u) &&
+                    first.rayMemoryBarriers - before.rayMemoryBarriers == (expected == ERayTracingBackend::ComputeGL43 ? 1u : 0u),
+                    "only compute backend dispatches and issues visibility barrier");
+                check(first.rayDraws - before.rayDraws == (expected == ERayTracingBackend::CompatibleGL33 ? 1u : 0u),
+                    "fragment backend draws; compute backend does not report a draw");
+                for (int cycle = 0; cycle != 3; ++cycle)
+                {
+                    world.BeginPlay();
+                    for (int width : {64, 96, 64})
+                    {
+                        check(target.Resize(width, 64, ContextGeneration()), "viewport resize succeeds");
+                        world.GetCamera().SetFOV(60, float(width) / 64.0f);
+                        const auto stable = render();
+                        check(stable.geometryUploads == 1 && stable.geometryReuploads == 1 &&
+                            stable.residentGeometryResources == 1 && stable.liveGBufferTextures == 9 &&
+                            stable.liveGBufferFramebuffers == 1 && stable.liveRasterOutputTextures == 1 &&
+                            stable.liveRasterFramebuffers == 1 && stable.liveMaterialTextures == 1 &&
+                            stable.liveEnvironmentTextures == 1 &&
+                            stable.liveRayOutputTextures == 3 && stable.liveRayBLAS == 1 &&
+                            target.OwnedAttachmentCount() == 3,
+                            "Play/resize live mesh/G-buffer/material/ray/target ownership remains bounded");
+                        check(stable.rayBLASUploads == first.rayBLASUploads,
+                            "unchanged scene and target resize never upload shared BLAS again");
+                    }
+                    world.EndPlay();
+                }
+            }
+            // A synthetic ineligible selection exercises the production renderer
+            // planner without substituting its hardware executor or ray backend.
+            selection.available = selection.rayTracingEnabled = false;
+            selection.fallbackReason = "Forced Compute unavailable: missing required Compute/SSBO entry points";
+            const auto beforeDisabled = renderer.Stats();
+            const auto disabled = render();
+            check(disabled.backendReason == selection.fallbackReason &&
+                disabled.activeRayBackend == ERayTracingBackend::Auto &&
+                disabled.rayBackendCalls == beforeDisabled.rayBackendCalls,
+                "ineligible backend preserves raster primary and meaningful disable reason");
+            features.rayTracing = false;
+            selection = SelectRayTracingBackend(ERayTracingBackend::Auto, GraphicsCapabilities());
+            const auto beforeOff = renderer.Stats();
+            const auto off = render();
+            check(off.rayFactoryCalls == beforeOff.rayFactoryCalls &&
+                off.rayResourceAllocations == beforeOff.rayResourceAllocations &&
+                off.raySceneUploads == beforeOff.raySceneUploads && off.rayDraws == beforeOff.rayDraws &&
+                off.rayDispatches == beforeOff.rayDispatches && off.rayMemoryBarriers == beforeOff.rayMemoryBarriers,
+                "RT-on to RT-off adds zero ray work even with cached backend");
+            const auto lifetime = renderer.Stats();
+            renderer.Shutdown(); target.Release();
+            const auto closed = renderer.Stats();
+            check(closed.residentGeometryResources == 0 && closed.liveGBufferTextures == 0 &&
+                closed.liveGBufferFramebuffers == 0 && closed.liveRasterOutputTextures == 0 &&
+                closed.liveRasterFramebuffers == 0 && closed.liveMaterialTextures == 0 &&
+                closed.liveEnvironmentTextures == 0 && closed.liveRayOutputTextures == 0 &&
+                closed.liveRayBLAS == 0 && target.OwnedAttachmentCount() == 0,
+                "shutdown releases all owned resource classes");
+            renderer.Init();
+            target = FRenderTarget::TextureViewport(64, 64, ContextGeneration());
+            const auto restarted = render();
+            check(restarted.geometryUploads == lifetime.geometryUploads + 1 &&
+                restarted.rayResourceAllocations == lifetime.rayResourceAllocations,
+                "renderer restart preserves cumulative totals and RT-off remains lazy");
+            renderer.Shutdown(); target.Release();
+            std::remove(environmentPath);
+            check(glGetError() == GL_NO_ERROR, "performance scene ends without GL errors");
+        }
+        std::printf("=== render performance gates: %d passed, %d failed ===\n", passed, failed);
+        return failed ? 1 : 0;
+    }
+};
+
+class FBoundedEditorRenderApp final : public EditorEngine
+{
+public:
+    int CheckFrames(bool rayTracing)
+    {
+        glfwHideWindow(window_);
+        proj_.defaultRenderFeatures.rayTracing = rayTracing;
+        OnStartup();
+        for (int frame = 0; frame != 3; ++frame) { glfwPollEvents(); Render(); }
+        const auto stats = RendererStats();
+        OnShutdown();
+        const bool ok = stats.hardwareDrawCalls > 0 && stats.compositePasses > 0 &&
+            stats.cpuFramebufferGenerations == 0 && stats.cpuFramebufferUploads == 0 && stats.cpuReadbacks == 0 &&
+            (rayTracing ? stats.rayBackendCalls > 0 : stats.rayFactoryCalls == 0);
+        std::printf("[%s] production Editor Render -> DrawViewport -> UWorldRenderer RT=%d frames=%llu\n",
+            ok ? "PASS" : "FAIL", int(rayTracing), stats.compositePasses);
+        return ok ? 0 : 1;
+    }
+};
+
+class FBoundedGameRenderApp final : public GameEngine
+{
+public:
+    FBoundedGameRenderApp() : GameEngine("") {}
+    int CheckFrames(bool rayTracing)
+    {
+        glfwHideWindow(window_);
+        OnStartup();
+        std::unique_ptr<UMesh> cube(UMesh::GenerateCube(glm::vec3(.5f)));
+        world_ = new UWorld();
+        auto* actor = new AActor(); auto* component = new UMeshComponent();
+        component->mesh = cube.get(); actor->SetMesh(component);
+        actor->SetActorLocation(glm::vec3(0, 0, -5)); world_->Spawn(actor);
+        world_->GetScene().renderFeatures.rayTracing = rayTracing;
+        world_->BeginPlay();
+        for (int frame = 0; frame != 3; ++frame) Render();
+        world_->EndPlay();
+        const auto stats = RendererStats();
+        OnShutdown();
+        delete world_; world_ = nullptr;
+        const bool ok = stats.hardwareDrawCalls == 3 && stats.compositePasses == 3 &&
+            stats.cpuFramebufferGenerations == 0 && stats.cpuFramebufferUploads == 0 && stats.cpuReadbacks == 0 &&
+            (rayTracing ? stats.rayBackendCalls == 3 : stats.rayFactoryCalls == 0);
+        std::printf("[%s] production Game Render -> UWorldRenderer RT=%d frames=%llu\n",
+            ok ? "PASS" : "FAIL", int(rayTracing), stats.compositePasses);
+        return ok ? 0 : 1;
+    }
+};
+
+static int RunRenderPerformanceGates()
+{
+    int failed = 0;
+    {
+        FRenderPerformanceSelfTestApp app;
+        if (!app.Init(64, 64, "Render Performance Self-Test")) return 2;
+        failed += app.RunGates();
+    }
+    // Isolate startup settings, generated local Developer Settings and content
+    // from the user's editor. No interactive loop, configuration mutation, or
+    // renderer test hooks are needed; subclasses expose only existing hooks.
+    const auto prior = std::filesystem::current_path();
+    const auto temporary = std::filesystem::temp_directory_path() /
+        ("render-role-gates-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(temporary / "Content");
+    std::filesystem::current_path(temporary);
+    for (bool rayTracing : {false, true})
+    {
+        {
+            FBoundedEditorRenderApp editor;
+            if (!editor.Init(640, 480, "Bounded Editor Route")) { ++failed; continue; }
+            failed += editor.CheckFrames(rayTracing);
+        }
+        {
+            FBoundedGameRenderApp game;
+            if (!game.Init(64, 64, "Bounded Game Route")) { ++failed; continue; }
+            failed += game.CheckFrames(rayTracing);
+        }
+    }
+    std::filesystem::current_path(prior);
+    std::filesystem::remove_all(temporary);
+    return failed ? 1 : 0;
+}
+
 int main(int argc, char** argv)
 {
     const std::string arg = (argc > 1) ? argv[1] : "";
+    if (arg == "--render-performance-selftest") return RunRenderPerformanceGates();
     if (arg == "--ray-compute-init-selftest") return RunComputeInitGate();
     if (arg == "--deprecated-raytracer-lifecycle-selftest")
         return RunDeprecatedRayTracerLifecycleGates();

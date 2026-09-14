@@ -29,7 +29,7 @@ public:
     // Sampled by the GPU paths' skyColor() for background + ambient. [World].
     std::string skyHDRI;
 
-    // Post-process filter applied after CPU ray-tracing (before glDrawPixels).
+    // Retained educational software-renderer post-process data.
     // Default values are identity (no change).
     UPostProcessFilter filter;
 

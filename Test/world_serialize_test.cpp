@@ -1,3 +1,5 @@
+// Current complete recipe: powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1 -Name world_serialize_test
+// Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // ---------------------------------------------------------------------------
 // world_serialize_test.cpp — GL-free self-test for P6 .world save/load.
 //

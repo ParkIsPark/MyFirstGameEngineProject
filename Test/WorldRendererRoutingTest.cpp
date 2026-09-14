@@ -1,3 +1,5 @@
+// Current complete recipe: powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1 -Name WorldRendererRoutingTest
+// Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // Build Engine.sln Debug|Win32 first, then from the repository root:
 // $includes = (Get-ChildItem Engine -Directory -Recurse).FullName | ForEach-Object { '/I"' + $_ + '"' }
 // $cmd = 'call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" -arch=x86 >nul && cl /nologo /std:c++17 /EHsc /MDd /DWIN32 /D_DEBUG /Iinclude ' + ($includes -join ' ') + ' Test\WorldRendererRoutingTest.cpp /Fe:WorldRendererRoutingTest.exe bin\Engine.lib /link /LIBPATH:lib glew32.lib freeglut.lib glfw3dll.lib opengl32.lib glu32.lib assimp-vc143-mt.lib'; & cmd.exe /d /c $cmd

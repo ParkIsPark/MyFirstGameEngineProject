@@ -1,3 +1,5 @@
+// Current complete recipe: powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1 -Name ScriptComponentFactoryAutoRegistrationTest
+// Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // ---------------------------------------------------------------------------
 // ScriptComponentFactoryAutoRegistrationTest.cpp -- a static-library consumer
 // links the concrete type and queries its factory registration before any world

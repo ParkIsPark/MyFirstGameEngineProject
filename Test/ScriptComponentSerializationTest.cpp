@@ -1,3 +1,5 @@
+// Current complete recipe: powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1 -Name ScriptComponentSerializationTest
+// Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // ---------------------------------------------------------------------------
 // ScriptComponentSerializationTest.cpp -- focused GL-free Task 5 coverage.
 //

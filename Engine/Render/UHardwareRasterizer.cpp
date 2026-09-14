@@ -816,6 +816,7 @@ bool UHardwareRasterizer::RenderGeometry(const FRenderScene& scene,
                 glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indexCount),
                                GL_UNSIGNED_INT,
                                reinterpret_cast<const void*>(firstIndex * sizeof(std::uint32_t)));
+                ++indexedDrawCalls_;
                 firstTriangle = endTriangle;
             }
         }

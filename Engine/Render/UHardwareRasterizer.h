@@ -60,6 +60,8 @@ public:
     std::uint64_t MaterialTextureUploads() const { return materialTextureUploads_; }
     std::uint64_t MaterialTextureUploadFailures() const { return materialTextureUploadFailures_; }
     std::uint64_t MaterialTextureHashComputations() const { return materialTextureHashComputations_; }
+    std::uint64_t IndexedDrawCalls() const { return indexedDrawCalls_; }
+    std::size_t OwnedMaterialTextureCount() const { return materialTextures_.size(); }
     void InjectNextMaterialTextureUploadFailureForTesting() {
         failNextMaterialTextureUploadForTesting_ = true;
     }
@@ -83,6 +85,7 @@ private:
     std::unordered_map<const Material*, std::uint64_t> materialSignaturesThisFrame_;
     std::uint64_t materialTextureFrame_ = 0;
     std::uint64_t materialTextureUploads_ = 0;
+    std::uint64_t indexedDrawCalls_ = 0;
     std::uint64_t materialTextureUploadFailures_ = 0;
     std::uint64_t materialTextureHashComputations_ = 0;
     bool failNextMaterialTextureUploadForTesting_ = false;

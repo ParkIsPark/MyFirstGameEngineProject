@@ -28,7 +28,7 @@ struct FRayTracingBackendStats
 {
     std::uint64_t resourceAllocations = 0;
     std::uint64_t renderCalls = 0;
-    std::uint64_t rayDraws = 0;
+    std::uint64_t rayDraws = 0; // Fragment draw submissions only; compute uses rayDispatches.
     std::uint64_t rayDispatches = 0;
     std::uint64_t memoryBarriers = 0;
     std::uint64_t sceneUploads = 0;
@@ -72,11 +72,19 @@ public:
 
 struct FRayEffectsSchedulerStats
 {
+    // Lifetime totals, including retired/failed backends and context changes.
     std::uint64_t factoryCalls = 0;
     std::uint64_t backendInitializations = 0;
     std::uint64_t backendCalls = 0;
     std::uint64_t resourceAllocations = 0;
     std::uint64_t sceneUploads = 0;
+    std::uint64_t rayDraws = 0;
+    std::uint64_t rayDispatches = 0;
+    std::uint64_t memoryBarriers = 0;
+    std::uint64_t blasUploads = 0;
+    std::uint64_t instanceUploads = 0;
+    std::uint64_t materialUploads = 0;
+    std::uint64_t outputAllocations = 0;
     std::uint64_t warnings = 0;
 };
 
@@ -94,6 +102,7 @@ public:
                  FRayEffectOutputs& outputs);
     void Shutdown() noexcept;
     const FRayEffectsSchedulerStats& Stats() const { return stats_; }
+    const std::string& BackendReason() const { return backendReason_; }
     IRayTracingBackend* ActiveBackend() const { return backend_.get(); }
     ERayTracingBackend ActiveKind() const
     {
@@ -106,6 +115,7 @@ private:
                        std::string& diagnostic);
     void WarnOnce(const std::string& key, const std::string& message);
     void ResetForContext(std::uint64_t contextGeneration) noexcept;
+    void CollectBackendStats() noexcept;
 
     IRayTracingBackendFactory& factory_;
     IRayEffectsWarningSink& warnings_;
@@ -115,5 +125,9 @@ private:
     std::string failureKey_;
     std::string warningKeys_;
     bool automaticComputeFallback_ = false;
+    std::string backendReason_;
+    std::string failureReason_;
+    std::string automaticFallbackReason_;
+    FRayTracingBackendStats observedBackendStats_;
     FRayEffectsSchedulerStats stats_;
 };

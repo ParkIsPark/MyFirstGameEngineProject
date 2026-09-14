@@ -2,7 +2,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
-// UPostProcessFilter
+// UPostProcessFilter - retained educational software-image effects.
 //
 // Applies a chain of image-space effects to the CPU-rendered float image that
 // lives in UScene::outputImage (row-major RGB, origin at bottom-left).
@@ -16,7 +16,7 @@
 //
 // Usage:
 //   filter.Apply(scene.outputImage, scene.width, scene.height);
-//   glDrawPixels(Width, Height, GL_RGB, GL_FLOAT, scene.outputImage.data());
+//   // Presentation belongs to the explicit deprecated renderer executor.
 // ---------------------------------------------------------------------------
 class UPostProcessFilter
 {

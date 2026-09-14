@@ -1,3 +1,5 @@
+// Current complete recipe: powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1 -Name light_test
+// Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // ---------------------------------------------------------------------------
 // light_test.cpp — GL-free self-test for P5 light componentization.
 //

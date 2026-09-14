@@ -1,3 +1,5 @@
+// Current complete recipe: powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1 -Name ScriptComponentStaticRegistrationTest
+// Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // ---------------------------------------------------------------------------
 // ScriptComponentStaticRegistrationTest.cpp -- verifies a static-library world
 // loader reaches ScriptComponent registration without naming the concrete type.

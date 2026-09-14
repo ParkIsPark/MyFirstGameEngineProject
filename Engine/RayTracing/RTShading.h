@@ -1,6 +1,6 @@
 #pragma once
 // ---------------------------------------------------------------------------
-// RTShading.h — the SHARED ray-traced lighting + shadow stage.
+// RTShading.h — shared lighting for the deprecated educational ray renderers.
 //
 // This GLSL is the single source of truth for how a visible surface is lit:
 // Blinn-Phong direct light + sky-hemisphere ambient + one BVH-traced hard

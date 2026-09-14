@@ -1,3 +1,5 @@
+// Current complete recipe: powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1 -Name GPUMeshCacheTest
+// Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // & 'C:\Program Files\Git\bin\bash.exe' --noprofile --norc -c 'export PATH=/c/msys64/ucrt64/bin:$PATH; g++ -std=c++17 -ffunction-sections -fdata-sections -Wall -Wextra -pedantic -I./include -I./Engine/Render -I./Engine/Mesh -I./Engine/Acceleration -I./Engine/RayTracing -I./Engine/Import Test/GPUMeshCacheTest.cpp Engine/Render/UGPUMeshCache.cpp Engine/Mesh/UMesh.cpp Engine/Acceleration/BVH.cpp Engine/Import/UObjImporter.cpp -Wl,--gc-sections -o GPUMeshCacheTest.exe && ./GPUMeshCacheTest.exe'
 #include "UGPUMeshCache.h"
 

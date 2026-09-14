@@ -1,3 +1,5 @@
+// Current complete recipe: powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1 -Name ScriptEditorWorkflowTest
+// Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // ScriptEditorWorkflowTest.cpp -- focused GL-free Task 7 coverage.
 //
 // MSYS2 UCRT64 filesystem-focused build/run (the macro selects the assertions

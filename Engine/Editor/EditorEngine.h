@@ -27,6 +27,7 @@ class EditorEngine : public Engine
 public:
     EditorEngine() : Engine(Role::Editor) {}
     ~EditorEngine() override;
+    const FWorldRendererStats& RendererStats() const { return worldRenderer_.Stats(); }
 
 protected:
     void OnStartup() override;

@@ -67,6 +67,8 @@ Before replacing the legacy output, capture deterministic numeric probes from th
 
 ## Verification corrections
 
+- The historical original plan's checklist text "Format-1 worlds ... re-save as format 2" is superseded: formats 1 and 2 load with the specified mapping and **re-save as format 3**, with named render features, no numeric renderer setting in new saves, and intact ScriptComponents. The original plan is preserved as a historical record; current architecture and submission boundaries are documented in `docs/rendering/hardware-raster-ray-effects.md`.
+
 - UCRT64 standalone commands remain mandatory for pure isolated units. Serializer/editor/routing tests that require the full engine use freshly built Win32 `Engine.lib`; OpenGL tests use integrated `bin/Test.exe` self-test switches.
 - Build `Engine.sln` as `Debug|Win32`. Separately build a generated/template project as `Editor|Win32` and `Game|Win32`; Template has no `Debug` configuration.
 - Task 8 paths use `Engine/RayTracing/UMeshRayTracer.*`, not `Engine/Render`.

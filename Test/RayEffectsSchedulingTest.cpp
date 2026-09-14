@@ -1,3 +1,5 @@
+// Current complete recipe: powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1 -Name RayEffectsSchedulingTest
+// Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // & 'C:\msys64\ucrt64\bin\g++.exe' -std=c++17 -Wall -Wextra -pedantic -I./include -I./Engine/Render -I./Engine/Core Test/RayEffectsSchedulingTest.cpp Engine/Render/IRayTracingBackend.cpp -o RayEffectsSchedulingTest.exe; if ($LASTEXITCODE -eq 0) { .\RayEffectsSchedulingTest.exe }
 #include "IRayTracingBackend.h"
 

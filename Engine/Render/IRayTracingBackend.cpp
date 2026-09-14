@@ -35,6 +35,7 @@ FRayEffectsScheduler::~FRayEffectsScheduler()
 void FRayEffectsScheduler::WarnOnce(const std::string& key,
                                     const std::string& message)
 {
+    backendReason_ = message;
     const std::string token = "\n" + key + "\n";
     if (warningKeys_.find(token) != std::string::npos) return;
     warningKeys_ += token;
@@ -52,6 +53,30 @@ void FRayEffectsScheduler::ResetForContext(
     failureKey_.clear();
     warningKeys_.clear();
     automaticComputeFallback_ = false;
+    observedBackendStats_ = {};
+    backendReason_.clear();
+    failureReason_.clear();
+    automaticFallbackReason_.clear();
+}
+
+void FRayEffectsScheduler::CollectBackendStats() noexcept
+{
+    if (!backend_) return;
+    const auto& current = backend_->Stats();
+    // Backends keep lifetime totals while alive; snapshot deltas before any
+    // replacement so totals cannot decrease when a new backend starts at zero.
+#define ACCUMULATE(field) stats_.field += current.field - observedBackendStats_.field
+    ACCUMULATE(resourceAllocations);
+    ACCUMULATE(sceneUploads);
+    ACCUMULATE(rayDraws);
+    ACCUMULATE(rayDispatches);
+    ACCUMULATE(memoryBarriers);
+    ACCUMULATE(blasUploads);
+    ACCUMULATE(instanceUploads);
+    ACCUMULATE(materialUploads);
+    ACCUMULATE(outputAllocations);
+#undef ACCUMULATE
+    observedBackendStats_ = current;
 }
 
 bool FRayEffectsScheduler::EnsureBackend(ERayTracingBackend kind,
@@ -62,11 +87,14 @@ bool FRayEffectsScheduler::EnsureBackend(ERayTracingBackend kind,
     if (backend_) backend_->Shutdown();
     backend_.reset();
     activeKind_ = kind;
+    observedBackendStats_ = {};
     ++stats_.factoryCalls;
     backend_ = factory_.Create(kind, &diagnostic);
     if (!backend_) return false;
     ++stats_.backendInitializations;
-    if (!backend_->Init(contextGeneration, &diagnostic))
+    const bool initialized = backend_->Init(contextGeneration, &diagnostic);
+    CollectBackendStats();
+    if (!initialized)
     {
         backend_->Shutdown();
         backend_.reset();
@@ -80,7 +108,12 @@ bool FRayEffectsScheduler::Execute(const FRayEffectInputs& inputs,
                                    FRayEffectOutputs& outputs)
 {
     outputs = {};
-    if (!HasRequestedEffects(inputs.features)) return true;
+    if (!HasRequestedEffects(inputs.features))
+    {
+        backendReason_ = inputs.features.rayTracing
+            ? "No secondary ray effects requested" : "Ray tracing master is off";
+        return true;
+    }
     if (inputs.contextGeneration != contextGeneration_)
         ResetForContext(inputs.contextGeneration);
 
@@ -88,7 +121,11 @@ bool FRayEffectsScheduler::Execute(const FRayEffectInputs& inputs,
         BackendName(selection.requested) + ":" + BackendName(selection.selected) + ":" +
         (selection.available ? "available" : "unavailable") + ":" +
         (selection.rayTracingEnabled ? "enabled" : "disabled");
-    if (failureKey_ == requestKey) return true;
+    if (failureKey_ == requestKey)
+    {
+        backendReason_ = failureReason_;
+        return true;
+    }
 
     if (!selection.rayTracingEnabled || !selection.available)
     {
@@ -97,6 +134,7 @@ bool FRayEffectsScheduler::Execute(const FRayEffectInputs& inputs,
             selection.fallbackReason.empty()
                 ? std::string("Ray effects disabled because requested backend is unavailable")
                 : selection.fallbackReason);
+        failureReason_ = backendReason_;
         return true;
     }
 
@@ -118,6 +156,7 @@ bool FRayEffectsScheduler::Execute(const FRayEffectInputs& inputs,
             WarnOnce(requestKey + ":auto-fallback",
                 "OpenGL 4.3 Compute ray effects are unavailable (" + diagnostic +
                 "); falling back to the OpenGL 3.3 compatible backend");
+            automaticFallbackReason_ = backendReason_;
             diagnostic.clear();
             selected = ERayTracingBackend::CompatibleGL33;
             if (!EnsureBackend(selected, inputs.contextGeneration, diagnostic))
@@ -125,6 +164,7 @@ bool FRayEffectsScheduler::Execute(const FRayEffectInputs& inputs,
                 failureKey_ = requestKey;
                 WarnOnce(requestKey + ":fallback-failed",
                     "Compatible ray-effects fallback failed: " + diagnostic);
+                failureReason_ = backendReason_;
                 return true;
             }
             automaticComputeFallback_ = true;
@@ -135,12 +175,15 @@ bool FRayEffectsScheduler::Execute(const FRayEffectInputs& inputs,
             WarnOnce(requestKey + ":init-failed",
                 std::string("Ray-effects backend ") + BackendName(selected) +
                 " failed to initialize: " + diagnostic);
+            failureReason_ = backendReason_;
             return true;
         }
     }
 
     ++stats_.backendCalls;
-    if (!backend_->RenderEffects(inputs, outputs, &diagnostic))
+    const bool rendered = backend_->RenderEffects(inputs, outputs, &diagnostic);
+    CollectBackendStats();
+    if (!rendered)
     {
         outputs = {};
         // Per-frame uploads and draws are transactional. Their failures are
@@ -150,9 +193,11 @@ bool FRayEffectsScheduler::Execute(const FRayEffectInputs& inputs,
             " failed; retaining raster output: " + diagnostic);
         return true;
     }
-    const FRayTracingBackendStats& backendStats = backend_->Stats();
-    stats_.resourceAllocations = backendStats.resourceAllocations;
-    stats_.sceneUploads = backendStats.sceneUploads;
+    if (automaticComputeFallback_)
+        backendReason_ = automaticFallbackReason_;
+    else
+        backendReason_ = selection.fallbackReason.empty()
+            ? std::string("Selected ") + BackendName(selected) : selection.fallbackReason;
     return true;
 }
 
@@ -165,4 +210,8 @@ void FRayEffectsScheduler::Shutdown() noexcept
     failureKey_.clear();
     warningKeys_.clear();
     automaticComputeFallback_ = false;
+    observedBackendStats_ = {};
+    backendReason_.clear();
+    failureReason_.clear();
+    automaticFallbackReason_.clear();
 }

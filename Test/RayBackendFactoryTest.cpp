@@ -1,3 +1,5 @@
+// Current complete recipe: powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1 -Name RayBackendFactoryTest
+// Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // & 'C:\msys64\ucrt64\bin\g++.exe' -std=c++17 -Wall -Wextra -pedantic -I./include -I./Engine/Render -I./Engine/RayTracing Test/RayBackendFactoryTest.cpp Engine/Render/FGraphicsCapabilities.cpp Engine/Render/IRayTracingBackend.cpp Engine/Render/FGL43ComputeApi.cpp -o RayBackendFactoryTest.exe; if ($LASTEXITCODE -eq 0) { .\RayBackendFactoryTest.exe }
 #include "FGL43ComputeApi.h"
 #include "FGraphicsCapabilities.h"

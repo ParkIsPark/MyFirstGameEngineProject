@@ -167,4 +167,5 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 Write-Host ''
 Write-Host '  Done. Project is now self-contained.' -ForegroundColor Green
+Write-Host '  Build Editor|Win32 or Game|Win32; bin\<Project>-Editor.exe and bin\<Project>-Game.exe stay separate.'
 Write-Host ''

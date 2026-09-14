@@ -1,3 +1,5 @@
+// Current complete recipe: powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1 -Name ComponentHandoffExceptionSafetyTest
+// Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // ---------------------------------------------------------------------------
 // ComponentHandoffExceptionSafetyTest.cpp -- deterministic SetMesh/SetLight
 // ownership test when root attachment allocation fails after adoption would

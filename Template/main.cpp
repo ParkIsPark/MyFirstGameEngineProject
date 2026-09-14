@@ -1,13 +1,13 @@
 // main.cpp -- entry point for a project built on MyFirstGameEngine.
 //
-// One executable, two roles (like Unreal's editor/standalone):
+// One entry point, two configuration-distinct executables:
 //   * EDITOR build  (no GAME_BUILD)  -> opens the ImGui editor on this project.
 //   * GAME   build  (GAME_BUILD set) -> boots straight into the standalone game.
 // Either build also honors `--game [world]` on the command line, so the editor's
 // "Play (Window)" can spawn this same exe as a standalone game window.
 //
 // The boot reads <name>.proj -> Setting/DefaultEngine.ini -> Content/<StartupWorld>
-// (Engine::Run wires this); GAME_BUILD just flips the no-argument default.
+// (Engine::Run wires this); GAME_BUILD selects the Game-only compilation.
 
 #include <string>
 #include "EditorEngine.h"

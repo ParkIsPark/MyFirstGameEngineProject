@@ -16,7 +16,7 @@
           bin/  *.dll                  (runtime DLLs)
 
     Configurations: Editor|Win32 (ImGui editor) and Game|Win32 (GAME_BUILD ->
-    standalone game). Both build <name>.exe into bin\.
+    standalone game). Build bin\<name>-Editor.exe and bin\<name>-Game.exe.
 
 .PARAMETER Parent
     Parent folder for the new project. If omitted, a GUI folder picker is shown.
@@ -247,6 +247,7 @@ $slnLines = @(
 
 Write-Host "  Done: $dest" -ForegroundColor Green
 Write-Host "    $Name.sln  ($Name.vcxproj: Editor|Win32, Game|Win32)"
+Write-Host "    Outputs: bin\$Name-Editor.exe and bin\$Name-Game.exe (independent incremental builds)"
 Write-Host '    main.cpp  Setting\*.ini  Content\DefaultWorld.world  bin\*.dll'
 
 if (-not $Headless) {

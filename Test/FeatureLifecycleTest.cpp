@@ -1,3 +1,5 @@
+// Current complete recipe: powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1 -Name FeatureLifecycleTest
+// Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // & 'C:\msys64\ucrt64\bin\g++.exe' -std=c++17 -Wall -Wextra -pedantic -I./Engine/Core Test/FeatureLifecycleTest.cpp Engine/Core/FFeatureLifecycle.cpp -o FeatureLifecycleTest.exe; if ($LASTEXITCODE -eq 0) { .\FeatureLifecycleTest.exe }
 #include "EngineVersion.h"
 #include "FFeatureLifecycle.h"

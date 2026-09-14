@@ -1,3 +1,5 @@
+// Current complete recipe: powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1 -Name LuaSmokeTest
+// Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // LuaSmokeTest.cpp -- standalone smoke test for the embedded Lua runtime.
 //
 // MSYS2 UCRT64:

@@ -88,15 +88,8 @@ public:
             rayInputs.height = request.target.Height();
             rayInputs.contextGeneration = generation;
             rayEffects_.Execute(rayInputs, request.backendSelection, rayOutputs);
-            stats_.rayResourceAllocations = rayEffects_.Stats().resourceAllocations;
-            stats_.rayBackendCalls = rayEffects_.Stats().backendCalls;
             stats_.activeRayBackend = rayEffects_.ActiveKind();
-            const IRayTracingBackend* activeBackend =
-                rayEffects_.ActiveBackend();
-            stats_.rayDispatches = activeBackend
-                ? activeBackend->Stats().rayDispatches : 0u;
-            stats_.rayMemoryBarriers = activeBackend
-                ? activeBackend->Stats().memoryBarriers : 0u;
+            stats_.backendReason = rayEffects_.BackendReason();
         }
         FCompositeOutput composite;
         if (!lighting_.Composite(request.target, rasterOutput, rayOutputs,
@@ -172,6 +165,42 @@ void UWorldRenderer::Shutdown() noexcept
     if (hardwareRasterizer_) hardwareRasterizer_->Shutdown();
     executor_->Shutdown();
     initialized_ = false;
+    stats_.activeRayBackend = ERayTracingBackend::Auto;
+    stats_.backendReason.clear();
+}
+
+const FWorldRendererStats& UWorldRenderer::Stats() const
+{
+    if (hardwareMeshCache_)
+    {
+        stats_.geometryUploads = hardwareMeshCache_->Stats().uploads;
+        stats_.geometryReuploads = hardwareMeshCache_->Stats().reuploads;
+        stats_.residentGeometryResources = hardwareMeshCache_->Stats().residentResources;
+        stats_.hardwareDrawCalls = hardwareRasterizer_->IndexedDrawCalls();
+        stats_.liveMaterialTextures = hardwareRasterizer_->OwnedMaterialTextureCount();
+        stats_.liveGBufferTextures = hardwareGBuffer_->OwnedTextureCount();
+        stats_.liveGBufferFramebuffers = hardwareGBuffer_->Framebuffer() ? 1u : 0u;
+        stats_.liveEnvironmentTextures = rasterLightingPass_->EnvironmentTexture() ? 1u : 0u;
+        stats_.liveRasterOutputTextures = rasterLightingPass_->OwnedTextureCount();
+        stats_.liveRasterFramebuffers = rasterLightingPass_->Framebuffer() ? 1u : 0u;
+        const auto& ray = rayEffectsScheduler_->Stats();
+        stats_.rayResourceAllocations = ray.resourceAllocations;
+        stats_.rayFactoryCalls = ray.factoryCalls;
+        stats_.rayBackendInitializations = ray.backendInitializations;
+        stats_.rayBackendCalls = ray.backendCalls;
+        stats_.rayDraws = ray.rayDraws;
+        stats_.rayDispatches = ray.rayDispatches;
+        stats_.rayMemoryBarriers = ray.memoryBarriers;
+        stats_.raySceneUploads = ray.sceneUploads;
+        stats_.rayBLASUploads = ray.blasUploads;
+        stats_.rayInstanceUploads = ray.instanceUploads;
+        stats_.rayMaterialUploads = ray.materialUploads;
+        stats_.rayOutputAllocations = ray.outputAllocations;
+        const auto* backend = rayEffectsScheduler_->ActiveBackend();
+        stats_.liveRayOutputTextures = backend ? backend->Stats().ownedOutputTextures : 0u;
+        stats_.liveRayBLAS = backend ? backend->Stats().residentBLAS : 0u;
+    }
+    return stats_;
 }
 
 bool UWorldRenderer::Render(UWorld& world,
@@ -191,6 +220,10 @@ bool UWorldRenderer::Render(UWorld& world,
     FRenderFeatures effective = normalized;
     if (!backendSelection.rayTracingEnabled) effective.rayTracing = false;
     const std::vector<ERenderPass> passPlan = BuildRenderPipelinePlan(effective);
+    stats_.activeRayBackend = ERayTracingBackend::Auto;
+    stats_.backendReason = !features.rayTracing ? "Ray tracing master is off" :
+        (!backendSelection.fallbackReason.empty() ? backendSelection.fallbackReason :
+         "No secondary ray effects requested");
     const FRenderScene scene = ExtractRenderScene(world, camera);
     FWorldRenderRequest request{
         scene, target, normalized, quality, backendSelection, passPlan,

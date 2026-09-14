@@ -70,6 +70,12 @@ public:
     ERenderTargetKind Kind() const { return kind_; }
     unsigned Identity() const { return attachments_.framebuffer; }
     unsigned ColorTexture() const { return attachments_.colorTexture; }
+    unsigned OwnedAttachmentCount() const
+    {
+        return (attachments_.framebuffer ? 1u : 0u) +
+               (attachments_.colorTexture ? 1u : 0u) +
+               (attachments_.depthAttachment ? 1u : 0u);
+    }
     int Width() const { return width_; }
     int Height() const { return height_; }
     std::uint64_t ContextGeneration() const { return contextGeneration_; }

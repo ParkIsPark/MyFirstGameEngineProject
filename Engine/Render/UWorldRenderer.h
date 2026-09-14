@@ -34,14 +34,38 @@ struct FWorldRenderRequest
 
 struct FWorldRendererStats
 {
+    // Cumulative for this renderer's lifetime, including Shutdown/Init cycles.
+    std::uint64_t hardwareDrawCalls = 0;
+    std::uint64_t geometryUploads = 0;
+    std::uint64_t geometryReuploads = 0;
     std::uint64_t hardwareGBufferPasses = 0;
     std::uint64_t rasterLightingPasses = 0;
     std::uint64_t compositePasses = 0;
     std::uint64_t rayResourceAllocations = 0;
     std::uint64_t rayBackendCalls = 0;
+    std::uint64_t rayFactoryCalls = 0;
+    std::uint64_t rayBackendInitializations = 0;
+    std::uint64_t rayDraws = 0;
+    std::uint64_t raySceneUploads = 0;
+    std::uint64_t rayBLASUploads = 0;
+    std::uint64_t rayInstanceUploads = 0;
+    std::uint64_t rayMaterialUploads = 0;
+    std::uint64_t rayOutputAllocations = 0;
     std::uint64_t rayDispatches = 0;
     std::uint64_t rayMemoryBarriers = 0;
     ERayTracingBackend activeRayBackend = ERayTracingBackend::Auto;
+    std::string backendReason;
+    // Current live ownership, refreshed by Stats(); target is independently
+    // owned by the caller and exposes FRenderTarget::OwnedAttachmentCount().
+    std::size_t residentGeometryResources = 0;
+    std::size_t liveGBufferTextures = 0;
+    std::size_t liveGBufferFramebuffers = 0;
+    std::size_t liveMaterialTextures = 0;
+    std::size_t liveEnvironmentTextures = 0;
+    std::size_t liveRasterOutputTextures = 0;
+    std::size_t liveRasterFramebuffers = 0;
+    std::size_t liveRayOutputTextures = 0;
+    std::size_t liveRayBLAS = 0;
     std::uint64_t cpuFramebufferGenerations = 0;
     std::uint64_t cpuReadbacks = 0;
     std::uint64_t cpuFramebufferUploads = 0;
@@ -79,7 +103,7 @@ public:
                 const FRenderQuality& quality,
                 const FBackendSelection& backendSelection,
                 std::uint64_t expectedContextGeneration = 0);
-    const FWorldRendererStats& Stats() const { return stats_; }
+    const FWorldRendererStats& Stats() const;
 
 private:
     std::unique_ptr<IWorldRenderExecutor> executor_;
@@ -94,5 +118,5 @@ private:
     std::unique_ptr<FStderrRayEffectsWarningSink> rayWarningSink_;
     std::unique_ptr<FRayEffectsScheduler> rayEffectsScheduler_;
     bool initialized_ = false;
-    FWorldRendererStats stats_;
+    mutable FWorldRendererStats stats_;
 };

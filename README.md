@@ -1,188 +1,72 @@
 # MyFirstGameEngine
 
-A self-contained, Unreal-flavored OpenGL engine for Konkuk University Computer Graphics coursework. It ships an ImGui **editor**, a standalone **game runtime**, and three render paths — a CPU **software rasterizer** (the graded HW deliverable), a **GPU mesh ray tracer**, and a **hybrid** renderer.
+An OpenGL engine and editor for Konkuk University Computer Graphics coursework. Editor and Game share one hardware renderer: indexed mesh draws create primary visibility in a GPU G-buffer, raster lighting shades it, and a composite writes the viewport or game target. Ray tracing is off by default. Enabling it adds optional ray-traced shadows, GI, and reflections to the same raster primary image.
 
-Everything needed to build is vendored in the repo (`include/`, `lib/`, `bin/*.dll`). After cloning, **no library install is required** — open a solution and press F5.
+The supported build is Windows, Visual Studio 2022, C++17, **Win32 (32-bit)**. Install the VS C++ workload and Windows SDK. Dependency headers, libraries, runtime DLLs, and upstream Lua 5.4.9 are vendored; no separate dependency package installation is needed. A driver providing **OpenGL 3.3 compatibility** is the minimum; **4.3 compatibility** is preferred for Compute. Context creation tries 4.3 then 3.3; an actual context below 3.3 is a fatal startup error.
 
-- **Platform:** Windows, Visual Studio 2022, **Win32 (32-bit)** only
-- **GL baseline:** OpenGL 3.3 (GLEW + GLFW + GLM)
-- **Language:** C++17
+## Build and run
 
----
-
-## Quick start
-
-1. Open `Engine.sln` at the repo root in Visual Studio 2022.
-2. Set **Test** as the startup project, choose **Debug | Win32**, press **F5**.
-3. The **editor** opens. Left-click to select, hold **RMB + WASD/QE** to fly, scroll to zoom.
-
-From a developer command prompt instead:
+Open `Engine.sln`, select **Test**, **Debug | Win32**, and press F5. From a VS developer PowerShell:
 
 ```powershell
-msbuild Engine.sln /p:Configuration=Debug /p:Platform=Win32
-bin\Test.exe
+$env:_CL_='/FS'
+msbuild Engine.sln /t:Build /p:Configuration=Debug /p:Platform=Win32 /m:1 /nr:false
+.\bin\Test.exe
+# Standalone runtime:
+.\bin\Test.exe --game Content/EditorWorld.world
 ```
 
-### Run modes (`Test.exe`)
+The editor provides an Outliner, Details, Content Browser and viewport. Click to select; hold RMB with WASD/QE to fly; scroll to move the camera; double-click an Outliner Actor to focus it. Move/Rotate/Scale gizmos edit transforms. Ctrl+S saves, Ctrl+Z/Y undo/redo, Ctrl+C/V copy/paste, and Delete removes the selection. Parenting preserves world position and rejects cycles.
 
-| Command | What it runs |
-|---------|--------------|
-| `Test.exe` (no args) | **Editor** (default) |
-| `Test.exe --game <world.world>` | **Standalone game**: load a `.world` and play it (defaults to `Content/EditorWorld.world`) |
-| `Test.exe --demo` | Mesh demo window — keys `1`=raster `2`=GPU RT `3`=depth `4`=hybrid `5`=OBJ `6`=FBX |
-| `Test.exe --hw6` | HW6 viewer — keys `1`=Flat `2`=Gouraud `3`=Phong on the reference sphere |
-| `Test.exe --fbxtest` | Headless FBX-import self-test (no window; PASS/FAIL gates) |
+**Add / Cube** creates a cube eight units in front of the camera. It renders through the shared hardware path. Arbitrary viewport-surface click-to-place coordinates are **not implemented by this renderer migration**; viewport left-click currently selects an Actor. This distinction matters for a literal click-position assignment rubric. Cube rotation in the assignment/demo is C++ `AActor::Tick` behavior, not a Lua transform binding.
 
----
+## Rendering
 
-## Using the editor
+The toolbar offers Flat/Gouraud/Phong shading and named ray features. Hardware raster primary visibility is mandatory. RT master off plans no ray pass and performs no ray factory, initialization, allocation, upload, draw, dispatch, or barrier work. RT master on adds only selected secondary effects.
 
-The editor is laid out as **Toolbar / World Outliner / Viewport / Content Browser / Details**, with a **Render Settings** window from the toolbar.
-
-### Camera & selection
-
-| Input | Action |
-|-------|--------|
-| **Left-click** | Ray-pick an actor in the viewport |
-| **RMB (hold) + W A S D** | Fly the camera; **Q/E** = down/up |
-| **Mouse wheel** | Zoom (dolly); hold **Shift** for faster |
-| **Double-click** an actor in the Outliner | Focus the camera on it |
-
-### Transform gizmo
-
-Select an actor, then use the toolbar **Move / Rotate / Scale** buttons (and **Local / World** space) to drag the gizmo. Edits write back to the actor's transform; for a parented actor the gizmo edits its **local** transform.
-
-### Editing shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| **Ctrl+Z / Ctrl+Y** | Undo / Redo |
-| **Ctrl+S** | Save the world |
-| **Ctrl+C / Ctrl+V** | Copy / paste the selected actor |
-| **Delete** | Delete the selected actor |
-
-Undo/redo restore the full scene (actors, names, meshes, lights, hierarchy); camera and render-mode are treated as view settings and stay out of undo.
-
-### Outliner hierarchy (parent/child)
-
-- **Drag one actor onto another** to parent it (the child keeps its world position; cycles are rejected).
-- Tree nodes **collapse/expand**; **moving a parent moves its children**.
-- Right-click → **Unparent**, or drag to empty space, to detach to the world root.
-
-### Render modes
-
-Pick the mode from the toolbar; it is saved into the world and used by the standalone game too.
-
-| Mode | Description |
-|------|-------------|
-| **Rasterizer** | CPU software rasterizer with **Flat / Gouraud / Phong** shading (the graded path). Pick the shading model + optional Depth view from the toolbar. |
-| **GPU RT** | GPU ray tracer: hard/soft shadows, hemisphere GI, HDRI/gradient sky, mirror reflection, diffuse textures. |
-| **Hybrid** | CPU rasterized G-buffer + GPU ray-traced shadows/GI. |
-
-### Play-in-Editor (PIE)
-
-- **Play** runs the world in the same window (physics + actor ticks); **Stop** reverts.
-- **Play (Window)** saves the world and launches it as a **separate game process** (`Test.exe --game`).
-
-### Lua Actor Scripting
-
-This project implements the engine-side Lua integration: component ownership, script loading and isolation, Play lifecycle, world serialization, editor assignment, and project packaging. Lua 5.4.9 itself is unmodified vendored upstream source, not coursework-authored code; its origin, license, checksum, and build notes are recorded in [`ThirdParty/Lua/README.md`](ThirdParty/Lua/README.md).
-
-To attach a script, select an Actor, choose **Details → + Add Component → Script Component**, then drop/choose a `.lua` asset or use **Import External .lua...**. Each Actor can have multiple Script Components. Select an attachment to toggle **Enabled**, **Clear** its assignment, or **Remove Component**. Save/reopen the world normally, then use **Play/Stop**; Lua never executes merely because the editor world is open. Put project scripts beneath `Content/Scripts`; packaging includes every in-root `.lua` file as data at the same relative path.
-
-The implementation is organized as follows:
-
-| Responsibility | Project code |
+| Backend | Behavior |
 |---|---|
-| VM lifetime and public binding seam | `Engine/Script/UScriptSubsystem.*`, `FLuaBindingRegistry.*` |
-| validated source/bytecode cache and isolated instances | `Engine/Script/FScriptPath.*`, `FLuaScriptCache.*`, `FLuaScriptInstance.*` |
-| Actor attachment and saved configuration | `Engine/Script/UScriptComponent.*`, `Engine/World/AActor.*`, `Engine/World/UWorld.*`, `Engine/Serialization/FWorldSerializer.*` |
-| editor assignment and PIE | `Engine/Editor/FEditorScriptWorkflow.cpp`, `FEditorAssetWorkflow.*`, `EditorEngine.cpp` |
-| generated projects and packaging | `Scripts/GenerateProject.ps1`, `Template/Package.ps1`, template project files |
-| acceptance examples/tests | `Content/Scripts/ExampleActor.lua`, `Test/*Script*Test*`, `Test/Fixtures/Scripts/` |
+| Auto | Compute on a capable 4.3 context; otherwise Compatible with a recorded reason. Compute initialization failure falls back to Compatible. |
+| Compatible | Explicit OpenGL 3.3 fragment backend, even on a 4.3-capable driver. |
+| Compute | Requires the 4.3 Compute/SSBO entry points. Unavailable or failed initialization disables ray effects and retains raster output; forced Compute does not silently select Compatible. |
 
-Editor PIE enters the callback path as `Engine::Run → USubsystemManager::InitAll → EditorEngine::OnPlay → CopyWorld → UWorld::BeginPlay/Tick/EndPlay → AActor::Dispatch* → UScriptComponent → FLuaScriptInstance → Lua callback`. Standalone Game uses `Engine::Run → Engine::BootWorld → FWorldSerializer → UScriptSubsystem::Init → UWorld::BeginPlay/Tick/EndPlay → AActor → UScriptComponent → FLuaScriptInstance → Lua`.
+Materials support diffuse/specular/emissive values, shininess, diffuse textures and component UV tiling. Multiple point lights and environment/HDRI contribute to lighting; mirror response uses optional ray reflections. The mesh cache is keyed by immutable asset identity and explicit geometry revision: 1, 100 or 1000 Actors sharing one cube upload one geometry, then submit one indexed draw per cube. Unchanged frames and transform edits never reupload its vertices or indices. Editing geometry requires `MarkGeometryDirty`/`FinalizeGeometry`.
 
-Cleanup differs by mode. `EditorEngine::OnStop` runs Lua `EndPlay` (only after a successful Begin), releases instance registry references, and deletes the PIE world and its components; the subsystem VM remains alive for another Play session and shuts down only when the editor exits. Standalone `Engine::Run` runs world and script `EndPlay` and releases normal instance references, then `USubsystemManager::ShutdownAll` invalidates any outstanding instance handles and registry references and calls `lua_close`; only after that does `Engine::Run` delete the C++ game world. That final object destruction cannot call Lua because script lifecycle state was released before shutdown and any outstanding handles were invalidated.
+Render Settings keeps separate Editor and Game quality profiles in `Config/EditorSettings.ini` and `Config/GameSettings.ini`. **Play** runs a cloned world in the editor; **Stop** ends it. **Play (Window)** saves a temporary world and starts the current Editor executable with `--game`, which still uses GameEngine and the shared renderer.
 
-The public milestone API is deliberately only `Engine.Log("message")`; callback signatures and limitations are in [`docs/scripting/lua-actor-scripting.md`](docs/scripting/lua-actor-scripting.md). In particular, the assignment cube still rotates in C++ through `AActor::Tick`: Lua has no Actor/transform API yet, and this milestone does not implement click-to-place.
+Developer Settings is an Editor-only diagnostic panel. Its local, gitignored `Config/DeveloperSettings.ini` stores `[Rendering]` keys `LegacyOverride=None`, `ShowDeprecatedFeatures=true`, and `ShowExperimentalWarnings=true`. Deprecated/Experimental badges and warnings describe feature status. The two explicit legacy overrides are `SoftwareRasterizer` and `PureGPURayTracer`. Old CPU software raster, whole-frame GPU ray tracing, and the CPU-G-buffer `UHybridPass` are educational/regression implementations, not normal render choices. Developer Settings is excluded from project settings, worlds and packaged Game behavior.
 
----
+See [the renderer guide](docs/rendering/hardware-raster-ray-effects.md) for resource counters, fallback troubleshooting, complete Editor/Game call stacks and the file-by-file assignment code map.
 
-## Worlds & assets
+## Projects, assets and Lua
 
-### Content browser
+Run `GenerateProject.bat`, or:
 
-The Content Browser lists assets under `Content/`, grouped by tab (World / Mesh / Material / Texture). Double-click a `.world` to open it, a mesh to add it to the scene (or drag it onto the viewport to place it), or a material to open the material editor. Right-click for New World / New Material / Import.
-
-### Importing models
-
-Import via the Content Browser, the **Details mesh slot**, or by **dragging a file onto the window**. Supported: **`.obj`** (hand-written parser, with `.mtl`), **`.fbx`** (Assimp), **`.mesh`** (engine binary). On import the file is **copied into `Content/`** (an OBJ brings its `.mtl` + textures), so reopening the project still resolves it.
-
-### Materials
-
-Each material is **Blinn-Phong**: diffuse (`kd`), specular (`ks`), shininess, **mirror** (`km`, shows in GPU RT), and an optional **diffuse texture** — all sampled in every render mode.
-
-Materials can be **shared assets** (`.material`): right-click → New Material, then **double-click to open the material editor**. Editing a material updates **every object that uses it** (it's shared by path). Assign one by dragging it onto an object in the viewport, or via the Details **Material slot** (drop / pick / Edit / Clear). An imported OBJ's `.mtl` shows up as a material too. Saving writes a `.material` (a `.mtl` source is written as `<stem>.material`, never overwritten).
-
-**Texture tiling (UV repeat)** lives on the *mesh component*, not the material — so the same material can repeat differently per object. Set it in Details → **Texture Tiling**.
-
-### Lights
-
-Add from the Outliner:
-
-- **Point Light** — position follows the actor; color × intensity.
-- **Environment Light** — drives **hemisphere GI** (Unreal-Lumen-style) + the sky. Details gives you:
-  - **Time of Day** — one slider (0–24 h, + Sunrise/Noon/Sunset/Night presets) moves the sun across the day, setting the sky gradient + light color/intensity.
-  - **Sky Image (HDRI)** — drop or pick an image; it's **copied into `Content/`** and **saved with the world**, so it's restored on reload. The HDRI replaces the gradient in every mode.
-  - Manual **Sky Horizon / Zenith / Exponent** for fine-tuning.
-
-### Physics
-
-Add a **Sphere** or **Box** collider to an actor (Details → Add Component). Toggle **Simulate Physics** off to make it **Static** (collides but immovable — e.g. a floor). Colliders have a scalable size + offset and draw as a green wireframe when selected.
-
----
-
-## Render settings
-
-Toolbar → **Render Settings**. Two independent profiles — **Editor** (live viewport) and **Game** (PIE / standalone) — let the editing view and the shipped game differ. Saved to `Config/EditorSettings.ini` (+ `Config/GameSettings.ini` for the game).
-
-| Setting | Meaning |
-|---------|---------|
-| **Anti-Aliasing** | Off / SSAA 2× (supersample then downscale) |
-| **Ambient Strength** | Base ambient brightness (raster) |
-| **GI Samples** | Hemisphere GI rays per pixel (0 = off; needs an Environment Light) |
-| **GI Bounces** | Diffuse path-trace depth (0 = AO, 1 = sky, 2+ = color bleed; GPU RT) |
-| **GI Strength** | Environment-light / GI brightness multiplier |
-| **Reflection Strength** | Mirror-reflection multiplier (GPU RT) |
-| **Shininess** | Specular exponent |
-| **Shadow Samples / Softness** | Soft-shadow ray count and penumbra width |
-
----
-
-## Making your own project
-
-Use the engine from a separate project instead of editing in-repo:
-
-1. Double-click **`GenerateProject.bat`** — pick a folder and a name. It scaffolds `<name>\` with a `.sln`, `main.cpp`, `EngineRoot.props`, runtime DLLs, and **Editor / Game** build configurations.
-2. By default the project is **linked** to this engine repo (engine edits propagate). Run **`Package.bat`** inside the generated folder to **freeze** the engine into the project for submission (self-contained; the repo can be moved/deleted afterward).
-
-A minimal entry point just boots the engine and runs a project descriptor; the **Editor** build opens the editor, and the **Game** build runs the world directly (same exe, two configurations).
-
-Set which world the project boots into via **File → Project Settings… → Default World** (saved to `Setting/DefaultEngine.ini`); the editor opens it on startup and a packaged game runs it.
-
----
-
-## Repository layout
-
-```
-Engine/        Engine source (Framework, World, Mesh, Rasterizer, Render,
-               RayTracing, Acceleration, Serialization, Threading, Import,
-               Editor, Light, Physics, Player)
-Test/          main.cpp — runs the editor / --game / --demo / --hw6 / --fbxtest
-Template/      Scaffold used by GenerateProject
-include/ lib/ bin/   Vendored GLEW/GLFW/GLM/Assimp/ImGui + runtime DLLs
-Engine.sln     Browse / build / run solution
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File Scripts/GenerateProject.ps1 -Parent C:/Projects -Name MyGame
 ```
 
-Engine internals and contribution conventions are documented in **[CLAUDE.md](CLAUDE.md)**.
+Generated projects use **Editor | Win32** and **Game | Win32**. Their independent artifacts are `bin/MyGame-Editor.exe` and `bin/MyGame-Game.exe`; both remain alongside runtime DLLs, so alternating incremental builds cannot overwrite the other role. `EngineRoot.props` initially links back to this repository. Run the generated `Package.bat` to copy engine/dependency sources and switch to a self-contained project. Packaging preserves safe `.lua` assets beneath `Content/Scripts` and excludes local Developer Settings. Set the startup world in File / Project Settings (`Setting/DefaultEngine.ini`).
+
+Import OBJ/MTL, FBX (Assimp), or engine `.mesh` assets through the Content Browser, Details, or OS drag/drop. Imports copy assets and supported sidecars into `Content`. Shared `.material` assets can be assigned to multiple objects; saving an imported MTL creates a `.material` file. Point/Environment lights and Sphere/Box colliders are Actor components.
+
+World saves now use **format 3** with named `[RenderFeatures]`. Legacy format 1 and 2 files migrate on load and re-save as format 3; old numeric renderer settings are migration input only. ScriptComponent order, enabled state and paths survive this migration.
+
+Attach Lua through Details / Add Component / Script Component, then assign a `.lua` from `Content/Scripts`. Each attachment has its own environment; callbacks run only during Play. The current public API is **`Engine.Log("message")` only**. There are no Lua Actor/transform/spawn/input/render APIs or hot reload. See [Lua Actor scripting](docs/scripting/lua-actor-scripting.md) and [upstream Lua provenance](ThirdParty/Lua/README.md).
+
+## Verification and authorship
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File Test/ScriptPackagingTest.ps1
+.\bin\Test.exe --meshrevisiontest
+.\bin\Test.exe --deprecated-raytracer-lifecycle-selftest
+.\bin\Test.exe --hw-raster-selftest=hardware.ppm
+.\bin\Test.exe --raster-lighting-selftest=lighting.ppm
+.\bin\Test.exe --ray-effects-selftest=rays.ppm
+.\bin\Test.exe --render-performance-selftest
+```
+
+These bounded gates cover import/revision, migration, Lua, deprecated isolation, real hardware shading, secondary ray effects, 1/100/1000 shared cubes, and production Editor/Game routes. The PPM gates deliberately read test images; normal rendering does not. `--demo` and `--hw6` are interactive educational/regression viewers of earlier coursework.
+
+Project-authored engine/integration work lives in the framework, world/components, rendering, import adapters, serialization, editor integration, scripting integration and tests. This is a code responsibility map, not a claim that every file or dependency was authored here. `ThirdParty`, `include`, libraries/DLLs, Dear ImGui/ImGuizmo, GLEW/GLFW/GLM/Assimp, stb and upstream Lua 5.4.9 retain their upstream authorship and licenses. See [CLAUDE.md](CLAUDE.md) for development conventions.

@@ -759,7 +759,6 @@ bool UGL43RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
                     GL_TEXTURE_FETCH_BARRIER_BIT);
     if (!CollectError("GL43 ray-effects dispatch", diagnostic)) return false;
     ++stats_.renderCalls;
-    ++stats_.rayDraws;
     ++stats_.rayDispatches;
     ++stats_.memoryBarriers;
     if (shadowTexture_) outputs.shadowVisibilityTarget = FRenderOutputView{

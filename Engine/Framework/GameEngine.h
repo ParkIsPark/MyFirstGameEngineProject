@@ -16,6 +16,7 @@ class GameEngine : public Engine
 {
 public:
     explicit GameEngine(std::string worldPath) : worldPath_(std::move(worldPath)) {}
+    const FWorldRendererStats& RendererStats() const { return worldRenderer_.Stats(); }
 
 protected:
     void    OnStartup() override;     // init the world renderer (GPU passes)

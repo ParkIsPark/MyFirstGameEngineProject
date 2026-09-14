@@ -1,3 +1,5 @@
+// Current complete recipe: powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1 -Name DeveloperSettingsTest
+// Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // PowerShell (MSYS2 UCRT64):
 // & C:/msys64/ucrt64/bin/g++.exe -std=c++17 -Wall -Wextra -pedantic -IEngine/Render -IEngine/Core -IEngine/Developer -IEngine/Editor Test/DeveloperSettingsTest.cpp Engine/Developer/FDeveloperSettings.cpp Engine/Core/FFeatureLifecycle.cpp -o DeveloperSettingsTest.exe
 // ./DeveloperSettingsTest.exe

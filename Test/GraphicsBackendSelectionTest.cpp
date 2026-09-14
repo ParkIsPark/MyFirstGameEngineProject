@@ -1,3 +1,5 @@
+// Current complete recipe: powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1 -Name GraphicsBackendSelectionTest
+// Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // & 'C:\msys64\ucrt64\bin\g++.exe' -std=c++17 -Wall -Wextra -pedantic -I./Engine/Render Test/GraphicsBackendSelectionTest.cpp Engine/Render/FGraphicsCapabilities.cpp -o GraphicsBackendSelectionTest.exe; if ($LASTEXITCODE -eq 0) { .\GraphicsBackendSelectionTest.exe }
 #include "FGraphicsCapabilities.h"
 
