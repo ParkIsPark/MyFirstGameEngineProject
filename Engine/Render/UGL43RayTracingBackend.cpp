@@ -2,6 +2,7 @@
 
 #include "FRenderScene.h"
 #include "FRenderTarget.h"
+#include "FTextureSamplingPolicy.h"
 #include "Shaders/RayEffectsComputeShaders.h"
 #include "FRenderHistory.h"
 #include "Shaders/SharedLightingShaderSource.h"
@@ -522,9 +523,12 @@ bool UGL43RayTracingBackend::ResizeOutputs(int width, int height, unsigned mask,
 }
 
 bool UGL43RayTracingBackend::UploadScene(const FPackedRayScene& packed,
+                                         float requestedAnisotropy,
                                          std::string* diagnostic)
 {
     auto& stats = stats_;
+    const FTextureSamplingPolicy sampling = TextureSamplingPolicyForContext(
+        contextGeneration_, requestedAnisotropy);
     if (packed.maximumBLASDepth > 60 || packed.tlasDepth > 28)
     {
         if (diagnostic)
@@ -592,15 +596,21 @@ bool UGL43RayTracingBackend::UploadScene(const FPackedRayScene& packed,
             stats.resourceAllocations += atlas ? 1u : 0u;
             glBindTexture(GL_TEXTURE_2D_ARRAY, atlas);
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-            glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, atlasWidth,
+            glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_SRGB8_ALPHA8, atlasWidth,
                 atlasHeight, layers, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                 packed.textureArrayRGBA.empty() ? white :
                     packed.textureArrayRGBA.data());
             ++stats.textureUploadCalls;
-            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+            glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER,
+                            GL_LINEAR_MIPMAP_LINEAR);
             glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            if (sampling.anisotropySupported)
+                glTexParameterf(GL_TEXTURE_2D_ARRAY,
+                    GL_TEXTURE_MAX_ANISOTROPY_EXT,
+                    sampling.EffectiveAnisotropy());
             okay = atlas != 0;
         }
     }
@@ -686,7 +696,7 @@ bool UGL43RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
     }
     if (!ResizeOutputs(inputs.width, inputs.height, mask,
                        inputs.contextGeneration, diagnostic) ||
-        !UploadScene(packed, diagnostic)) return false;
+        !UploadScene(packed, inputs.quality.anisotropy, diagnostic)) return false;
 
     const std::uint64_t groupsX =
         (static_cast<std::uint64_t>(inputs.width) + LocalSizeX - 1u) / LocalSizeX;

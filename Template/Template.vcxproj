@@ -97,6 +97,7 @@
     <ClCompile Include="$(EngineRootDir)Engine\Rasterizer\URasterizer.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\FGraphicsCapabilities.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\FRenderMath.cpp" />
+    <ClCompile Include="$(EngineRootDir)Engine\Render\FTextureSamplingPolicy.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\FRenderQualitySettings.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\FRenderScene.cpp" />
     <ClCompile Include="$(EngineRootDir)Engine\Render\FRenderHistory.cpp" />
@@ -226,6 +227,7 @@
     <!-- Engine: Render headers -->
     <ClInclude Include="$(EngineRootDir)Engine\Render\FGraphicsCapabilities.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderMath.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\FTextureSamplingPolicy.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderQualitySettings.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderOutputs.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderScene.h" />

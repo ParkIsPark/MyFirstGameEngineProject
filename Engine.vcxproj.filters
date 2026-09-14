@@ -102,6 +102,7 @@
     <!-- Render -->
     <ClCompile Include="Engine\Render\FGraphicsCapabilities.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\FRenderMath.cpp"><Filter>Engine\Render</Filter></ClCompile>
+    <ClCompile Include="Engine\Render\FTextureSamplingPolicy.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\FRenderQualitySettings.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\FRenderScene.cpp"><Filter>Engine\Render</Filter></ClCompile>
     <ClCompile Include="Engine\Render\FRenderHistory.cpp"><Filter>Engine\Render</Filter></ClCompile>
@@ -227,6 +228,7 @@
     <!-- Render -->
     <ClInclude Include="Engine\Render\FGraphicsCapabilities.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderMath.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="Engine\Render\FTextureSamplingPolicy.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderQualitySettings.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderOutputs.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderScene.h"><Filter>Engine\Render</Filter></ClInclude>

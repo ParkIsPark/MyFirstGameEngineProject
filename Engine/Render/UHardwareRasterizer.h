@@ -62,6 +62,11 @@ public:
     std::uint64_t MaterialTextureHashComputations() const { return materialTextureHashComputations_; }
     std::uint64_t IndexedDrawCalls() const { return indexedDrawCalls_; }
     std::size_t OwnedMaterialTextureCount() const { return materialTextures_.size(); }
+    unsigned MaterialTextureForTesting(const Material* material) const
+    {
+        const auto found = materialTextures_.find(material);
+        return found == materialTextures_.end() ? 0u : found->second.texture;
+    }
     void InjectNextMaterialTextureUploadFailureForTesting() {
         failNextMaterialTextureUploadForTesting_ = true;
     }
@@ -69,6 +74,7 @@ public:
 private:
     bool ResolveMaterialTexture(const Material* material,
                                 std::uint64_t contextGeneration,
+                                float requestedAnisotropy,
                                 unsigned& texture,
                                 std::string& diagnostic);
     void ReleaseUnusedMaterialTextures() noexcept;

@@ -3,6 +3,7 @@
 #include "BVH.h"
 #include "FRenderScene.h"
 #include "FRenderMath.h"
+#include "FTextureSamplingPolicy.h"
 #include "UMesh.h"
 
 #include <algorithm>
@@ -144,6 +145,7 @@ void HashMaterial(std::uint64_t& hash, const FResolvedRenderMaterial& material,
     HashBytes(hash, &material.transmittanceDistance, sizeof(material.transmittanceDistance));
     HashBytes(hash, &material.castRayTracedShadows,
               sizeof(material.castRayTracedShadows));
+    HashBytes(hash, &material.runtimeRevision, sizeof(material.runtimeRevision));
     HashBytes(hash, &instanceTiling, sizeof(instanceTiling));
     const std::size_t pathLength = material.diffuseTexturePath.size();
     HashBytes(hash, &pathLength, sizeof(pathLength));
@@ -537,22 +539,6 @@ const FPackedRayScene& FRaySceneCache::Prepare(const FRenderScene& scene)
             packed_.textureWidth = std::max(packed_.textureWidth, source->texWidth);
             packed_.textureHeight = std::max(packed_.textureHeight, source->texHeight);
         }
-        if (!textureSources.empty() &&
-            (packed_.textureWidth > std::numeric_limits<int>::max() - 2 ||
-             packed_.textureHeight > std::numeric_limits<int>::max() - 2))
-        {
-            packed_.valid = false;
-            packed_.diagnostic = "Ray material texture dimensions cannot be padded safely";
-            return packed_;
-        }
-        if (!textureSources.empty())
-        {
-            // One duplicate edge texel on every side makes a sub-rectangle in
-            // the common array layer sample exactly like the source texture's
-            // GL_LINEAR + CLAMP_TO_EDGE storage at its logical resolution.
-            packed_.textureWidth += 2;
-            packed_.textureHeight += 2;
-        }
         packed_.textureLayerCount = static_cast<int>(textureSources.size());
         if (!textureSources.empty())
         {
@@ -569,29 +555,14 @@ const FPackedRayScene& FRaySceneCache::Prepare(const FRenderScene& scene)
                 return packed_;
             }
             const std::size_t layerBytes = width * height * 4u;
-            packed_.textureArrayRGBA.resize(layerBytes * textureSources.size(), 255u);
+            packed_.textureArrayRGBA.resize(layerBytes * textureSources.size());
             for (std::size_t layer = 0; layer < textureSources.size(); ++layer)
             {
                 const Material& source = *textureSources[layer];
-                const int channels = source.texChannels > 0 ? source.texChannels : 3;
-                for (int y = 0; y < source.texHeight + 2; ++y)
-                    for (int x = 0; x < source.texWidth + 2; ++x)
-                    {
-                        const int sx = std::clamp(x - 1, 0, source.texWidth - 1);
-                        const int sy = std::clamp(y - 1, 0, source.texHeight - 1);
-                        const std::size_t sourceOffset = (static_cast<std::size_t>(sy) *
-                            source.texWidth + sx) * static_cast<std::size_t>(channels);
-                        const std::size_t targetOffset = layer * layerBytes +
-                            (static_cast<std::size_t>(y) * packed_.textureWidth + x) * 4u;
-                        const unsigned char r = source.texData[sourceOffset];
-                        packed_.textureArrayRGBA[targetOffset] = r;
-                        packed_.textureArrayRGBA[targetOffset + 1] = channels >= 2
-                            ? source.texData[sourceOffset + 1] : 0u;
-                        packed_.textureArrayRGBA[targetOffset + 2] = channels >= 3
-                            ? source.texData[sourceOffset + 2] : 0u;
-                        packed_.textureArrayRGBA[targetOffset + 3] = channels == 4
-                            ? source.texData[sourceOffset + 3] : 255u;
-                    }
+                const std::vector<unsigned char> resampled = ResampleRGBA8ToLayer(
+                    source, packed_.textureWidth, packed_.textureHeight);
+                std::copy(resampled.begin(), resampled.end(),
+                    packed_.textureArrayRGBA.begin() + layer * layerBytes);
             }
         }
 
@@ -621,12 +592,7 @@ const FPackedRayScene& FRaySceneCache::Prepare(const FRenderScene& scene)
                     static_cast<float>(layer));
                 packed_.materialTexels.emplace_back(instance->uvTiling * sourceTiling,
                     repeat, 0.0f);
-                packed_.materialTexels.emplace_back(
-                    material.source && layer >= 0
-                        ? static_cast<float>(material.source->texWidth) : 0.0f,
-                    material.source && layer >= 0
-                        ? static_cast<float>(material.source->texHeight) : 0.0f,
-                    0.0f, 0.0f);
+                packed_.materialTexels.emplace_back(0.0f);
                 packed_.materialTexels.emplace_back(
                     material.transmittanceColor, material.opacity);
                 packed_.materialTexels.emplace_back(material.refraction,

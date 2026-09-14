@@ -5,6 +5,7 @@
 #include "FRenderTarget.h"
 #include "FPixelUnpackGuard.h"
 #include "FTransform.h"
+#include "FTextureSamplingPolicy.h"
 #include "Material.h"
 #include "Shaders/HardwareRasterShaders.h"
 #include "Shaders/SharedLightingShaderSource.h"
@@ -288,6 +289,8 @@ std::uint64_t TextureSignature(const Material& material)
     mix(&material.texWidth, sizeof(material.texWidth));
     mix(&material.texHeight, sizeof(material.texHeight));
     mix(&material.texChannels, sizeof(material.texChannels));
+    const std::uint64_t runtimeRevision = material.RuntimeRevision();
+    mix(&runtimeRevision, sizeof(runtimeRevision));
     const std::size_t size = material.texData.size();
     mix(&size, sizeof(size));
     if (!material.texData.empty()) mix(material.texData.data(), material.texData.size());
@@ -526,6 +529,7 @@ void UHardwareRasterizer::Shutdown() noexcept
 
 bool UHardwareRasterizer::ResolveMaterialTexture(
     const Material* material, std::uint64_t contextGeneration,
+    float requestedAnisotropy,
     unsigned& texture, std::string& diagnostic)
 {
     texture = 0;
@@ -563,6 +567,9 @@ bool UHardwareRasterizer::ResolveMaterialTexture(
         return false;
     }
 
+    const FTextureSamplingPolicy sampling = TextureSamplingPolicyForContext(
+        contextGeneration, requestedAnisotropy);
+
     FPixelUnpackGuard unpack;
     glActiveTexture(GL_TEXTURE0);
     unsigned candidate = 0;
@@ -570,15 +577,18 @@ bool UHardwareRasterizer::ResolveMaterialTexture(
     glBindTexture(GL_TEXTURE_2D, candidate);
     const GLenum format = channels == 4 ? GL_RGBA : channels == 2 ? GL_RG :
                           channels == 1 ? GL_RED : GL_RGB;
-    const GLint internal = channels == 4 ? GL_RGBA8 : channels == 2 ? GL_RG8 :
-                           channels == 1 ? GL_R8 : GL_RGB8;
-    glTexImage2D(GL_TEXTURE_2D, 0, internal,
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8,
                  material->texWidth, material->texHeight, 0, format,
                  GL_UNSIGNED_BYTE, material->texData.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                    GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    if (sampling.anisotropySupported)
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT,
+                        sampling.EffectiveAnisotropy());
 
     const bool injectedFailure = failNextMaterialTextureUploadForTesting_;
     failNextMaterialTextureUploadForTesting_ = false;
@@ -806,6 +816,7 @@ bool UHardwareRasterizer::RenderGeometry(const FRenderScene& scene,
                 unsigned texture = 0;
                 std::string textureDiagnostic;
                 if (!ResolveMaterialTexture(material.source, contextGeneration,
+                                            quality.anisotropy,
                                             texture, textureDiagnostic))
                 {
                     ReleaseUnusedMaterialTextures();

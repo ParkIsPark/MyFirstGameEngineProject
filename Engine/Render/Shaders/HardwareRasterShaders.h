@@ -57,7 +57,7 @@ vec3 sampledAlbedo(vec2 uv)
     {
         vec2 tiled = uv * uUVTiling;
         vec2 addressed = uRepeatDiffuseTexture ? fract(tiled) : clamp(tiled, 0.0, 1.0);
-        albedo *= pow(texture(uDiffuseTexture, addressed).rgb, vec3(2.2));
+        albedo *= texture(uDiffuseTexture, addressed).rgb;
     }
     return albedo;
 }
@@ -141,7 +141,7 @@ void main()
     {
         vec2 tiled = fsIn.uv * uUVTiling;
         vec2 addressed = uRepeatDiffuseTexture ? fract(tiled) : clamp(tiled, 0.0, 1.0);
-        albedo *= pow(texture(uDiffuseTexture, addressed).rgb, vec3(2.2));
+        albedo *= texture(uDiffuseTexture, addressed).rgb;
     }
     vec3 geometric = normalize(fsIn.geometricNormal);
     vec3 shading = normalize(fsIn.shadingNormal);

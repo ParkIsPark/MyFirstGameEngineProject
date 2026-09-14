@@ -30,6 +30,8 @@ public:
     int Width() const { return width_; }
     int Height() const { return height_; }
     std::size_t OwnedOutputTextureCount() const;
+    unsigned MaterialAtlasTextureForTesting() const
+    { return materialAtlasTexture_; }
     void InjectNextUploadFailureForTesting() { failNextUploadForTesting_ = true; }
     void InjectNextInitializationFailureForTesting()
     { failNextInitializationForTesting_ = true; }
@@ -38,7 +40,8 @@ private:
     bool ResizeOutputs(int width, int height, unsigned mask,
                        std::uint64_t contextGeneration,
                        std::string* diagnostic);
-    bool UploadScene(const FPackedRayScene& packed, std::string* diagnostic);
+    bool UploadScene(const FPackedRayScene& packed, float requestedAnisotropy,
+                     std::string* diagnostic);
     void DeleteCurrentResources() noexcept;
     void ForgetCurrentResources() noexcept;
 

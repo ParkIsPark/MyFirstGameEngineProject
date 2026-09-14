@@ -1481,6 +1481,37 @@ public:
               checkerFirst.first && checkerSecond.first &&
               textureUploadsAfterFirst == textureUploadsBefore + 1u &&
               rasterizer.MaterialTextureUploads() == textureUploadsAfterFirst);
+        const GLuint rasterMaterialTexture = static_cast<GLuint>(
+            rasterizer.MaterialTextureForTesting(&material));
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, rasterMaterialTexture);
+        GLint rasterInternal = 0, rasterMinFilter = 0;
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0,
+            GL_TEXTURE_INTERNAL_FORMAT, &rasterInternal);
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+            &rasterMinFilter);
+        GLint rasterMipWidth = 0, rasterMipHeight = 0;
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 1, GL_TEXTURE_WIDTH,
+            &rasterMipWidth);
+        glGetTexLevelParameteriv(GL_TEXTURE_2D, 1, GL_TEXTURE_HEIGHT,
+            &rasterMipHeight);
+        GLfloat rasterAnisotropy = 1.0f, implementationAnisotropy = 1.0f;
+        if (GLEW_EXT_texture_filter_anisotropic)
+        {
+            glGetTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT,
+                &rasterAnisotropy);
+            glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT,
+                &implementationAnisotropy);
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glActiveTexture(GL_TEXTURE5);
+        check("raster material texture is sRGB with a complete trilinear mip chain",
+              rasterMaterialTexture != 0 && rasterInternal == GL_SRGB8_ALPHA8 &&
+              rasterMinFilter == GL_LINEAR_MIPMAP_LINEAR &&
+              rasterMipWidth == 1 && rasterMipHeight == 1);
+        check("raster anisotropy is capability bounded",
+              rasterAnisotropy >= 1.0f &&
+              rasterAnisotropy <= implementationAnisotropy);
         check("geometry ignores hostile samplers and restores units zero/one",
               restoredGeometryActiveTexture == GL_TEXTURE5 &&
               restoredGeometryEnvironment ==
@@ -1504,6 +1535,13 @@ public:
         check("live texture byte edits refresh the cached texture",
               checkerEdited.first &&
               rasterizer.MaterialTextureUploads() == textureUploadsAfterFirst + 1u);
+        const std::uint64_t uploadsBeforeRuntimeRevision =
+            rasterizer.MaterialTextureUploads();
+        material.MarkRuntimeDirty();
+        const auto checkerRevisionOnly = renderFrame(scene, quality);
+        check("runtime-only material revisions refresh raster texture storage",
+              checkerRevisionOnly.first && rasterizer.MaterialTextureUploads() ==
+                  uploadsBeforeRuntimeRevision + 1u);
         material.texData.clear();
         material.texWidth = material.texHeight = material.texChannels = 0;
         material.diffuseTexPath.clear();
@@ -2327,12 +2365,13 @@ public:
               firstMaterialPack.valid && firstMaterialPack.materialCount == 2 &&
               firstMaterialPack.textureLayerCount == 1 &&
               firstMaterialPack.triangleTexels.size() == 12u * 7u);
-        check("ray atlas preserves logical texture size for GL_LINEAR sampling",
-              firstMaterialPack.textureWidth == 4 &&
-              firstMaterialPack.textureHeight == 4 &&
+        check("ray atlas resamples each texture across the full normalized layer",
+              firstMaterialPack.textureWidth == 2 &&
+              firstMaterialPack.textureHeight == 2 &&
               firstMaterialPack.materialTexels.size() == 2u * 8u &&
-              firstMaterialPack.materialTexels[13].x == 2.0f &&
-              firstMaterialPack.materialTexels[13].y == 2.0f &&
+              firstMaterialPack.textureArrayRGBA.size() == 2u * 2u * 4u &&
+              firstMaterialPack.materialTexels[13].x == 0.0f &&
+              firstMaterialPack.materialTexels[13].y == 0.0f &&
               firstMaterialPack.primaryOpticsTexels.size() == 4u);
         check("closed-volume validity is packed per ray instance",
               firstMaterialPack.instanceTexels.size() == 7u &&
@@ -2349,6 +2388,16 @@ public:
               changedMaterialPack.blasRevision == materialBLASRevision &&
               changedMaterialPack.instanceRevision == materialInstanceRevision &&
               changedMaterialPack.materialRevision != materialRevision);
+        const std::uint64_t changedMaterialRevision =
+            changedMaterialPack.materialRevision;
+        materialMesh->materials[1].MarkRuntimeDirty();
+        materialScene.meshes.front().materialSlots[1].runtimeRevision =
+            materialMesh->materials[1].RuntimeRevision();
+        const FPackedRayScene revisionOnlyMaterialPack =
+            materialCache.Prepare(materialScene);
+        check("runtime-only material revisions repack ray texture storage",
+              revisionOnlyMaterialPack.materialRevision !=
+                  changedMaterialRevision);
         materialScene.meshes.front().materialOverride =
             materialScene.meshes.front().materialSlots[0];
         materialScene.meshes.front().materialOverrideIdentity = 499u;
@@ -3095,9 +3144,8 @@ public:
         computeQualityRays.Shutdown();
 
         // One hardware-primary pixel reflects into a known secondary triangle.
-        // The literal expected value follows HardwareRasterShaders: GL_LINEAR
-        // samples the stored UNORM RGB first, pow(2.2) decodes it, then the
-        // result is multiplied by the non-white material base albedo.
+        // The literal expected value follows full-layer resampling followed by
+        // hardware sRGB decode/filtering and non-white base-albedo modulation.
         UHardwareGBuffer controlledGBuffer;
         const bool controlledGBufferOK = controlledGBuffer.Resize(
             1, 1, ContextGeneration());
@@ -3279,10 +3327,8 @@ public:
                 &controlledPixel[0]);
             glBindTexture(GL_TEXTURE_2D, 0);
         }
-        const glm::vec3 expectedStoredRGB(93.8f / 255.0f,
-            131.6f / 255.0f, 65.8f / 255.0f);
-        const glm::vec3 expectedSecondary = controlledMaterial.kd *
-            glm::pow(expectedStoredRGB, glm::vec3(2.2f));
+        const glm::vec3 expectedSecondary(
+            0.030380249f, 0.039031982f, 0.026977539f);
         const glm::vec3 controlledError = glm::abs(
             glm::vec3(controlledPixel) - expectedSecondary);
         check("secondary textured albedo matches raster GL_LINEAR decode and base color",
@@ -3308,6 +3354,42 @@ public:
                 &computeControlledPixel[0]);
             glBindTexture(GL_TEXTURE_2D, 0);
         }
+        auto verifyRayAtlasSampling = [&](const char* label, GLuint atlas)
+        {
+            glBindTexture(GL_TEXTURE_2D_ARRAY, atlas);
+            GLint internal = 0, minFilter = 0;
+            GLint finalWidth = 0, finalHeight = 0, beyondWidth = -1;
+            glGetTexLevelParameteriv(GL_TEXTURE_2D_ARRAY, 0,
+                GL_TEXTURE_INTERNAL_FORMAT, &internal);
+            glGetTexParameteriv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER,
+                &minFilter);
+            glGetTexLevelParameteriv(GL_TEXTURE_2D_ARRAY, 2,
+                GL_TEXTURE_WIDTH, &finalWidth);
+            glGetTexLevelParameteriv(GL_TEXTURE_2D_ARRAY, 2,
+                GL_TEXTURE_HEIGHT, &finalHeight);
+            glGetTexLevelParameteriv(GL_TEXTURE_2D_ARRAY, 3,
+                GL_TEXTURE_WIDTH, &beyondWidth);
+            GLfloat anisotropy = 1.0f, maximum = 1.0f;
+            if (GLEW_EXT_texture_filter_anisotropic)
+            {
+                glGetTexParameterfv(GL_TEXTURE_2D_ARRAY,
+                    GL_TEXTURE_MAX_ANISOTROPY_EXT, &anisotropy);
+                glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maximum);
+            }
+            glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+            check(label, atlas != 0 && internal == GL_SRGB8_ALPHA8 &&
+                  minFilter == GL_LINEAR_MIPMAP_LINEAR && finalWidth == 1 &&
+                  finalHeight == 1 && beyondWidth == 0 &&
+                  anisotropy >= 1.0f && anisotropy <= maximum);
+        };
+        verifyRayAtlasSampling(
+            "GL33 ray material array is sRGB with complete bounded filtering",
+            static_cast<GLuint>(controlledRays.MaterialAtlasTextureForTesting()));
+        if (computeQualityAvailable)
+            verifyRayAtlasSampling(
+                "GL43 ray material array is sRGB with complete bounded filtering",
+                static_cast<GLuint>(
+                    computeControlledRays.MaterialAtlasTextureForTesting()));
         if (computeQualityAvailable)
             check("GL43 non-white mixed-resolution textured secondary hit matches GL33",
                   computeControlledReflectionOK &&
@@ -4465,7 +4547,10 @@ public:
                     float centerAlbedo[4] = {};
                     glReadPixels(width / 2, 32, 1, 1, GL_RGBA, GL_FLOAT, centerAlbedo);
                     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-                    const float texel = std::pow(textured.texData[0] / 255.f, 2.2f);
+                    const float encoded = textured.texData[0] / 255.0f;
+                    const float texel = encoded <= 0.04045f
+                        ? encoded / 12.92f
+                        : std::pow((encoded + 0.055f) / 1.055f, 2.4f);
                     check("material first/refresh sampled texels ignore hostile row/skip layout",
                           geometryOkay && std::fabs(centerAlbedo[0] - textured.kd.x * texel) < .002f &&
                           std::fabs(centerAlbedo[1] - textured.kd.y * texel) < .002f);

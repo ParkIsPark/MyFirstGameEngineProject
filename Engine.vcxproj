@@ -81,6 +81,7 @@
     <!-- Engine: Render -->
     <ClCompile Include="Engine\Render\FGraphicsCapabilities.cpp" />
     <ClCompile Include="Engine\Render\FRenderMath.cpp" />
+    <ClCompile Include="Engine\Render\FTextureSamplingPolicy.cpp" />
     <ClCompile Include="Engine\Render\FRenderQualitySettings.cpp" />
     <ClCompile Include="Engine\Render\FRenderScene.cpp" />
     <ClCompile Include="Engine\Render\FRenderHistory.cpp" />
@@ -212,6 +213,7 @@
     <!-- Engine: Render headers -->
     <ClInclude Include="Engine\Render\FGraphicsCapabilities.h" />
     <ClInclude Include="Engine\Render\FRenderMath.h" />
+    <ClInclude Include="Engine\Render\FTextureSamplingPolicy.h" />
     <ClInclude Include="Engine\Render\FRenderQualitySettings.h" />
     <ClInclude Include="Engine\Render\FRenderOutputs.h" />
     <ClInclude Include="Engine\Render\FRenderScene.h" />

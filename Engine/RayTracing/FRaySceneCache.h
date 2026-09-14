@@ -36,7 +36,7 @@ struct FPackedRayScene
     std::vector<float> tlasInstanceIndices;
     // Eight texels per deterministic material record: diffuse/mirror,
     // ambient/shininess, specular/exact identity bits, emissive/atlas layer,
-    // combined UV tiling/wrap metadata, and logical source texture size.
+    // combined UV tiling/wrap metadata, reserved texture metadata, and optics.
     std::vector<glm::vec4> materialTexels;
     // Two texels per dense primary material identity (identity N -> N-1).
     std::vector<glm::vec4> primaryOpticsTexels;
