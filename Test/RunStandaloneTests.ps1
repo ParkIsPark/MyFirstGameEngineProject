@@ -14,6 +14,21 @@ removed on completion. No standalone main is added to Test.vcxproj.
 param([string]$Name = '', [string]$LogDirectory = '',
     [ValidateSet('','ProcessStart','NonzeroExit','Timeout','AfterStart')][string]$FailureProbe = '')
 $ErrorActionPreference = 'Stop'
+function Invoke-NativeCompiler {
+    param([string]$Executable, [string[]]$Arguments, [string]$LogPath, [switch]$Append)
+    if (-not $Append) { [IO.File]::WriteAllText($LogPath, '') }
+    $savedErrorAction = $ErrorActionPreference
+    try {
+        # Windows PowerShell 5.1 wraps native stderr as ErrorRecords. Do not let
+        # those records throw before the native command's exit code is captured.
+        $ErrorActionPreference = 'Continue'
+        & $Executable @Arguments *>> $LogPath
+        $compilerExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorAction
+    }
+    return $compilerExitCode
+}
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $root
 if ($Name -and $Name -notmatch '^[A-Za-z0-9_]+$') { throw 'Name must be a test stem' }
@@ -55,21 +70,22 @@ foreach ($test in $tests) {
         $luaObjects = @()
         foreach ($lua in $luaFiles) {
             $luaObj = Join-Path $artifactRoot ($lua.BaseName + '.o')
-            $ErrorActionPreference = 'Continue' # Preserve native compiler stderr in its log.
-            & C:/msys64/ucrt64/bin/gcc.exe -std=c17 -DLUA_USE_APICHECK -I./ThirdParty/Lua/5.4.9/src -c $lua.FullName -o $luaObj *>> $buildLog
-            $ErrorActionPreference = 'Stop'
-            if ($LASTEXITCODE -ne 0) {
-                [IO.File]::WriteAllText((Join-Path $logRoot ($stem + '.build.status.json')), (@{ ExitCode=$LASTEXITCODE } | ConvertTo-Json))
-                throw "Lua compile failed (exit $LASTEXITCODE): $($lua.Name)"
+            $compileExit = Invoke-NativeCompiler -Executable 'C:/msys64/ucrt64/bin/gcc.exe' -LogPath $buildLog -Append -Arguments @(
+                '-std=c17','-DLUA_USE_APICHECK','-I./ThirdParty/Lua/5.4.9/src','-c',$lua.FullName,'-o',$luaObj)
+            if ($compileExit -ne 0) {
+                [IO.File]::WriteAllText((Join-Path $logRoot ($stem + '.build.status.json')), (@{ ExitCode=$compileExit } | ConvertTo-Json))
+                throw "Lua compile failed (exit $compileExit): $($lua.Name)"
             }
             $luaObjects += $luaObj
         }
-        & C:/msys64/ucrt64/bin/g++.exe -std=c++17 -Wall -Wextra -I./Engine/Script -I./ThirdParty/Lua/5.4.9/src $test.FullName Engine/Script/FScriptPath.cpp Engine/Script/FLuaBindingRegistry.cpp Engine/Script/UScriptSubsystem.cpp Engine/Script/FLuaScriptCache.cpp Engine/Script/FLuaScriptInstance.cpp @luaObjects '-Wl,--wrap=__imp_GetFinalPathNameByHandleW' -o $exe *>> $buildLog
-        $compileExit = $LASTEXITCODE
+        $cppArguments = @('-std=c++17','-Wall','-Wextra','-I./Engine/Script','-I./ThirdParty/Lua/5.4.9/src',
+            $test.FullName,'Engine/Script/FScriptPath.cpp','Engine/Script/FLuaBindingRegistry.cpp',
+            'Engine/Script/UScriptSubsystem.cpp','Engine/Script/FLuaScriptCache.cpp','Engine/Script/FLuaScriptInstance.cpp') +
+            $luaObjects + @('-Wl,--wrap=__imp_GetFinalPathNameByHandleW','-o',$exe)
+        $compileExit = Invoke-NativeCompiler -Executable 'C:/msys64/ucrt64/bin/g++.exe' -Arguments $cppArguments -LogPath $buildLog -Append
     } else {
         $command = 'call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" -arch=x86 >nul && cl /nologo /utf-8 /FS /std:c++17 /EHsc /MDd /DWIN32 /D_DEBUG ' + $includeFlags + ' "' + $test.FullName + '" /Fo:"' + $obj + '" /Fe:"' + $exe + '" bin\Engine.lib /link /OPT:NOREF,NOICF /LIBPATH:lib glew32.lib freeglut.lib glfw3dll.lib opengl32.lib glu32.lib assimp-vc143-mt.lib'
-        & cmd.exe /d /c $command *> $buildLog
-        $compileExit = $LASTEXITCODE
+        $compileExit = Invoke-NativeCompiler -Executable 'cmd.exe' -Arguments @('/d','/c',$command) -LogPath $buildLog
     }
     [IO.File]::WriteAllText((Join-Path $logRoot ($stem + '.build.status.json')), (@{ ExitCode=$compileExit } | ConvertTo-Json))
     if ($compileExit -ne 0) {
