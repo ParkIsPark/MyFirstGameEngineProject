@@ -434,7 +434,6 @@ bool UGL33RayTracingBackend::UploadScene(const FPackedRayScene& packed,
     };
     if (!fits(packed.triangleTexels.size()) || !fits(packed.blasNodeTexels.size()) ||
         !fits(packed.blasTriangleIndices.size()) || !fits(packed.instanceTexels.size()) ||
-        !fits(packed.instanceIdentityTexels.size()) ||
         !fits(packed.tlasNodeTexels.size()) || !fits(packed.tlasInstanceIndices.size()) ||
         !fits(packed.materialTexels.size() + packed.primaryOpticsTexels.size()))
     {
@@ -478,7 +477,6 @@ bool UGL33RayTracingBackend::UploadScene(const FPackedRayScene& packed,
     ++stats.sceneUploadAttempts;
     GLuint tb = 0, tt = 0, nb = 0, nt = 0, ib = 0, it = 0;
     GLuint xb = 0, xt = 0, tnb = 0, tnt = 0, tib = 0, tit = 0;
-    GLuint xib = 0, xit = 0;
     GLuint mb = 0, mt = 0, atlas = 0;
     bool okay = true;
     if (uploadBLAS)
@@ -492,7 +490,6 @@ bool UGL33RayTracingBackend::UploadScene(const FPackedRayScene& packed,
     {
         ++stats.instanceUploadAttempts;
         okay = UploadTBO(GL_RGBA32F, packed.instanceTexels, xb, xt, stats) &&
-            UploadTBO(GL_RGBA32UI, packed.instanceIdentityTexels, xib, xit, stats) &&
             UploadTBO(GL_RGBA32F, packed.tlasNodeTexels, tnb, tnt, stats) &&
             UploadTBO(GL_R32F, packed.tlasInstanceIndices, tib, tit, stats);
     }
@@ -542,7 +539,6 @@ bool UGL33RayTracingBackend::UploadScene(const FPackedRayScene& packed,
     {
         DeletePair(tb, tt, stats); DeletePair(nb, nt, stats); DeletePair(ib, it, stats);
         DeletePair(xb, xt, stats); DeletePair(tnb, tnt, stats); DeletePair(tib, tit, stats);
-        DeletePair(xib, xit, stats);
         DeletePair(mb, mt, stats);
         if (atlas) { glDeleteTextures(1, &atlas); ++stats.releasedResources; }
         return false;
@@ -562,11 +558,9 @@ bool UGL33RayTracingBackend::UploadScene(const FPackedRayScene& packed,
     if (uploadInstances)
     {
         DeletePair(instanceBuffer_, instanceTexture_, stats);
-        DeletePair(instanceIdentityBuffer_, instanceIdentityTexture_, stats);
         DeletePair(tlasNodeBuffer_, tlasNodeTexture_, stats);
         DeletePair(tlasIndexBuffer_, tlasIndexTexture_, stats);
         instanceBuffer_ = xb; instanceTexture_ = xt;
-        instanceIdentityBuffer_ = xib; instanceIdentityTexture_ = xit;
         tlasNodeBuffer_ = tnb; tlasNodeTexture_ = tnt;
         tlasIndexBuffer_ = tib; tlasIndexTexture_ = tit;
         ++stats_.instanceUploads;
@@ -756,7 +750,6 @@ void UGL33RayTracingBackend::DeleteCurrentResources() noexcept
     DeletePair(blasNodeBuffer_, blasNodeTexture_, stats);
     DeletePair(blasIndexBuffer_, blasIndexTexture_, stats);
     DeletePair(instanceBuffer_, instanceTexture_, stats);
-    DeletePair(instanceIdentityBuffer_, instanceIdentityTexture_, stats);
     DeletePair(tlasNodeBuffer_, tlasNodeTexture_, stats);
     DeletePair(tlasIndexBuffer_, tlasIndexTexture_, stats);
     DeletePair(materialBuffer_, materialTexture_, stats);
@@ -773,7 +766,6 @@ void UGL33RayTracingBackend::ForgetCurrentResources() noexcept
         OwnedOutputTextureCount() +
         (triangleBuffer_ ? 2u : 0u) + (blasNodeBuffer_ ? 2u : 0u) +
         (blasIndexBuffer_ ? 2u : 0u) + (instanceBuffer_ ? 2u : 0u) +
-        (instanceIdentityBuffer_ ? 2u : 0u) +
         (tlasNodeBuffer_ ? 2u : 0u) + (tlasIndexBuffer_ ? 2u : 0u) +
         (materialBuffer_ ? 2u : 0u) + (materialAtlasTexture_ ? 1u : 0u);
     if (contextGeneration_ && contextGeneration_ != ActiveRenderTargetContextGeneration())
@@ -784,7 +776,6 @@ void UGL33RayTracingBackend::ForgetCurrentResources() noexcept
     blasNodeBuffer_ = blasNodeTexture_ = 0;
     blasIndexBuffer_ = blasIndexTexture_ = 0;
     instanceBuffer_ = instanceTexture_ = 0;
-    instanceIdentityBuffer_ = instanceIdentityTexture_ = 0;
     tlasNodeBuffer_ = tlasNodeTexture_ = 0;
     tlasIndexBuffer_ = tlasIndexTexture_ = 0;
     materialBuffer_ = materialTexture_ = materialAtlasTexture_ = 0;

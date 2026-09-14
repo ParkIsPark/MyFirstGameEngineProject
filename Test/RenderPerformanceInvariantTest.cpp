@@ -16,12 +16,90 @@
 #include "IRayTracingBackend.h"
 #include <algorithm>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <memory>
+#include <sstream>
 
 static void Require(bool value, const char* message)
 {
     if (!value) { std::cerr << "FAIL: " << message << '\n'; std::exit(1); }
+}
+
+static std::string ReadSource(const char* path)
+{
+    std::ifstream input(path, std::ios::binary);
+    Require(bool(input), path);
+    std::ostringstream text;
+    text << input.rdbuf();
+    return text.str();
+}
+
+static std::size_t CountText(const std::string& text, const std::string& needle)
+{
+    std::size_t count = 0;
+    for (std::size_t offset = 0;
+         (offset = text.find(needle, offset)) != std::string::npos;
+         offset += needle.size())
+        ++count;
+    return count;
+}
+
+static void CheckFinalRendererSourceInvariants()
+{
+    const std::string shared = ReadSource(
+        "Engine/Render/Shaders/SharedLightingShaderSource.h");
+    const std::string hardware = ReadSource(
+        "Engine/Render/Shaders/HardwareRasterShaders.h");
+    const std::string raster = ReadSource(
+        "Engine/Render/Shaders/RasterLightingShaders.h");
+    const std::string fragment = ReadSource(
+        "Engine/Render/Shaders/RayEffectsFragmentShaders.h");
+    const std::string compute = ReadSource(
+        "Engine/Render/Shaders/RayEffectsComputeShaders.h");
+    Require(CountText(shared, "void evaluatePointLight(") == 1 &&
+        CountText(shared, "PointLightFunctions()") == 5 &&
+        hardware.find("void evaluatePointLight(") == std::string::npos &&
+        raster.find("void evaluatePointLight(") == std::string::npos &&
+        fragment.find("void evaluatePointLight(") == std::string::npos &&
+        compute.find("void evaluatePointLight(") == std::string::npos,
+        "all raster/ray shaders consume one shared point-light implementation");
+
+    const std::string presentation = ReadSource(
+        "Engine/Render/Shaders/HybridPresentationShaders.h");
+    Require(CountText(presentation, "vec3 linearToSRGB(") == 1 &&
+        CountText(presentation, "linearToSRGB(mapped)") == 1 &&
+        hardware.find("linearToSRGB") == std::string::npos &&
+        raster.find("linearToSRGB") == std::string::npos &&
+        fragment.find("linearToSRGB") == std::string::npos &&
+        compute.find("linearToSRGB") == std::string::npos,
+        "presentation owns the single linear-to-sRGB conversion");
+
+    const std::string outputs = ReadSource("Engine/Render/FRenderOutputs.h");
+    const std::string hybrid = ReadSource(
+        "Engine/Render/Shaders/HybridPresentationShaders.h");
+    Require(outputs.find("shadowVisibilityTarget") == std::string::npos &&
+        hybrid.find("shadowVisibilityTarget") == std::string::npos &&
+        hybrid.find("raster * visibility") == std::string::npos,
+        "shadows cannot regress to a whole-raster visibility multiply");
+
+    const std::string geometry = ReadSource("Engine/Render/UHardwareRasterizer.cpp");
+    Require(geometry.find("uEnvironmentTint") == std::string::npos &&
+        geometry.find("uSkyHorizon") == std::string::npos &&
+        geometry.find("uSkyZenith") == std::string::npos &&
+        geometry.find("uSkyExponent") == std::string::npos &&
+        geometry.find("uAmbientStrength") == std::string::npos &&
+        geometry.find("uHasEnvironmentTexture") == std::string::npos,
+        "geometry pass does not upload obsolete environment/ambient uniforms");
+
+    const std::string gl33 = ReadSource("Engine/Render/UGL33RayTracingBackend.cpp");
+    const std::string gl33Header = ReadSource("Engine/Render/UGL33RayTracingBackend.h");
+    Require(gl33.find("instanceIdentityTexels") == std::string::npos &&
+        gl33.find("instanceIdentityBuffer_") == std::string::npos &&
+        gl33.find("instanceIdentityTexture_") == std::string::npos &&
+        gl33Header.find("instanceIdentityBuffer_") == std::string::npos &&
+        gl33Header.find("instanceIdentityTexture_") == std::string::npos,
+        "GL3.3 identity uses packed instance texel 3 without a redundant typed TBO");
 }
 
 class UploadAdapter final : public IMeshGPUUploadAdapter
@@ -68,6 +146,7 @@ public:
 
 int main()
 {
+    CheckFinalRendererSourceInvariants();
     for (int count : {1, 100, 1000})
     {
         std::unique_ptr<UMesh> cube(UMesh::GenerateCube(glm::vec3(1.0f)));

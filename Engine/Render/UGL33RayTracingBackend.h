@@ -55,7 +55,6 @@ private:
     unsigned blasNodeBuffer_ = 0, blasNodeTexture_ = 0;
     unsigned blasIndexBuffer_ = 0, blasIndexTexture_ = 0;
     unsigned instanceBuffer_ = 0, instanceTexture_ = 0;
-    unsigned instanceIdentityBuffer_ = 0, instanceIdentityTexture_ = 0;
     unsigned tlasNodeBuffer_ = 0, tlasNodeTexture_ = 0;
     unsigned tlasIndexBuffer_ = 0, tlasIndexTexture_ = 0;
     unsigned materialBuffer_ = 0, materialTexture_ = 0;

@@ -1,6 +1,54 @@
 # Hardware raster and secondary ray effects
 
-This is the current rendering and submission map. Earlier design plans are historical records. The normal Editor and Game renderer uses hardware raster primary visibility, raster lighting, optional secondary ray effects, and composite. It never renders a CPU image to bridge the normal frame into OpenGL.
+This is the current rendering and submission map. Earlier design plans are historical records. The two normal product modes are **Raster** and **Raster + Ray Effects**. Both Editor and Game use hardware raster primary visibility; the latter adds selected secondary shadows, GI, reflection, and clear-glass transport. CPU software raster and whole-frame pure GPU ray tracing are deprecated, developer-only teaching routes. The normal frame never renders a CPU image to bridge into OpenGL.
+
+## Exact frame graph and color contract
+
+`internalSize = outputSize * SSAA`, where SSAA is 1 or 2. Every scene-space pass uses the internal size; only the last pass resolves to output size.
+
+```text
+UHardwareRasterizer::RenderGeometry
+  -> UHardwareGBuffer (coverage/position, geometric normal + ambient.r,
+     shading normal/model, albedo/shininess, specular/mirror,
+     exact object/material identity, precomputed direct + ambient.g,
+     emissive + ambient.b, depth)
+URasterLightingPass::Render
+  -> RGBA16F environmentAmbientTarget + RGBA16F unshadowedDirectTarget
+FRayEffectsScheduler::Execute (only when requested)
+  -> raw shadowedDirectTarget + GI target + optical target
+URayEffectsReconstruction::Reconstruct
+  -> temporal shadow/GI history, 2-pass bilateral shadow, 3-pass A-trous GI
+UHybridPresentationPass::CompositeHDR
+  -> RGBA16F linear HDR
+UHybridPresentationPass::Present
+  -> linear SSAA resolve -> exposure -> ACES fitted -> linearToSRGB once
+```
+
+The point-light implementation is injected from `Shaders/SharedLightingShaderSource.h` into hardware Flat/Gouraud pre-lighting, raster Phong, GL3.3 fragment rays, and GL4.3 compute rays:
+
+```text
+d2 = max(dot(lightPosition - position, lightPosition - position), 0.01)
+radiance = lightSource / d2
+diffuse = albedo * radiance * max(dot(N,L), 0)
+specular = specularColor * radiance * pow(max(dot(N,normalize(L+V)),0), max(shininess,1))
+direct = diffuse + specular
+shadowedDirect = sum(lightVisibility[i] * direct[i])
+```
+
+Composition never multiplies the whole raster result by visibility:
+
+```text
+kt = translucent ? 1 - clamp(opacity,0,1) : 0
+kr = (1-kt) * clamp(LegacyMirror * ReflectionStrength,0,1)
+kl = 1-kt-kr
+local = environmentAmbient + selectedDirect + GI
+HDR = emissive + kl*local + optical.rgb
+optical.rgb = kr*reflection + kt*(Fresnel*reflection + (1-Fresnel)*Beer*refraction)
+```
+
+`selectedDirect` is reconstructed shadowed direct when valid, otherwise raster unshadowed direct. Missing GI is black. Missing optical contribution uses alpha 1 and RGB black, preserving fully local opaque rendering. An uncovered raster-lighting pixel contains procedural/HDRI sky in ambient, direct RGB `(0,0,0)`, and direct alpha `1`; alpha is intentionally initialized even though direct-light meaning is RGB.
+
+Presentation evaluates `exposed = HDR * exp2(ExposureEV)`, applies the ACES fitted curve, then performs the engine's only linear-to-sRGB conversion. Base-color textures are uploaded as sRGB and decoded once by sampling. HDR environments and numeric buffers remain linear; no material/ray shader applies manual gamma.
 
 ## Build, capabilities and routing
 
@@ -49,7 +97,8 @@ frame -> EditorEngine::Render -> DrawUI -> DrawViewport
         -> URasterLightingPass::Render
         -> optional FRayEffectsScheduler::Execute
            -> factory -> GL33 fragment or GL43 Compute secondary backend
-        -> URasterLightingPass::Composite -> target
+        -> URayEffectsReconstruction::Reconstruct
+        -> UHybridPresentationPass::CompositeHDR -> Present -> target
      -> FRenderTarget::End (restore caller FBO/viewport)
   -> ImGui::Image(viewportTarget_.ColorTexture())
 ```
@@ -95,6 +144,31 @@ The deterministic performance fixture creates exactly 1, 100 and 1000 Actors ref
 
 Ray scene caching similarly keeps one mesh-local BLAS per identity/revision and separates instance, material and output-size updates. RT master off has no ray pass; turning it off after use stops work while previously created resources may stay cached. Geometry, material, HDRI, ray outputs and target attachments are released by their owning objects. Context changes invalidate generation-labelled GL names; renderers reject mismatched target generations.
 
+GL3.3 stores exact object/material identity bits in instance texel 3 and reads them with `floatBitsToUint`; it therefore has no separate typed instance-identity TBO. GL4.3 still consumes `FPackedRayScene::instanceIdentityTexels` through its typed `uvec4` SSBO. This is intentional backend packing, not a logical-output difference. Both backends are required to match effect masks and float probes within `0.015 + 0.025 * max(abs(a), abs(b))` per channel.
+
+## Temporal history, glass, quality, and fallback
+
+The reset-on-change history signature covers output/internal dimensions; camera view and projection; geometry, instance transform, material, and texture revisions; point-light positions/source values; environment texture/revision and environment settings; feature mask; shadow/GI/reflection/exposure/SSAA quality; selected backend; and OpenGL context generation. Backend failure/fallback, shutdown, resize, SSAA change, and context recreation also reset history. A reset contributes frame index 0; an unchanged signature advances toward the configured 32-frame running-average cap. There is no motion-vector reprojection, so camera/object changes reset immediately rather than ghosting prior pixels. Identity, depth, and geometric-normal rejection prevent reconstruction from crossing object and strong geometric edges. Mirror/refraction remains deterministic and is not spatially blurred.
+
+Clear glass uses `Blend Mode = Translucent`, `Opacity`, `Refraction`, `Transmittance Color`, `Transmittance Distance`, and `Cast Ray Traced Shadows`. The absorption conversion is `sigmaA=-log(clamp(color,.0001,1))/max(distance,.0001)` and `Beer=exp(-sigmaA*travelledDistance)`. Transport supports one closed-volume entry, one same-mesh exit, one continuation hit/environment miss, Schlick Fresnel, Snell refraction, and total-internal-reflection fallback. An open/malformed volume falls back to reflection and emits one deduplicated diagnostic. Transmissive shadows apply Fresnel and Beer attenuation without bending the shadow ray. Masked/general alpha blending, sorting, nested dielectrics, recursive mirrors, rough/frosted optics, metallic PBR, and caustics are out of scope.
+
+`Legacy Mirror` is the transitional compatibility scalar `mirrorFactor`; a value of 1 replaces local light when ray reflections are available. Clear glass does not overload it. When the requested ray backend is unavailable or a pass fails, mirror and glass weights fall back to local 1 / mirror 0 / transmission 0, shadow falls back to raster direct, and GI/optical outputs are neutral. No optional failure may blacken or remove the raster surface.
+
+Defaults and accepted ranges are:
+
+| Setting | Default | Accepted |
+|---|---:|---:|
+| SSAA | 1 | 1 or 2 |
+| ShadowSamples | 4 | 1..16 |
+| ShadowSoftness | 0.05 | nonnegative |
+| GISamples | 4 | 0..32 |
+| GIBounces | 1 | 0..4 |
+| GIStrength | 1.0 | artistic multiplier |
+| ReflectionStrength | 1.0 | 0..1 |
+| ExposureEV | 0.0 | -16..16 |
+| TemporalFrames | 32 | 1..32 |
+| Anisotropy | 8 | 1..16, capped by device |
+
 ## Telemetry and verification
 
 Read `UWorldRenderer::Stats()` (or Editor/Game `RendererStats()`) in a debugger. These getters expose read-only snapshots; they do not change render decisions or perform GL reads. Keep a value copy before the next frame to compare deltas.
@@ -114,12 +188,13 @@ Read `UWorldRenderer::Stats()` (or Editor/Game `RendererStats()`) in a debugger.
 | `cpuFramebufferGenerations`, `cpuReadbacks`, `cpuFramebufferUploads` | Zero in every normal hardware frame. |
 | `activeRayBackend`, `backendReason` | Effective backend and selected/fallback/disable/failure explanation. |
 
-`--render-performance-selftest` uses real OpenGL and production UWorldRenderer, tests 1/100/1000 shared cubes, raster/Compatible/Auto routes, off-after-on, ineligible backend, three BeginPlay/EndPlay cycles for each backend, repeated 64x64 -> 96x64 -> 64x64 targets, shutdown and restart. It also runs bounded production Editor and Game hooks with RT off/on, isolating local settings in a temporary directory. Stable live counts with all three effects and a textured/HDRI scene are geometry 1, G-buffer textures 9 + FBO 1, material texture 1, HDRI 1, raster output 1 + FBO 1, ray output textures 3, BLAS 1, target attachments 3. These are structural ownership invariants, not a GPU byte-memory or timing benchmark.
+`--render-performance-selftest` uses real OpenGL and production UWorldRenderer, tests 1/100/1000 shared cubes, raster/Compatible/Auto routes, off-after-on, ineligible backend, three BeginPlay/EndPlay cycles for each backend, repeated 64x64 -> 96x64 -> 64x64 targets, shutdown and restart. It also runs bounded production Editor and Game hooks with RT off/on, isolating local settings in a temporary directory. After warm-up, 100 size-stable frames must add zero ray GL allocations, buffer/texture uploads, or reconstruction allocations. Stable live counts with all effects and a textured/HDRI scene are geometry 1, G-buffer textures 9 + FBO 1, material texture 1, HDRI 1, raster outputs 2 + FBO 1, hybrid HDR 1 + FBO 1, ray output textures 3, reconstruction textures 8 + FBO 1, BLAS 1, target attachments 3. These are structural ownership invariants, not a GPU byte-memory or timing benchmark.
 
 From repository root after `Engine.sln Debug|Win32`:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneRunnerSelfTest.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File Test/ScriptPackagingTest.ps1
 .\bin\Test.exe --meshrevisiontest
 .\bin\Test.exe --fbxtest
@@ -128,6 +203,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File Test/ScriptPackagingTest.ps1
 .\bin\Test.exe --raster-lighting-selftest=lighting.ppm
 .\bin\Test.exe --ray-effects-selftest=rays.ppm
 .\bin\Test.exe --render-performance-selftest
+.\bin\Test.exe --ray-compute-init-selftest
 ```
 
 Standalone tests own their own main and are outside Test.vcxproj. The runner documents compiler/linker commands and bounds each run to 60 seconds. Its outer finally removes only its dedicated artifact directory on compile failure or exception; per-process finally terminates only its owned process when necessary, waits, drains stdout/stderr and disposes handles. Logs and original compiler/process status survive. All gcc, g++ and cmd/MSVC calls share stderr-safe invocation with immediate exit capture for Windows PowerShell 5.1. Run `powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneRunnerSelfTest.ps1` for actual C and C++ compiler failures in all three branches plus safe start/nonzero/timeout/post-start exception probes. No arbitrary command-injection parameter is provided. Integrated gates exit after their checks; never run the no-argument interactive editor as a regression gate. Ray/hardware/lighting switches require the documented `=output.ppm` argument. The PPM gates intentionally read test output; production frames do not. Delete generated verification images after inspection. Serial generated builds should alternate `/t:Build /p:Configuration=Editor`, Game, Editor, Game with `/p:Platform=Win32 /m:1 /nr:false` and `_CL_=/FS`; both EXEs must stay present with unchanged hashes on the final up-to-date builds.
@@ -154,7 +230,9 @@ Paths are relative to the repository root; paired headers define the contracts i
 | `Engine/Render/FRenderScene.cpp/.h`, `FRenderOutputs.h` | Immutable per-call scene and backend-neutral output semantics. |
 | `Engine/Render/UGPUMeshCache.cpp/.h`, `FGPUMeshResource.h` | Identity/revision cache, upload adapter, ownership counters. |
 | `Engine/Render/UHardwareRasterizer.cpp/.h`, `UHardwareGBuffer.cpp/.h` | Real VAO/VBO/EBO uploads, indexed instance/material draws, GPU attachments. |
-| `Engine/Render/URasterLightingPass.cpp/.h`, `Shaders/HardwareRasterShaders.h`, `Shaders/RasterLightingShaders.h` | Hardware shading, environment, lighting and final composite. |
+| `Engine/Render/URasterLightingPass.cpp/.h`, `Shaders/HardwareRasterShaders.h`, `Shaders/RasterLightingShaders.h`, `Shaders/SharedLightingShaderSource.h` | Split ambient/direct raster lighting and the one shared point-light source. |
+| `Engine/Render/URayEffectsReconstruction.cpp/.h`, `FRenderHistory.cpp/.h` | History signatures, temporal accumulation, bilateral/A-trous reconstruction, invalidation. |
+| `Engine/Render/UHybridPresentationPass.cpp/.h`, `Shaders/HybridPresentationShaders.h`, `FRenderMath.cpp/.h` | Optical/local energy weights, linear HDR composition, SSAA resolve, exposure, ACES, sole display conversion. |
 | `Engine/Render/IRayTracingBackend.cpp/.h` | Scheduler, fallback/failure latching, backend contract and cumulative totals. |
 | `Engine/Render/UGL33RayTracingBackend.cpp/.h`, `Shaders/RayEffectsFragmentShaders.h` | Secondary fragment ray effects with buffer textures. |
 | `Engine/Render/UGL43RayTracingBackend.cpp/.h`, `Shaders/RayEffectsComputeShaders.h` | Secondary compute effects, SSBO/images and memory barrier. |
@@ -169,7 +247,7 @@ Paths are relative to the repository root; paired headers define the contracts i
 | `Scripts/GenerateProject.ps1`, `Template/Template.vcxproj`, `Template/Package.ps1` | Independent Editor/Game artifacts, linked/package paths, Lua packaging. |
 | `Test/RenderPerformanceInvariantTest.cpp`, `RunStandaloneTests.ps1`, `RunStandaloneRunnerSelfTest.ps1`, `main.cpp`, `Fixtures/box.fbx` | Structural tests, standalone/failure-cleanup recipes, real-GL gates and deterministic import fixture. |
 
-Assignment item 1, cube creation/draw: `EditorEngine::AddActor("Cube", name)` -> `UMesh::GenerateCube` -> UMeshComponent/Actor -> `UWorld::Spawn` -> shared extraction/cache/hardware route. Item 2, multiple cubes: Actor list -> one immutable extraction -> shared cache for shared asset identities -> one indexed draw per cube instance. Item 3, current click action: clicking Add/Cube uses `camera.eye + normalize(-camera.w) * 8`; the resulting cube enters the same path. **Arbitrary viewport-surface click-position placement is not implemented by this migration.** Left-click ray selection and camera-forward Add are not a completed literal click-position rubric.
+Assignment item 1, cube creation/draw: `EditorEngine::AddActor("Cube", name)` -> `UMesh::GenerateCube` -> `UMeshComponent`/`AActor` -> `UWorld::Spawn` -> `ExtractRenderScene` -> `UWorldRenderer::Render` -> `UHardwareRasterizer::RenderGeometry` -> `UGPUMeshCache::Acquire` -> `glDrawElements`. Item 2, multiple cubes: Actor list -> one immutable extraction -> shared cache for shared asset identities -> one indexed draw per cube instance. Item 3, current click action: viewport selection reaches `EditorEngine::PickActor`; clicking Add/Cube uses `camera.eye + normalize(-camera.w) * 8`, then follows the draw path above. **Arbitrary viewport-surface click-position placement is not implemented by this migration.** Left-click ray selection and camera-forward Add are not a completed literal click-position rubric.
 
 Rotation is authored in C++ `AActor::Tick`, reached through `UWorld::Tick`. The Actor-only Lua milestone exposes `Engine.Log` only. Its lifecycle pointer is `Engine::Run/BootWorld` (or Editor CopyWorld/OnPlay) -> `UWorld::BeginPlay/Tick/EndPlay` -> `AActor::Dispatch*` -> `UScriptComponent` -> isolated `FLuaScriptInstance` callbacks. World format 3 preserves script attachment configuration; VM/closures are runtime-only. See [Lua Actor scripting](../scripting/lua-actor-scripting.md).
 

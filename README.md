@@ -1,6 +1,6 @@
 # MyFirstGameEngine
 
-An OpenGL engine and editor for Konkuk University Computer Graphics coursework. Editor and Game share one hardware renderer: indexed mesh draws create primary visibility in a GPU G-buffer, raster lighting shades it, and a composite writes the viewport or game target. Ray tracing is off by default. Enabling it adds optional ray-traced shadows, GI, and reflections to the same raster primary image.
+An OpenGL engine and editor for Konkuk University Computer Graphics coursework. Editor and Game share one hardware renderer with two normal modes: **Raster** and **Raster + Ray Effects**. Indexed mesh draws create primary visibility in a GPU G-buffer; optional secondary shadows, GI, reflection, and clear-glass transport augment that raster image. Ray effects are off by default. CPU software raster and whole-frame pure GPU ray tracing are deprecated, developer-only teaching routes.
 
 The supported build is Windows, Visual Studio 2022, C++17, **Win32 (32-bit)**. Install the VS C++ workload and Windows SDK. Dependency headers, libraries, runtime DLLs, and upstream Lua 5.4.9 are vendored; no separate dependency package installation is needed. A driver providing **OpenGL 3.3 compatibility** is the minimum; **4.3 compatibility** is preferred for Compute. Context creation tries 4.3 then 3.3; an actual context below 3.3 is a fatal startup error.
 
@@ -30,7 +30,7 @@ The toolbar offers Flat/Gouraud/Phong shading and named ray features. Hardware r
 | Compatible | Explicit OpenGL 3.3 fragment backend, even on a 4.3-capable driver. |
 | Compute | Requires the 4.3 Compute/SSBO entry points. Unavailable or failed initialization disables ray effects and retains raster output; forced Compute does not silently select Compatible. |
 
-Materials support diffuse/specular/emissive values, shininess, diffuse textures and component UV tiling. Multiple point lights and environment/HDRI contribute to lighting; mirror response uses optional ray reflections. The mesh cache is keyed by immutable asset identity and explicit geometry revision: 1, 100 or 1000 Actors sharing one cube upload one geometry, then submit one indexed draw per cube. Unchanged frames and transform edits never reupload its vertices or indices. Editing geometry requires `MarkGeometryDirty`/`FinalizeGeometry`.
+Materials support diffuse/specular/emissive values, shininess, diffuse textures and component UV tiling. Multiple inverse-square point lights and environment/HDRI contribute in linear HDR. **Legacy Mirror** is a transitional compatibility control for perfect ray reflection. Clear glass instead uses Unreal-familiar `Blend Mode = Translucent`, `Opacity`, `Refraction`, `Transmittance Color`, `Transmittance Distance`, and `Cast Ray Traced Shadows`; it is closed-volume dielectric transport, not general alpha blending. The mesh cache is keyed by immutable asset identity and explicit geometry revision: 1, 100 or 1000 Actors sharing one cube upload one geometry, then submit one indexed draw per cube. Unchanged frames and transform edits never reupload its vertices or indices. Editing geometry requires `MarkGeometryDirty`/`FinalizeGeometry`.
 
 Render Settings keeps separate Editor and Game quality profiles in `Config/EditorSettings.ini` and `Config/GameSettings.ini`. **Play** runs a cloned world in the editor; **Stop** ends it. **Play (Window)** saves a temporary world and starts the current Editor executable with `--game`, which still uses GameEngine and the shared renderer.
 
@@ -58,6 +58,7 @@ Attach Lua through Details / Add Component / Script Component, then assign a `.l
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneTests.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File Test/RunStandaloneRunnerSelfTest.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File Test/ScriptPackagingTest.ps1
 .\bin\Test.exe --meshrevisiontest
 .\bin\Test.exe --deprecated-raytracer-lifecycle-selftest
@@ -65,6 +66,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File Test/ScriptPackagingTest.ps1
 .\bin\Test.exe --raster-lighting-selftest=lighting.ppm
 .\bin\Test.exe --ray-effects-selftest=rays.ppm
 .\bin\Test.exe --render-performance-selftest
+.\bin\Test.exe --ray-compute-init-selftest
 ```
 
 These bounded gates cover import/revision, migration, Lua, deprecated isolation, real hardware shading, secondary ray effects, 1/100/1000 shared cubes, and production Editor/Game routes. The PPM gates deliberately read test images; normal rendering does not. `--demo` and `--hw6` are interactive educational/regression viewers of earlier coursework.

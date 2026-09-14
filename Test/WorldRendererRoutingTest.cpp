@@ -5,6 +5,7 @@
 // $cmd = 'call "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat" -arch=x86 >nul && cl /nologo /std:c++17 /EHsc /MDd /DWIN32 /D_DEBUG /Iinclude ' + ($includes -join ' ') + ' Test\WorldRendererRoutingTest.cpp /Fe:WorldRendererRoutingTest.exe bin\Engine.lib /link /LIBPATH:lib glew32.lib freeglut.lib glfw3dll.lib opengl32.lib glu32.lib assimp-vc143-mt.lib'; & cmd.exe /d /c $cmd
 // $env:Path = "$PWD\bin;$env:Path"; .\WorldRendererRoutingTest.exe
 #include "FRenderOutputs.h"
+#include "FRenderMath.h"
 #include "FRenderScene.h"
 #include "FRenderTarget.h"
 #include "FDeprecatedWorldRenderExecutor.h"
@@ -413,6 +414,17 @@ void CheckNeutralRayOutputs()
     sample.objectIdentity = 4;
     sample.materialIdentity = 2;
     assert(sample.valid && sample.coverage == 1.0f && sample.depth == 0.5f);
+
+    const FMaterialOpticalWeights mirrorFallback =
+        ResolveMaterialOpticalWeights(false, 1.0f, 1.0f, 1.0f, false);
+    const FMaterialOpticalWeights glassFallback =
+        ResolveMaterialOpticalWeights(true, 0.0f, 0.0f, 1.0f, false);
+    assert(Near(mirrorFallback.local, 1.0f) &&
+           Near(mirrorFallback.mirror, 0.0f) &&
+           Near(mirrorFallback.transmission, 0.0f));
+    assert(Near(glassFallback.local, 1.0f) &&
+           Near(glassFallback.mirror, 0.0f) &&
+           Near(glassFallback.transmission, 0.0f));
 }
 
 void CheckRuntimeBackendChangesUseCurrentWorldRequest()

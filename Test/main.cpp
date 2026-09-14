@@ -1013,8 +1013,8 @@ public:
             scene, ContextGeneration(), &diagnostic);
         check("Phong geometry includes lighting interpolants",
               preparedInitialEnvironment && rasterizer.RenderGeometry(
-                  scene, quality, cache, gbuffer, lighting.EnvironmentTexture(),
-                  ContextGeneration(), &diagnostic));
+                  scene, quality, cache, gbuffer, ContextGeneration(),
+                  &diagnostic));
         cache.ReleaseUnused();
         FRasterLightingOutput lit;
         check("Phong G-buffer shades into HDR output",
@@ -1203,7 +1203,7 @@ public:
                 frameScene, ContextGeneration(), &diagnostic);
             const bool geometryOK = environmentOK && rasterizer.RenderGeometry(
                 frameScene, frameQuality, cache, gbuffer,
-                lighting.EnvironmentTexture(), ContextGeneration(), &diagnostic);
+                ContextGeneration(), &diagnostic);
             cache.ReleaseUnused();
             FRasterLightingOutput frameLighting;
             const bool lightingOK = geometryOK && lighting.Render(
@@ -1249,6 +1249,8 @@ public:
             glm::vec3 environmentAmbient = glm::vec3(0.0f);
             glm::vec3 unshadowedDirect = glm::vec3(0.0f);
             glm::vec3 emissive = glm::vec3(0.0f);
+            glm::vec4 cornerEnvironmentAmbient = glm::vec4(0.0f);
+            glm::vec4 cornerUnshadowedDirect = glm::vec4(0.0f);
         };
         auto renderSplitProbe = [&](FRenderScene& probeScene,
                                     const FRenderQuality& probeQuality)
@@ -1259,7 +1261,7 @@ public:
                 probeScene, ContextGeneration(), &diagnostic);
             const bool geometryOK = environmentOK && rasterizer.RenderGeometry(
                 probeScene, probeQuality, cache, gbuffer,
-                lighting.EnvironmentTexture(), ContextGeneration(), &diagnostic);
+                ContextGeneration(), &diagnostic);
             cache.ReleaseUnused();
             FRasterLightingOutput split;
             probe.valid = geometryOK && lighting.Render(
@@ -1273,9 +1275,15 @@ public:
                 glReadBuffer(GL_COLOR_ATTACHMENT0);
                 glReadPixels(32, 32, 1, 1, GL_RGBA, GL_FLOAT, pixel);
                 probe.environmentAmbient = glm::vec3(pixel[0], pixel[1], pixel[2]);
+                glReadPixels(0, 0, 1, 1, GL_RGBA, GL_FLOAT, pixel);
+                probe.cornerEnvironmentAmbient = glm::vec4(
+                    pixel[0], pixel[1], pixel[2], pixel[3]);
                 glReadBuffer(GL_COLOR_ATTACHMENT1);
                 glReadPixels(32, 32, 1, 1, GL_RGBA, GL_FLOAT, pixel);
                 probe.unshadowedDirect = glm::vec3(pixel[0], pixel[1], pixel[2]);
+                glReadPixels(0, 0, 1, 1, GL_RGBA, GL_FLOAT, pixel);
+                probe.cornerUnshadowedDirect = glm::vec4(
+                    pixel[0], pixel[1], pixel[2], pixel[3]);
                 glBindFramebuffer(GL_READ_FRAMEBUFFER, gbuffer.Framebuffer());
                 glReadBuffer(gbuffer.ColorAttachment(EHardwareGBufferSemantic::Emissive));
                 glReadPixels(32, 32, 1, 1, GL_RGBA, GL_FLOAT, pixel);
@@ -1323,6 +1331,9 @@ public:
               energyTwo > 0.0f && energyFour > 0.0f &&
               std::fabs(energyOne / energyTwo - 4.0f) < 0.08f &&
               std::fabs(energyOne / energyFour - 16.0f) < 0.32f);
+        std::printf("visual-probe distance-light E1=%.6f E2=%.6f E4=%.6f ratios=(%.6f,%.6f)\n",
+            energyOne, energyTwo, energyFour, energyOne / energyTwo,
+            energyOne / energyFour);
 
         FRenderScene ambientEmissiveScene = distanceScene;
         ambientEmissiveScene.pointLights.clear();
@@ -1336,6 +1347,19 @@ public:
               ambientEmissive.environmentAmbient.r < 0.2f &&
               ambientEmissive.emissive.r > 0.19f &&
               glm::length(ambientEmissive.unshadowedDirect) < 0.001f);
+        check("uncovered raster MRT keeps sky/ambient, neutral direct RGB, and direct alpha one",
+              ambientEmissive.cornerEnvironmentAmbient.r > 0.0f &&
+              glm::length(glm::vec3(ambientEmissive.cornerUnshadowedDirect)) < 0.001f &&
+              std::fabs(ambientEmissive.cornerUnshadowedDirect.a - 1.0f) < 0.001f);
+        std::printf("visual-probe uncovered-mrt ambient=(%.6f,%.6f,%.6f,%.6f) direct=(%.6f,%.6f,%.6f,%.6f)\n",
+            ambientEmissive.cornerEnvironmentAmbient.r,
+            ambientEmissive.cornerEnvironmentAmbient.g,
+            ambientEmissive.cornerEnvironmentAmbient.b,
+            ambientEmissive.cornerEnvironmentAmbient.a,
+            ambientEmissive.cornerUnshadowedDirect.r,
+            ambientEmissive.cornerUnshadowedDirect.g,
+            ambientEmissive.cornerUnshadowedDirect.b,
+            ambientEmissive.cornerUnshadowedDirect.a);
 
         FRenderScene hdrScene = distanceScene;
         hdrScene.meshes.front().materialOverride->emissive = glm::vec3(2.0f);
@@ -1461,8 +1485,7 @@ public:
         cache.BeginFrame();
         glActiveTexture(GL_TEXTURE0 - 1);
         const bool hostilePreexistingErrorDrained = rasterizer.RenderGeometry(
-            scene, quality, cache, gbuffer, lighting.EnvironmentTexture(),
-            ContextGeneration(), &diagnostic);
+            scene, quality, cache, gbuffer, ContextGeneration(), &diagnostic);
         cache.ReleaseUnused();
         GLint activeAfterHostileError = 0;
         glGetIntegerv(GL_ACTIVE_TEXTURE, &activeAfterHostileError);
@@ -2541,8 +2564,7 @@ public:
         const bool prepared = lighting.PrepareEnvironment(
             scene, ContextGeneration(), &diagnostic);
         const bool geometry = prepared && rasterizer.RenderGeometry(
-            scene, quality, meshCache, gbuffer, lighting.EnvironmentTexture(),
-            ContextGeneration(), &diagnostic);
+            scene, quality, meshCache, gbuffer, ContextGeneration(), &diagnostic);
         meshCache.ReleaseUnused();
         FRasterLightingOutput lit;
         const bool litOK = geometry && lighting.Render(scene, quality, gbuffer,
@@ -2775,7 +2797,7 @@ public:
         scene.meshes.front().materialOverride->mirrorFactor = 0.0f;
         meshCache.BeginFrame();
         const bool matteGeometry = rasterizer.RenderGeometry(scene, quality, meshCache,
-            gbuffer, lighting.EnvironmentTexture(), ContextGeneration(), &diagnostic);
+            gbuffer, ContextGeneration(), &diagnostic);
         meshCache.ReleaseUnused();
         const bool matteLit = matteGeometry && lighting.Render(scene, quality, gbuffer,
             ContextGeneration(), lit, &diagnostic);
@@ -2801,7 +2823,7 @@ public:
         scene.meshes.front().materialOverride->mirrorFactor = 0.8f;
         meshCache.BeginFrame();
         const bool restoredGeometry = rasterizer.RenderGeometry(scene, quality, meshCache,
-            gbuffer, lighting.EnvironmentTexture(), ContextGeneration(), &diagnostic);
+            gbuffer, ContextGeneration(), &diagnostic);
         meshCache.ReleaseUnused();
         const bool restoredLit = restoredGeometry && lighting.Render(scene, quality, gbuffer,
             ContextGeneration(), lit, &diagnostic);
@@ -3350,6 +3372,9 @@ public:
               coloredShadowPixel.r < 0.01f && coloredShadowPixel.g > 0.1f &&
               coloredShadowPixel.b < 0.01f &&
               std::fabs(coloredShadowPixel.a - 1.0f) < 0.001f);
+        std::printf("visual-probe per-light-shadow rgba=(%.6f,%.6f,%.6f,%.6f)\n",
+            coloredShadowPixel.r, coloredShadowPixel.g, coloredShadowPixel.b,
+            coloredShadowPixel.a);
 
         GLuint precomputedDirectTexture = 0;
         const GLfloat precomputedDirect[4] = {0.8f, 0.6f, 0.4f, 1.0f};
@@ -3423,6 +3448,9 @@ public:
               controlledError.z < 0.003f);
         check("full mirror optical alpha removes local diffuse contribution",
               controlledReflectionOK && std::fabs(controlledPixel.a) < 0.001f);
+        std::printf("visual-probe full-mirror optical=(%.6f,%.6f,%.6f) localWeight=%.6f\n",
+            controlledPixel.r, controlledPixel.g, controlledPixel.b,
+            controlledPixel.a);
 
         UGL43RayTracingBackend computeControlledRays;
         glm::vec4 computeControlledPixel(0.0f);
@@ -3633,7 +3661,8 @@ public:
         glassMaterial.blendMode = EMaterialBlendMode::Translucent;
         glassMaterial.opacity = 0.0f;
         glassMaterial.refraction = 1.52f;
-        glassMaterial.transmittanceColor = glm::vec3(1.0f);
+        glassMaterial.transmittanceColor = glm::vec3(0.25f, 0.5f, 1.0f);
+        glassMaterial.transmittanceDistance = 1.0f;
         glassMaterial.castRayTracedShadows = true;
         Material markerMaterial;
         markerMaterial.emissive = glm::vec3(1.0f, 0.0f, 0.0f);
@@ -3666,6 +3695,9 @@ public:
         check("open transmissive mesh renders reflection fallback on GL33",
               openFallback33.first && openFallback33.second.g > 0.9f &&
               openFallback33.second.r < 0.05f);
+        std::printf("visual-probe open-glass-reflection-fallback rgb=(%.6f,%.6f,%.6f)\n",
+            openFallback33.second.r, openFallback33.second.g,
+            openFallback33.second.b);
         if (computeQualityAvailable)
             check("GL43 open-volume reflection fallback matches GL33",
                   openFallback43.first && openFallback43.second.g > 0.9f &&
@@ -3702,7 +3734,7 @@ public:
         FRenderScene shadowSkipScene;
         shadowSkipScene.camera.eye = glm::vec3(0.0f, 0.0f, 1.0f);
         shadowSkipScene.pointLights = {{glm::vec3(0.0f, 0.0f, 4.0f),
-                                        glm::vec3(16.0f, 0.0f, 0.0f)}};
+                                        glm::vec3(16.0f)}};
         FRayEffectInputs shadowSkipInputs = controlledInputs;
         shadowSkipInputs.scene = &shadowSkipScene;
         shadowSkipInputs.features.rayTracedShadows = true;
@@ -3716,10 +3748,15 @@ public:
             ? renderControlledPixel(computeControlledRays, shadowSkipInputs, false)
             : std::make_pair(false, glm::vec4(0.0f));
         check("first non-casting glass surface is ignored on GL33",
-              nonCastingFirst33.first && nonCastingFirst33.second.r > 0.95f);
+              nonCastingFirst33.first &&
+              nonCastingFirst33.second.r > 0.95f &&
+              nonCastingFirst33.second.g > 0.95f &&
+              nonCastingFirst33.second.b > 0.95f);
         if (computeQualityAvailable)
             check("GL43 first non-casting glass skip matches GL33",
                   nonCastingFirst43.first && nonCastingFirst43.second.r > 0.95f &&
+                  nonCastingFirst43.second.g > 0.95f &&
+                  nonCastingFirst43.second.b > 0.95f &&
                   glm::length(glm::vec3(nonCastingFirst43.second -
                                         nonCastingFirst33.second)) < 0.015f);
         shadowSkipScene.meshes = {castingInstance, nonCastingInstance};
@@ -3728,13 +3765,18 @@ public:
         const auto nonCastingLater43 = computeQualityAvailable
             ? renderControlledPixel(computeControlledRays, shadowSkipInputs, false)
             : std::make_pair(false, glm::vec4(0.0f));
-        check("later non-casting glass surface is ignored after one volume on GL33",
-              nonCastingLater33.first && nonCastingLater33.second.r > 0.85f);
+        check("colored glass volume casts Beer-Lambert transmissive shadow on GL33",
+              nonCastingLater33.first && nonCastingLater33.second.r > 0.1f &&
+              nonCastingLater33.second.g > nonCastingLater33.second.r * 1.5f &&
+              nonCastingLater33.second.b > nonCastingLater33.second.g * 1.5f);
         if (computeQualityAvailable)
-            check("GL43 later non-casting glass skip matches GL33",
-                  nonCastingLater43.first && nonCastingLater43.second.r > 0.85f &&
+            check("GL43 colored transmissive shadow matches GL33",
+                  nonCastingLater43.first &&
                   glm::length(glm::vec3(nonCastingLater43.second -
                                         nonCastingLater33.second)) < 0.015f);
+        std::printf("visual-probe colored-transmissive-shadow rgb=(%.6f,%.6f,%.6f)\n",
+            nonCastingLater33.second.r, nonCastingLater33.second.g,
+            nonCastingLater33.second.b);
 
         controlledInputs.features.rayTracedTranslucency = false;
         controlledInputs.scene = &controlledScene;
@@ -4368,14 +4410,14 @@ public:
               retryScheduler.ActiveKind() == ERayTracingBackend::Auto &&
               retryScheduler.BackendReason().find("retaining raster") != std::string::npos);
         check("GL33 failed upload counts allocated rollback objects",
-              retryScheduler.Stats().resourceAllocations == 25u &&
+              retryScheduler.Stats().resourceAllocations == 23u &&
               retryScheduler.Stats().sceneUploads == 0u);
         const auto gl33FailedWork = retryScheduler.Stats();
         check("GL33 failed scene retains attempts but commits no GPU scene",
               gl33FailedWork.sceneUploadAttempts == 1 && gl33FailedWork.blasUploadAttempts == 1 &&
               gl33FailedWork.instanceUploadAttempts == 1 && gl33FailedWork.materialUploadAttempts == 1 &&
-              gl33FailedWork.bufferUploadCalls == 8 && gl33FailedWork.textureUploadCalls == 4 &&
-              gl33FailedWork.releasedResources == 19 && retryScheduler.ActiveBackend()->Stats().residentBLAS == 0);
+              gl33FailedWork.bufferUploadCalls == 7 && gl33FailedWork.textureUploadCalls == 4 &&
+              gl33FailedWork.releasedResources == 17 && retryScheduler.ActiveBackend()->Stats().residentBLAS == 0);
         const bool schedulerRecovered = retryScheduler.Execute(
             retryInputs, retrySelection, schedulerRetry);
         check("scheduler retries a transactional real-GL upload failure next frame",
@@ -4385,8 +4427,8 @@ public:
               retryScheduler.Stats().backendCalls == 2u);
         check("GL33 retry performs a second real upload and commits only once",
               retryScheduler.Stats().sceneUploadAttempts == 2 && retryScheduler.Stats().sceneUploads == 1 &&
-              retryScheduler.Stats().bufferUploadCalls == 16 && retryScheduler.Stats().textureUploadCalls == 5 &&
-              retryScheduler.Stats().resourceAllocations == gl33FailedWork.resourceAllocations + 17 &&
+              retryScheduler.Stats().bufferUploadCalls == 14 && retryScheduler.Stats().textureUploadCalls == 5 &&
+              retryScheduler.Stats().resourceAllocations == gl33FailedWork.resourceAllocations + 15 &&
               retryScheduler.ActiveBackend()->Stats().residentBLAS > 0);
         retryScheduler.Shutdown();
         check("GL33 scheduler shutdown includes rollback and live-object deletion",
@@ -4580,9 +4622,9 @@ public:
                   failedUpdate.residentBLAS == beforeUpdate.residentBLAS &&
                   failedUpdate.ownedOutputTextures == beforeUpdate.ownedOutputTextures &&
                   failedUpdate.instanceUploadAttempts == beforeUpdate.instanceUploadAttempts + 1 &&
-                  failedUpdate.bufferUploadCalls == beforeUpdate.bufferUploadCalls + 4 &&
-                  failedUpdate.resourceAllocations == beforeUpdate.resourceAllocations + (compute ? 4u : 8u) &&
-                  failedUpdate.releasedResources == beforeUpdate.releasedResources + (compute ? 4u : 8u));
+                  failedUpdate.bufferUploadCalls == beforeUpdate.bufferUploadCalls + (compute ? 4u : 3u) &&
+                  failedUpdate.resourceAllocations == beforeUpdate.resourceAllocations + (compute ? 4u : 6u) &&
+                  failedUpdate.releasedResources == beforeUpdate.releasedResources + (compute ? 4u : 6u));
             check("replacement retry reuploads uncommitted revision then commits exactly once",
                   backend.RenderEffects(faultInputs, recovered, &diagnostic) &&
                   backend.Stats().instanceUploadAttempts == beforeUpdate.instanceUploadAttempts + 2 &&
@@ -4681,7 +4723,7 @@ public:
                     for (auto& channel : textured.texData) ++channel;
                     uploadMeshes.BeginFrame();
                     const bool geometryOkay = uploadRaster.RenderGeometry(uploadScene, quality, uploadMeshes,
-                        uploadGBuffer, uploadLighting.EnvironmentTexture(), ContextGeneration(), &diagnostic);
+                        uploadGBuffer, ContextGeneration(), &diagnostic);
                     check("material first upload/refresh preserves full unpack state", geometryOkay && hostile.Preserved() && hostile.NoError());
                     glBindFramebuffer(GL_READ_FRAMEBUFFER, uploadGBuffer.Framebuffer());
                     glReadBuffer(uploadGBuffer.ColorAttachment(EHardwareGBufferSemantic::AlbedoShininess));
@@ -4710,7 +4752,7 @@ public:
                 hostile.Set(); ++textured.texData[0];
                 uploadRaster.InjectNextMaterialTextureUploadFailureForTesting(); uploadMeshes.BeginFrame();
                 const bool materialFailed = !uploadRaster.RenderGeometry(uploadScene, quality, uploadMeshes,
-                    uploadGBuffer, uploadLighting.EnvironmentTexture(), ContextGeneration(), &diagnostic);
+                    uploadGBuffer, ContextGeneration(), &diagnostic);
                 check("material rollback restores hostile state", materialFailed && hostile.Preserved() && hostile.NoError());
                 uploadScene.environment.skyPath.clear();
                 uploadLighting.PrepareEnvironment(uploadScene, ContextGeneration(), &diagnostic);
@@ -5100,6 +5142,8 @@ public:
             check("static stochastic pixel variance falls over 32 temporal frames",
                 strongestEarlyVariance > 0.0 &&
                 matchingLateVariance < strongestEarlyVariance);
+            std::printf("visual-probe temporal-32 earlyVariance=%.6f lateVariance=%.6f\n",
+                strongestEarlyVariance, matchingLateVariance);
 
             routedCamera.eye.x += 0.35f;
             const bool movedOK = worldRenderer.Render(*routedWorld, routedCamera,
@@ -5117,6 +5161,9 @@ public:
             check("camera change resets frame index and leaves no old-color ghost",
                 movedOK && freshOK && worldRenderer.Stats().temporalFrameIndex == 0 &&
                 resetPixels == freshPixels);
+            std::printf("visual-probe camera-reset frameIndex=%u exactFreshMatch=%d\n",
+                worldRenderer.Stats().temporalFrameIndex,
+                int(resetPixels == freshPixels));
             freshRenderer.Shutdown();
             freshTarget.Release();
             worldRenderer.Shutdown();
@@ -5664,11 +5711,17 @@ public:
                             selection, ContextGeneration());
                     const auto converged = renderer.Stats();
                     check(unchangedFrames &&
+                        converged.rayResourceAllocations ==
+                            warm.rayResourceAllocations &&
+                        converged.rayBufferUploadCalls ==
+                            warm.rayBufferUploadCalls &&
+                        converged.rayTextureUploadCalls ==
+                            warm.rayTextureUploadCalls &&
                         converged.reconstructionResourceAllocations ==
                             warm.reconstructionResourceAllocations &&
                         converged.liveReconstructionTextures == 8 &&
                         converged.liveReconstructionFramebuffers == 1,
-                        "100 unchanged frames allocate zero reconstruction textures/framebuffers");
+                        "100 unchanged frames allocate/upload zero ray or reconstruction resources");
                     check(converged.temporalFrameIndex >= 100,
                         "unchanged stochastic frames advance the exposed temporal sequence");
                 }
@@ -5759,7 +5812,7 @@ public:
 class FBoundedEditorRenderApp final : public EditorEngine
 {
 public:
-    int CheckFrames(bool rayTracing)
+    int CheckFrames(bool rayTracing, int ssaa)
     {
         glfwHideWindow(window_);
         proj_.defaultRenderFeatures.rayTracing = rayTracing;
@@ -5769,12 +5822,14 @@ public:
         OnShutdown();
         const bool ok = stats.hardwareDrawCalls > 0 && stats.compositePasses > 0 &&
             stats.outputWidth > 0 && stats.outputHeight > 0 &&
-            stats.internalWidth == stats.outputWidth * 2 &&
-            stats.internalHeight == stats.outputHeight * 2 &&
+            stats.internalWidth == stats.outputWidth * ssaa &&
+            stats.internalHeight == stats.outputHeight * ssaa &&
             stats.cpuFramebufferGenerations == 0 && stats.cpuFramebufferUploads == 0 && stats.cpuReadbacks == 0 &&
             (rayTracing ? stats.rayBackendCalls > 0 : stats.rayFactoryCalls == 0);
-        std::printf("[%s] production Editor Render -> DrawViewport -> UWorldRenderer RT=%d frames=%llu\n",
-            ok ? "PASS" : "FAIL", int(rayTracing), stats.compositePasses);
+        std::printf("[%s] production Editor Render -> DrawViewport -> UWorldRenderer RT=%d SSAA=%d output=%dx%d internal=%dx%d frames=%llu\n",
+            ok ? "PASS" : "FAIL", int(rayTracing), ssaa, stats.outputWidth,
+            stats.outputHeight, stats.internalWidth, stats.internalHeight,
+            stats.compositePasses);
         return ok ? 0 : 1;
     }
 };
@@ -5783,7 +5838,7 @@ class FBoundedGameRenderApp final : public GameEngine
 {
 public:
     FBoundedGameRenderApp() : GameEngine("") {}
-    int CheckFrames(bool rayTracing)
+    int CheckFrames(bool rayTracing, int ssaa)
     {
         glfwHideWindow(window_);
         OnStartup();
@@ -5801,11 +5856,14 @@ public:
         delete world_; world_ = nullptr;
         const bool ok = stats.hardwareDrawCalls == 3 && stats.compositePasses == 3 &&
             stats.outputWidth == Width() && stats.outputHeight == Height() &&
-            stats.internalWidth == Width() * 2 && stats.internalHeight == Height() * 2 &&
+            stats.internalWidth == Width() * ssaa &&
+            stats.internalHeight == Height() * ssaa &&
             stats.cpuFramebufferGenerations == 0 && stats.cpuFramebufferUploads == 0 && stats.cpuReadbacks == 0 &&
             (rayTracing ? stats.rayBackendCalls == 3 : stats.rayFactoryCalls == 0);
-        std::printf("[%s] production Game Render -> UWorldRenderer RT=%d frames=%llu\n",
-            ok ? "PASS" : "FAIL", int(rayTracing), stats.compositePasses);
+        std::printf("[%s] production Game Render -> UWorldRenderer RT=%d SSAA=%d output=%dx%d internal=%dx%d frames=%llu\n",
+            ok ? "PASS" : "FAIL", int(rayTracing), ssaa, stats.outputWidth,
+            stats.outputHeight, stats.internalWidth, stats.internalHeight,
+            stats.compositePasses);
         return ok ? 0 : 1;
     }
 };
@@ -5827,23 +5885,25 @@ static int RunRenderPerformanceGates()
     std::filesystem::create_directories(temporary / "Content");
     std::filesystem::create_directories(temporary / "Config");
     std::filesystem::current_path(temporary);
-    {
-        std::ofstream editorSettings("Config/EditorSettings.ini");
-        editorSettings << "[Editor]\nSSAA = 2\n[Game]\nSSAA = 2\n";
-        std::ofstream gameSettings("Config/GameSettings.ini");
-        gameSettings << "[Render]\nSSAA = 2\n";
-    }
+    for (int ssaa : {1, 2})
     for (bool rayTracing : {false, true})
     {
         {
+            std::ofstream editorSettings("Config/EditorSettings.ini");
+            editorSettings << "[Editor]\nSSAA = " << ssaa
+                << "\n[Game]\nSSAA = " << ssaa << "\n";
+            std::ofstream gameSettings("Config/GameSettings.ini");
+            gameSettings << "[Render]\nSSAA = " << ssaa << "\n";
+        }
+        {
             FBoundedEditorRenderApp editor;
             if (!editor.Init(640, 480, "Bounded Editor Route")) { ++failed; continue; }
-            failed += editor.CheckFrames(rayTracing);
+            failed += editor.CheckFrames(rayTracing, ssaa);
         }
         {
             FBoundedGameRenderApp game;
             if (!game.Init(64, 64, "Bounded Game Route")) { ++failed; continue; }
-            failed += game.CheckFrames(rayTracing);
+            failed += game.CheckFrames(rayTracing, ssaa);
         }
     }
     std::filesystem::current_path(prior);

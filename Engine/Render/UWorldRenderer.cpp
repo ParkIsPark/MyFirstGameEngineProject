@@ -63,8 +63,7 @@ public:
         if (!lighting_.PrepareEnvironment(request.scene, generation, &diagnostic) ||
             !gbuffer_.Resize(request.internalWidth, request.internalHeight, generation) ||
             !rasterizer_.RenderGeometry(request.scene, request.quality, meshCache_,
-                                        gbuffer_, lighting_.EnvironmentTexture(),
-                                        generation, &diagnostic))
+                                        gbuffer_, generation, &diagnostic))
         {
             meshCache_.ReleaseUnused();
             if (!diagnostic.empty())

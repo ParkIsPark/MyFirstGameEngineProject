@@ -46,13 +46,6 @@ public:
                         UHardwareGBuffer& gbuffer,
                         std::uint64_t contextGeneration,
                         std::string* diagnostic = nullptr);
-    bool RenderGeometry(const FRenderScene& scene,
-                        const FRenderQuality& quality,
-                        UGPUMeshCache& meshCache,
-                        UHardwareGBuffer& gbuffer,
-                        unsigned environmentTexture,
-                        std::uint64_t contextGeneration,
-                        std::string* diagnostic = nullptr);
 
     bool IsReady() const { return program_ != 0; }
     unsigned Program() const { return program_; }

@@ -671,26 +671,14 @@ bool UHardwareRasterizer::RenderGeometry(const FRenderScene& scene,
                                          std::string* diagnostic)
 {
     const FRenderQuality quality;
-    return RenderGeometry(scene, quality, meshCache, gbuffer,
-                          contextGeneration, diagnostic);
+    return RenderGeometry(scene, quality, meshCache, gbuffer, contextGeneration,
+                          diagnostic);
 }
 
 bool UHardwareRasterizer::RenderGeometry(const FRenderScene& scene,
                                          const FRenderQuality& quality,
                                          UGPUMeshCache& meshCache,
                                          UHardwareGBuffer& gbuffer,
-                                         std::uint64_t contextGeneration,
-                                         std::string* diagnostic)
-{
-    return RenderGeometry(scene, quality, meshCache, gbuffer, 0,
-                          contextGeneration, diagnostic);
-}
-
-bool UHardwareRasterizer::RenderGeometry(const FRenderScene& scene,
-                                         const FRenderQuality& quality,
-                                         UGPUMeshCache& meshCache,
-                                         UHardwareGBuffer& gbuffer,
-                                         unsigned environmentTexture,
                                          std::uint64_t contextGeneration,
                                          std::string* diagnostic)
 {
@@ -751,23 +739,6 @@ bool UHardwareRasterizer::RenderGeometry(const FRenderScene& scene,
 
     glUniform3fv(glGetUniformLocation(program_, "uEye"), 1,
                  glm::value_ptr(scene.camera.eye));
-    glUniform3fv(glGetUniformLocation(program_, "uEnvironmentTint"), 1,
-                 glm::value_ptr(scene.environment.tint));
-    glUniform3fv(glGetUniformLocation(program_, "uSkyHorizon"), 1,
-                 glm::value_ptr(scene.environment.horizon));
-    glUniform3fv(glGetUniformLocation(program_, "uSkyZenith"), 1,
-                 glm::value_ptr(scene.environment.zenith));
-    glUniform1f(glGetUniformLocation(program_, "uSkyExponent"),
-                scene.environment.exponent);
-    glUniform1f(glGetUniformLocation(program_, "uAmbientStrength"),
-                quality.ambientStrength);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, environmentTexture);
-    glBindSampler(1, 0);
-    glUniform1i(glGetUniformLocation(program_, "uHasEnvironmentTexture"),
-                environmentTexture ? 1 : 0);
-    glActiveTexture(GL_TEXTURE0);
-    glBindSampler(0, 0);
     const int lightCount = std::min<int>(pointLightLimit_,
         static_cast<int>(scene.pointLights.size()));
     glUniform1i(glGetUniformLocation(program_, "uPointLightCount"), lightCount);

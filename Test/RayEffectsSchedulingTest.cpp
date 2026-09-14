@@ -128,6 +128,20 @@ FRayEffectInputs Inputs(const FRenderFeatures& features)
     return result;
 }
 
+void SeedNonNeutralOutputs(FRayEffectOutputs& outputs)
+{
+    outputs.shadowedDirectTarget = FRenderOutputView{91, 64, 64, true};
+    outputs.globalIlluminationTarget = FRenderOutputView{92, 64, 64, true};
+    outputs.opticalContributionTarget = FRenderOutputView{93, 64, 64, true};
+}
+
+void AssertNeutralOutputs(const FRayEffectOutputs& outputs)
+{
+    assert(!outputs.shadowedDirectTarget);
+    assert(!outputs.globalIlluminationTarget);
+    assert(!outputs.opticalContributionTarget);
+}
+
 void CheckStatus(const FRayEffectsScheduler& scheduler, const FRenderFeatures& features,
                  const char* effective, const char* reason)
 {
@@ -150,6 +164,7 @@ void CheckNoWorkCombinations()
     features.rayTracedShadows = features.rayTracedGI =
         features.rayTracedReflections = true;
     features.rayTracedTranslucency = true;
+    SeedNonNeutralOutputs(outputs);
     assert(scheduler.Execute(Inputs(features),
         Selection(ERayTracingBackend::CompatibleGL33,
                   ERayTracingBackend::CompatibleGL33), outputs));
@@ -167,9 +182,7 @@ void CheckNoWorkCombinations()
     assert(factory.renderCalls == 0);
     assert(scheduler.Stats().resourceAllocations == 0);
     assert(scheduler.Stats().sceneUploads == 0);
-    assert(!outputs.shadowedDirectTarget);
-    assert(!outputs.globalIlluminationTarget);
-    assert(!outputs.opticalContributionTarget);
+    AssertNeutralOutputs(outputs);
 }
 
 void CheckExactChildMasksUseOneCall()
@@ -266,11 +279,12 @@ void CheckPermanentInitFailureIsNeutralWarnedAndLatched()
     features.rayTracedShadows = true;
     features.rayTracedGI = features.rayTracedReflections = false;
     FRayEffectOutputs outputs;
+    SeedNonNeutralOutputs(outputs);
     const FBackendSelection selection = Selection(
         ERayTracingBackend::CompatibleGL33, ERayTracingBackend::CompatibleGL33);
 
     assert(scheduler.Execute(Inputs(features), selection, outputs));
-    assert(!outputs.shadowedDirectTarget);
+    AssertNeutralOutputs(outputs);
     assert(factory.initCalls == 1 && factory.renderCalls == 0);
     assert(warnings.messages.size() == 1);
     CheckStatus(scheduler, features, "Disabled", "injected initialization failure");
@@ -326,8 +340,9 @@ void CheckTransientRenderFailureRetriesNextFrame()
     const FBackendSelection selection = Selection(
         ERayTracingBackend::CompatibleGL33, ERayTracingBackend::CompatibleGL33);
 
+    SeedNonNeutralOutputs(outputs);
     assert(scheduler.Execute(Inputs(features), selection, outputs));
-    assert(!outputs.shadowedDirectTarget);
+    AssertNeutralOutputs(outputs);
     assert(factory.renderCalls == 1 && warnings.messages.size() == 1);
     assert(scheduler.ActiveKind() == ERayTracingBackend::Auto);
     const auto failureReason = scheduler.BackendReason();
