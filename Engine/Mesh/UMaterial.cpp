@@ -54,6 +54,7 @@ namespace
 void UMaterial::LoadTexture(Material& m)
 {
     m.texData.clear(); m.texWidth = m.texHeight = m.texChannels = 0;
+    m.MarkRuntimeDirty();
     if (m.diffuseTexPath.empty()) return;
     int w = 0, h = 0, n = 0;
     stbi_set_flip_vertically_on_load(0);
@@ -93,7 +94,7 @@ bool UMaterial::Save(const std::string& path, const Material& m)
     if (!f) return false;
     FSaveArchive ar;
     const_cast<Material&>(m).Serialize(ar);    // Serialize is read/write; saving here
-    f << "MaterialFormat = 1\n" << ar.str();
+    f << "MaterialFormat = 2\n" << ar.str();
     if (!f) return false;
 
     // Keep the shared cache instance in sync with what we just wrote, so the
@@ -101,6 +102,7 @@ bool UMaterial::Save(const std::string& path, const Material& m)
     if (Material* shared = Resolve(path); shared && shared != &m)
     {
         *shared = m;
+        shared->MarkRuntimeDirty();
         LoadTexture(*shared);
     }
     return true;

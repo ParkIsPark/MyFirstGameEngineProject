@@ -9,7 +9,8 @@ std::vector<ERenderPass> BuildRenderPipelinePlan(const FRenderFeatures& features
 
     const bool anyRayTracedEffect = features.rayTracedShadows ||
                                     features.rayTracedGI ||
-                                    features.rayTracedReflections;
+                                    features.rayTracedReflections ||
+                                    features.rayTracedTranslucency;
     if (features.rayTracing && anyRayTracedEffect)
     {
         plan.push_back(ERenderPass::RayTracedEffects);

@@ -86,6 +86,7 @@ namespace
         features.rayTracedShadows = true;
         features.rayTracedGI = true;
         features.rayTracedReflections = true;
+        features.rayTracedTranslucency = true;
         features.rayTracingBackend = ERayTracingBackend::Auto;
         return true;
     }
@@ -138,6 +139,7 @@ std::string FWorldSerializer::Save(UWorld& world)
         bool shadows = sc.renderFeatures.rayTracedShadows; a.Field("RayTracedShadows", shadows);
         bool gi = sc.renderFeatures.rayTracedGI; a.Field("RayTracedGI", gi);
         bool reflections = sc.renderFeatures.rayTracedReflections; a.Field("RayTracedReflections", reflections);
+        bool translucency = sc.renderFeatures.rayTracedTranslucency; a.Field("RayTracedTranslucency", translucency);
         std::string backend = BackendName(sc.renderFeatures.rayTracingBackend); a.Field("RayTracingBackend", backend);
         out += a.str();
     }
@@ -257,6 +259,7 @@ UWorld* FWorldSerializer::Load(const std::string& text, const FRenderFeatures& d
             readBool("RayTracedShadows", sc.renderFeatures.rayTracedShadows);
             readBool("RayTracedGI", sc.renderFeatures.rayTracedGI);
             readBool("RayTracedReflections", sc.renderFeatures.rayTracedReflections);
+            readBool("RayTracedTranslucency", sc.renderFeatures.rayTracedTranslucency);
             if (a.HasField("RayTracingBackend"))
             {
                 std::string value; a.Field("RayTracingBackend", value);

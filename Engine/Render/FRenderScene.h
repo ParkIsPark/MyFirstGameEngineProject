@@ -40,6 +40,13 @@ struct FResolvedRenderMaterial
     glm::vec3 emissive = glm::vec3(0.0f);
     float shininess = 0.0f;
     float mirrorFactor = 0.0f;
+    EMaterialBlendMode blendMode = EMaterialBlendMode::Opaque;
+    float opacity = 1.0f;
+    float refraction = 1.52f;
+    glm::vec3 transmittanceColor = glm::vec3(1.0f);
+    float transmittanceDistance = 1.0f;
+    bool castRayTracedShadows = true;
+    std::uint64_t runtimeRevision = 0;
     std::string diffuseTexturePath;
 };
 

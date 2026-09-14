@@ -54,6 +54,7 @@ namespace
         features.rayTracedShadows = true;
         features.rayTracedGI = true;
         features.rayTracedReflections = true;
+        features.rayTracedTranslucency = true;
         features.rayTracingBackend = ERayTracingBackend::Auto;
         return true;
     }
@@ -71,6 +72,8 @@ namespace
             features.rayTracedGI = value;
         if (ini.Has(section, "RayTracedReflections") && parseBool(ini.GetString(section, "RayTracedReflections"), value))
             features.rayTracedReflections = value;
+        if (ini.Has(section, "RayTracedTranslucency") && parseBool(ini.GetString(section, "RayTracedTranslucency"), value))
+            features.rayTracedTranslucency = value;
         if (ini.Has(section, "RayTracingBackend"))
         {
             ERayTracingBackend backend;

@@ -1,11 +1,13 @@
 #pragma once
 #include <glm/glm.hpp>
+#include <cstdint>
 #include <vector>
 #include <string>
 
 // UV addressing for the diffuse texture. GL sampler wrap is texture-wide, so
 // per-material wrap is applied in SampleDiffuse / the shader (P3 decision).
 enum class EWrapMode { Repeat, Clamp };
+enum class EMaterialBlendMode { Opaque, Translucent };
 
 // ---------------------------------------------------------------------------
 // Phong/Blinn-Phong material coefficients.  Owned by UMesh (per-asset default)
@@ -15,6 +17,8 @@ enum class EWrapMode { Repeat, Clamp };
 // ---------------------------------------------------------------------------
 struct Material
 {
+    Material();
+
     glm::vec3    ka        = glm::vec3(0.2f); // ambient  : constant fill light, prevents fully black shadowed areas
     glm::vec3    kd        = glm::vec3(1.0f); // diffuse  : Lambertian reflection, gives the object its base color
     glm::vec3    ks        = glm::vec3(0.0f); // specular : Blinn-Phong highlight color (usually white/grey for metals)
@@ -34,10 +38,26 @@ struct Material
     EWrapMode   wrapMode = EWrapMode::Repeat;   // per-material UV addressing
     glm::vec2   uvTiling = glm::vec2(1.0f);     // UV scale before wrap
 
+    EMaterialBlendMode blendMode = EMaterialBlendMode::Opaque;
+    float opacity = 1.0f;
+    float refraction = 1.52f;
+    glm::vec3 transmittanceColor = glm::vec3(1.0f);
+    float transmittanceDistance = 1.0f;
+    bool castRayTracedShadows = true;
+
     // Bidirectional serialization (numeric Blinn-Phong + diffuse-texture fields).
     void Serialize(class FArchive& ar);
+    void SanitizeOptics();
+
+    std::uint64_t RuntimeRevision() const { return runtimeRevision_; }
+    void MarkRuntimeDirty();
 
     // CPU diffuse sample at uv (applies uvTiling + wrapMode, sRGB->linear).
     // Returns kd when there is no CPU texture data.
     glm::vec3 SampleDiffuse(glm::vec2 uv) const;
+
+private:
+    // Runtime-only invalidation token. Material text and mesh assets never
+    // persist it; reload mutations advance it monotonically for render caches.
+    std::uint64_t runtimeRevision_ = 0;
 };

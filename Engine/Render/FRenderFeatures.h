@@ -21,5 +21,6 @@ struct FRenderFeatures
     bool rayTracedShadows = true;
     bool rayTracedGI = true;
     bool rayTracedReflections = true;
+    bool rayTracedTranslucency = true;
     ERayTracingBackend rayTracingBackend = ERayTracingBackend::Auto;
 };

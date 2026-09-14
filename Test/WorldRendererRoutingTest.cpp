@@ -335,6 +335,7 @@ void CheckDefaultLightAndTargetValidation()
     features.rayTracedShadows = false;
     features.rayTracedGI = false;
     features.rayTracedReflections = false;
+    features.rayTracedTranslucency = false;
     FRenderQuality quality;
     FBackendSelection backend;
     backend.available = true;
@@ -352,6 +353,7 @@ void CheckDefaultLightAndTargetValidation()
     assert(renderer.Render(world, world.GetCamera(), target, features, quality, backend));
     assert(observed->calls == 1);
     assert(observed->scene.pointLights.size() == 1);
+    assert(!observed->features.rayTracedTranslucency);
     assert(observed->scene.usesDefaultPointLight);
     assert(observed->scene.pointLights[0].worldPosition == glm::vec3(6.0f, 8.0f, 2.0f));
     assert(observed->plan == std::vector<ERenderPass>({

@@ -36,6 +36,7 @@ void CheckRasterOnlyPlans()
     disabled.rayTracedShadows = true;
     disabled.rayTracedGI = true;
     disabled.rayTracedReflections = true;
+    disabled.rayTracedTranslucency = true;
     RequirePlan(disabled, rasterOnly);
 
     FRenderFeatures noEffects;
@@ -43,6 +44,7 @@ void CheckRasterOnlyPlans()
     noEffects.rayTracedShadows = false;
     noEffects.rayTracedGI = false;
     noEffects.rayTracedReflections = false;
+    noEffects.rayTracedTranslucency = false;
     RequirePlan(noEffects, rasterOnly);
 }
 
@@ -60,6 +62,7 @@ void CheckEachRayEffectSchedulesOnePass()
     shadowsOnly.rayTracedShadows = true;
     shadowsOnly.rayTracedGI = false;
     shadowsOnly.rayTracedReflections = false;
+    shadowsOnly.rayTracedTranslucency = false;
     RequirePlan(shadowsOnly, withRayEffects);
 
     FRenderFeatures giOnly = shadowsOnly;
@@ -71,6 +74,11 @@ void CheckEachRayEffectSchedulesOnePass()
     reflectionsOnly.rayTracedShadows = false;
     reflectionsOnly.rayTracedReflections = true;
     RequirePlan(reflectionsOnly, withRayEffects);
+
+    FRenderFeatures translucencyOnly = shadowsOnly;
+    translucencyOnly.rayTracedShadows = false;
+    translucencyOnly.rayTracedTranslucency = true;
+    RequirePlan(translucencyOnly, withRayEffects);
 
     FRenderFeatures allEffects;
     allEffects.rayTracing = true;

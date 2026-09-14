@@ -3,6 +3,42 @@
 
 #include <cmath>
 #include <algorithm>
+#include <atomic>
+#include <limits>
+#include <stdexcept>
+
+namespace
+{
+std::atomic<std::uint64_t> GNextMaterialRuntimeRevision{1};
+
+std::uint64_t NextMaterialRuntimeRevision()
+{
+    const std::uint64_t revision =
+        GNextMaterialRuntimeRevision.fetch_add(1, std::memory_order_relaxed);
+    if (revision == 0 || revision == std::numeric_limits<std::uint64_t>::max())
+        throw std::overflow_error("Material runtime revision exhausted");
+    return revision;
+}
+}
+
+Material::Material()
+    : runtimeRevision_(NextMaterialRuntimeRevision())
+{
+}
+
+void Material::MarkRuntimeDirty()
+{
+    runtimeRevision_ = NextMaterialRuntimeRevision();
+}
+
+void Material::SanitizeOptics()
+{
+    opacity = glm::clamp(opacity, 0.0f, 1.0f);
+    refraction = glm::clamp(refraction, 1.0f, 2.42f);
+    transmittanceColor = glm::clamp(
+        transmittanceColor, glm::vec3(0.0001f), glm::vec3(1.0f));
+    transmittanceDistance = std::max(transmittanceDistance, 0.0001f);
+}
 
 // Numeric Blinn-Phong fields + diffuse-texture metadata (path / wrap / tiling).
 // Texture pixels are never serialized here — only the Content-relative path;
@@ -20,6 +56,23 @@ void Material::Serialize(FArchive& ar)
     ar.Field("wrap", wm);
     wrapMode = static_cast<EWrapMode>(wm);     // no-op when saving
     ar.Field("uvTiling", uvTiling);
+
+    std::string blend = blendMode == EMaterialBlendMode::Translucent
+        ? "Translucent" : "Opaque";
+    ar.Field("blendMode", blend);
+    if (ar.IsLoading())
+        blendMode = blend == "Translucent"
+            ? EMaterialBlendMode::Translucent : EMaterialBlendMode::Opaque;
+    ar.Field("opacity", opacity);
+    ar.Field("refraction", refraction);
+    ar.Color("transmittanceColor", transmittanceColor);
+    ar.Field("transmittanceDistance", transmittanceDistance);
+    ar.Field("castRayTracedShadows", castRayTracedShadows);
+    if (ar.IsLoading())
+    {
+        SanitizeOptics();
+        MarkRuntimeDirty();
+    }
 }
 
 glm::vec3 Material::SampleDiffuse(glm::vec2 uv) const

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../Mesh/Material.h"
+
 #include <glm/glm.hpp>
 
 #include <cstdint>
@@ -30,6 +32,12 @@ struct FLogicalGBufferSample
     glm::vec3 specularColor = glm::vec3(0.0f);
     float shininess = 0.0f;
     float mirrorFactor = 0.0f;
+    EMaterialBlendMode blendMode = EMaterialBlendMode::Opaque;
+    float opacity = 1.0f;
+    float refraction = 1.52f;
+    glm::vec3 transmittanceColor = glm::vec3(1.0f);
+    float transmittanceDistance = 1.0f;
+    bool castRayTracedShadows = true;
     ERenderShadingModel shadingModel = ERenderShadingModel::Phong;
     std::uint32_t objectIdentity = 0;
     std::uint32_t materialIdentity = 0;

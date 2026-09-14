@@ -38,11 +38,21 @@ int main()
         Material m;
         m.kd = {0.8f, 0.3f, 0.3f}; m.ks = {0.4f, 0.4f, 0.4f}; m.ka = {0.0f, 1.0f, 0.0f};
         m.shininess = 64.0f; m.km = {0.1f, 0.1f, 0.1f}; m.emissive = {0.2f, 0.0f, 0.0f};
+        m.blendMode = EMaterialBlendMode::Translucent;
+        m.opacity = 0.25f;
+        m.refraction = 1.33f;
+        m.transmittanceColor = {0.8f, 0.6f, 0.4f};
+        m.transmittanceDistance = 2.5f;
+        m.castRayTracedShadows = false;
         FSaveArchive sa; m.Serialize(sa);
         Material n; FLoadArchive la(sa.str()); n.Serialize(la);
         ck("T1", "Material round-trip",
            veq(n.kd, m.kd) && veq(n.ks, m.ks) && veq(n.ka, m.ka) &&
-           std::fabs(n.shininess - 64.0f) < 1e-4f && veq(n.km, m.km) && veq(n.emissive, m.emissive));
+           std::fabs(n.shininess - 64.0f) < 1e-4f && veq(n.km, m.km) && veq(n.emissive, m.emissive) &&
+           n.blendMode == EMaterialBlendMode::Translucent && std::fabs(n.opacity - 0.25f) < 1e-4f &&
+           std::fabs(n.refraction - 1.33f) < 1e-4f && veq(n.transmittanceColor, {0.8f, 0.6f, 0.4f}) &&
+           std::fabs(n.transmittanceDistance - 2.5f) < 1e-4f && !n.castRayTracedShadows &&
+           sa.str().find("blendMode = Translucent") != std::string::npos);
     }
     // T2: USceneComponent round-trip (name + transform)
     {
@@ -108,6 +118,17 @@ int main()
         FLoadArchive la("Other = 5\n");
         float f = 42.0f; la.Field("Absent", f);
         ck("T10", "missing key keeps default", std::fabs(f - 42.0f) < 1e-6f);
+    }
+    // T11: old material text retains the new opaque optical defaults.
+    {
+        Material material;
+        FLoadArchive archive("kd = 0.1 0.2 0.3\nshininess = 8\n");
+        material.Serialize(archive);
+        ck("T11", "old material text keeps opaque optical defaults",
+           material.blendMode == EMaterialBlendMode::Opaque && material.opacity == 1.0f &&
+           std::fabs(material.refraction - 1.52f) < 1e-6f &&
+           veq(material.transmittanceColor, {1.0f, 1.0f, 1.0f}) &&
+           material.transmittanceDistance == 1.0f && material.castRayTracedShadows);
     }
 
     std::printf("=== serialize: %d passed, %d failed ===\n", g_pass, g_fail);

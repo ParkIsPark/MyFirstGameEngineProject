@@ -36,6 +36,21 @@ FResolvedRenderMaterial ResolveMaterial(const Material& material)
     result.emissive = material.emissive;
     result.shininess = material.shininess;
     result.mirrorFactor = std::max(material.km.x, std::max(material.km.y, material.km.z));
+    Material optics;
+    optics.blendMode = material.blendMode;
+    optics.opacity = material.opacity;
+    optics.refraction = material.refraction;
+    optics.transmittanceColor = material.transmittanceColor;
+    optics.transmittanceDistance = material.transmittanceDistance;
+    optics.castRayTracedShadows = material.castRayTracedShadows;
+    optics.SanitizeOptics();
+    result.blendMode = optics.blendMode;
+    result.opacity = optics.opacity;
+    result.refraction = optics.refraction;
+    result.transmittanceColor = optics.transmittanceColor;
+    result.transmittanceDistance = optics.transmittanceDistance;
+    result.castRayTracedShadows = optics.castRayTracedShadows;
+    result.runtimeRevision = material.RuntimeRevision();
     result.diffuseTexturePath = material.diffuseTexPath;
     return result;
 }

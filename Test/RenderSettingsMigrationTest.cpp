@@ -47,7 +47,7 @@ namespace
     bool IsLegacyAllOn(const FRenderFeatures& f)
     {
         return f.hardwareRaster && f.rayTracing && f.rayTracedShadows &&
-               f.rayTracedGI && f.rayTracedReflections &&
+               f.rayTracedGI && f.rayTracedReflections && f.rayTracedTranslucency &&
                f.rayTracingBackend == ERayTracingBackend::Auto;
     }
 }
@@ -107,6 +107,7 @@ int main()
             defaults.rayTracedShadows = false;
             defaults.rayTracedGI = false;
             defaults.rayTracedReflections = false;
+            defaults.rayTracedTranslucency = false;
             defaults.rayTracingBackend = ERayTracingBackend::ComputeGL43;
             std::vector<std::string> warnings;
             FWorldSerializer::SetWarningSink([&](std::string_view message) { warnings.emplace_back(message); });
@@ -117,6 +118,7 @@ int main()
                 !world->GetScene().renderFeatures.rayTracedShadows &&
                 !world->GetScene().renderFeatures.rayTracedGI &&
                 !world->GetScene().renderFeatures.rayTracedReflections &&
+                !world->GetScene().renderFeatures.rayTracedTranslucency &&
                 world->GetScene().renderFeatures.rayTracingBackend == ERayTracingBackend::ComputeGL43 &&
                 warnings.empty();
         }
@@ -133,6 +135,7 @@ int main()
         f.rayTracedShadows = false;
         f.rayTracedGI = true;
         f.rayTracedReflections = false;
+        f.rayTracedTranslucency = false;
         f.rayTracingBackend = ERayTracingBackend::ComputeGL43;
         const std::string saved = FWorldSerializer::Save(source);
         std::unique_ptr<UWorld> loaded(FWorldSerializer::Load(saved));
@@ -141,9 +144,11 @@ int main()
             saved.find("WorldFormat = 3") == 0 && saved.find("[RenderFeatures]") != std::string::npos &&
             saved.find("HardwareRaster = 1") != std::string::npos && saved.find("RayTracing = 1") != std::string::npos &&
             saved.find("RayTracedShadows = 0") != std::string::npos && saved.find("RayTracedGI = 1") != std::string::npos &&
-            saved.find("RayTracedReflections = 0") != std::string::npos && saved.find("RayTracingBackend = Compute") != std::string::npos &&
+            saved.find("RayTracedReflections = 0") != std::string::npos && saved.find("RayTracedTranslucency = 0") != std::string::npos &&
+            saved.find("RayTracingBackend = Compute") != std::string::npos &&
             saved.find("RenderMode") == std::string::npos && got.hardwareRaster && got.rayTracing && !got.rayTracedShadows &&
-            got.rayTracedGI && !got.rayTracedReflections && got.rayTracingBackend == ERayTracingBackend::ComputeGL43);
+            got.rayTracedGI && !got.rayTracedReflections && !got.rayTracedTranslucency &&
+            got.rayTracingBackend == ERayTracingBackend::ComputeGL43);
         Check("format 3 save-load-save is byte stable", loaded && saved == FWorldSerializer::Save(*loaded));
     }
 
@@ -163,6 +168,7 @@ int main()
         defaults.rayTracedShadows = false;
         defaults.rayTracedGI = false;
         defaults.rayTracedReflections = false;
+        defaults.rayTracedTranslucency = false;
         defaults.rayTracingBackend = ERayTracingBackend::ComputeGL43;
         std::unique_ptr<UWorld> absent(FWorldSerializer::Load("WorldFormat = 3\n\n[World]\nShadingModel = 1\n", defaults));
         std::unique_ptr<UWorld> partial(FWorldSerializer::Load(
@@ -172,6 +178,8 @@ int main()
             absent->GetScene().renderFeatures.rayTracingBackend == ERayTracingBackend::ComputeGL43 &&
             partial && !partial->GetScene().renderFeatures.rayTracing &&
             !partial->GetScene().renderFeatures.rayTracedShadows &&
+            !absent->GetScene().renderFeatures.rayTracedTranslucency &&
+            !partial->GetScene().renderFeatures.rayTracedTranslucency &&
             partial->GetScene().renderFeatures.rayTracingBackend == ERayTracingBackend::ComputeGL43);
     }
 
@@ -193,7 +201,7 @@ int main()
         Write("render_settings_project.tmp",
             "[Display]\nTitle = Project X\nWidth = 900\nHeight = 500\n"
             "[Render]\nMode = GPU_RT\nHardwareRaster = 1\nRayTracing = 0\nRayTracedShadows = 0\n"
-            "RayTracedGI = 1\nRayTracedReflections = 0\nRayTracingBackend = Compatible\n"
+            "RayTracedGI = 1\nRayTracedReflections = 0\nRayTracedTranslucency = 0\nRayTracingBackend = Compatible\n"
             "[Startup]\nDefaultWorld = Maps/Start\n");
         FProjectDescriptor project;
         const bool loaded = project.LoadSettings("render_settings_project.tmp");
@@ -202,7 +210,8 @@ int main()
         Check("named project settings override legacy mode and preserve boot settings",
             loaded && project.windowTitle == "Project X" && project.width == 900 && project.height == 500 &&
             project.startupWorld == "Maps/Start" && f.hardwareRaster && !f.rayTracing && !f.rayTracedShadows &&
-            f.rayTracedGI && !f.rayTracedReflections && f.rayTracingBackend == ERayTracingBackend::CompatibleGL33);
+            f.rayTracedGI && !f.rayTracedReflections && !f.rayTracedTranslucency &&
+            f.rayTracingBackend == ERayTracingBackend::CompatibleGL33);
     }
 
     // Mutation caught: changing any historical project mode mapping.
@@ -250,6 +259,18 @@ int main()
             project.defaultRenderFeatures.hardwareRaster && project.defaultRenderFeatures.rayTracing &&
             project.defaultRenderFeatures.rayTracingBackend == ERayTracingBackend::Auto &&
             warning.str().find("Metal") != std::string::npos && warning.str().find("Auto") != std::string::npos);
+    }
+
+    // Mutation caught: treating an absent optional project field as enabled
+    // instead of preserving the caller's current feature value.
+    {
+        Write("render_settings_absent.tmp", "[Render]\nRayTracing = 1\n");
+        FProjectDescriptor project;
+        project.defaultRenderFeatures.rayTracedTranslucency = false;
+        const bool loaded = project.LoadSettings("render_settings_absent.tmp");
+        std::remove("render_settings_absent.tmp");
+        Check("absent project translucency field preserves caller value",
+            loaded && !project.defaultRenderFeatures.rayTracedTranslucency);
     }
 
     std::printf("=== render settings migration: %d passed, %d failed ===\n", passed, failed);
