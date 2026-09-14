@@ -1290,8 +1290,9 @@ void EditorEngine::DrawStatusBar(float x, float y, float w, float h)
             ImGui::SameLine(); ImGui::TextDisabled("|  %s (Deprecated)", legacy->displayName.c_str());
         }
         else {
-        ImGui::SameLine(); ImGui::TextDisabled("|  Hardware Raster | RT %s (%s)",
-            features.rayTracing ? "On" : "Off", FProjectDescriptor::RayTracingBackendName(features.rayTracingBackend));
+        ImGui::SameLine(); ImGui::TextDisabled("|  %s",
+            DescribeRayTracingStatus(features, worldRenderer_.Stats()).c_str());
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", worldRenderer_.Stats().backendReason.c_str());
         }
         ImGui::SameLine(ImGui::GetWindowWidth() - 150);
         ImGui::TextDisabled("Alt+P Play  *  %.0f FPS", ImGui::GetIO().Framerate);
@@ -1868,11 +1869,13 @@ void EditorEngine::DrawViewport()
         viewportFeatures, worldRenderer_.Stats().activeRayBackend));
     if (const auto* legacy = LegacyFeature(developerOverride_.ActiveOverride()))
         ImGui::TextDisabled("[%s] %s", legacy->displayName.c_str(), playing_ ? "Playing (PIE)" : "Editor World");
-    else ImGui::TextDisabled("[Hardware Raster%s%s%s] %s   (RMB-drag + WASD/QE to fly, LMB to pick)",
-                        viewportFeatures.rayTracing ? " + RT (" : " / ",
-                        viewportFeatures.rayTracing ? FProjectDescriptor::RayTracingBackendName(viewportFeatures.rayTracingBackend) : kShading[ActiveWorld().GetScene().shadingModel],
-                        viewportFeatures.rayTracing ? ")" : "",
-                        playing_ ? "Playing (PIE)" : "Editor World");
+    else {
+        const auto& stats = worldRenderer_.Stats();
+        ImGui::TextDisabled("[%s] %s", DescribeRayTracingStatus(viewportFeatures, stats).c_str(),
+                           playing_ ? "Playing (PIE)" : "Editor World");
+        ImGui::TextWrapped("RT status: %s", stats.backendReason.empty()
+            ? "Awaiting first rendered frame" : stats.backendReason.c_str());
+    }
     ImGui::Separator();
 
     const ImVec2 avail = ImGui::GetContentRegionAvail();

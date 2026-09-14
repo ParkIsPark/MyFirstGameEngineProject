@@ -2,6 +2,7 @@
 
 #include "FRenderScene.h"
 #include "FRenderTarget.h"
+#include "FPixelUnpackGuard.h"
 #include "Shaders/RayEffectsFragmentShaders.h"
 #include "UHardwareGBuffer.h"
 #include "UGL43RayTracingBackend.h"
@@ -377,6 +378,7 @@ bool UGL33RayTracingBackend::ResizeOutputs(int width, int height, unsigned mask,
         static_cast<GLenum>(mask & ReflectionBit ? GL_COLOR_ATTACHMENT2 : GL_NONE),
     };
     glDrawBuffers(3, drawBuffers);
+    glReadBuffer(GL_NONE); // No readback: valid for every effect mask on baseline GL 3.3.
     const bool complete = candidateFBO && glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE &&
         CollectError("GL33 ray-effects output creation", diagnostic);
     if (!complete)
@@ -577,6 +579,7 @@ bool UGL33RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
     }
     if (!Init(inputs.contextGeneration, diagnostic)) return false;
     FStateGuard restore;
+    FPixelUnpackGuard unpack;
     // All temporary texture object creation/upload below is confined to a
     // texture unit captured by FState. A caller may legally leave unit 16+
     // active; touching that uncaptured unit would leak bindings on return.

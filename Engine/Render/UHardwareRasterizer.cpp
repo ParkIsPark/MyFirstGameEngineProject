@@ -3,6 +3,7 @@
 #include "FRenderScene.h"
 #include "FRenderQuality.h"
 #include "FRenderTarget.h"
+#include "FPixelUnpackGuard.h"
 #include "FTransform.h"
 #include "Material.h"
 #include "Shaders/HardwareRasterShaders.h"
@@ -559,9 +560,8 @@ bool UHardwareRasterizer::ResolveMaterialTexture(
         return false;
     }
 
-    GLint unpackAlignment = 4;
-    glGetIntegerv(GL_UNPACK_ALIGNMENT, &unpackAlignment);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    FPixelUnpackGuard unpack;
+    glActiveTexture(GL_TEXTURE0);
     unsigned candidate = 0;
     glGenTextures(1, &candidate);
     glBindTexture(GL_TEXTURE_2D, candidate);
@@ -576,7 +576,6 @@ bool UHardwareRasterizer::ResolveMaterialTexture(
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, unpackAlignment);
 
     const bool injectedFailure = failNextMaterialTextureUploadForTesting_;
     failNextMaterialTextureUploadForTesting_ = false;

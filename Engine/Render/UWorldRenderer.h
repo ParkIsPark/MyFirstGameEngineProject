@@ -80,6 +80,22 @@ struct FWorldRendererStats
     std::uint64_t cpuFramebufferUploads = 0;
 };
 
+// GL-free view-model used by both Editor surfaces. Auto in activeRayBackend
+// means no effective effects; requested intent must not advertise success.
+inline std::string DescribeRayTracingStatus(const FRenderFeatures& requested,
+                                           const FWorldRendererStats& stats)
+{
+    const auto name = [](ERayTracingBackend backend) {
+        return backend == ERayTracingBackend::ComputeGL43 ? "Compute" :
+            backend == ERayTracingBackend::CompatibleGL33 ? "Compatible" : "Auto";
+    };
+    const bool enabled = requested.rayTracing &&
+        stats.activeRayBackend != ERayTracingBackend::Auto;
+    return std::string("Hardware Raster | RT ") + (enabled ? "On (" : "Disabled (") +
+        (enabled ? name(stats.activeRayBackend) : "raster only") + ") | requested " +
+        (requested.rayTracing ? name(requested.rayTracingBackend) : "Off");
+}
+
 // Narrow dispatch seam: tests observe one immutable scene extraction and one
 // execution request without OpenGL. Production construction selects the
 // hardware G-buffer, raster-lighting, and composite executor.

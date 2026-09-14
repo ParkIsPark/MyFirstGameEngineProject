@@ -1863,6 +1863,96 @@ public:
     ~FScopedRejectedDeveloperLink() { __glewGetProgramiv=developerOriginalGetProgramiv; }
 };
 
+// Enforce the baseline GL 3.3 read-buffer completeness rule even on a newer
+// driver that relaxes it. Delegate every valid FBO to the actual driver.
+static PFNGLCHECKFRAMEBUFFERSTATUSPROC strictOriginalFramebufferStatus = nullptr;
+static GLenum __stdcall StrictGL33FramebufferStatus(GLenum target)
+{
+    GLint read = 0, objectType = GL_NONE;
+    glGetIntegerv(GL_READ_BUFFER, &read);
+    if (read != GL_NONE) {
+        glGetFramebufferAttachmentParameteriv(GL_READ_FRAMEBUFFER, read,
+            GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &objectType);
+        if (objectType == GL_NONE) return GL_FRAMEBUFFER_INCOMPLETE_READ_BUFFER;
+    }
+    return strictOriginalFramebufferStatus(target);
+}
+
+class FHostileUploadFixture
+{
+public:
+    GLuint buffer = 0, texture = 0;
+    const GLenum fields[6] = {GL_UNPACK_ALIGNMENT, GL_UNPACK_ROW_LENGTH,
+        GL_UNPACK_IMAGE_HEIGHT, GL_UNPACK_SKIP_PIXELS, GL_UNPACK_SKIP_ROWS,
+        GL_UNPACK_SKIP_IMAGES};
+    const GLint values[6] = {8, 17, 19, 3, 5, 7};
+    FHostileUploadFixture()
+    {
+        glGenBuffers(1, &buffer);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer);
+        unsigned char bytes[16] = {};
+        glBufferData(GL_PIXEL_UNPACK_BUFFER, sizeof(bytes), bytes, GL_STATIC_DRAW);
+        glGenTextures(1, &texture);
+        Set();
+    }
+    void Set()
+    {
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer);
+        for (int i = 0; i < 6; ++i) glPixelStorei(fields[i], values[i]);
+        glActiveTexture(GL_TEXTURE12);
+        glBindTexture(GL_TEXTURE_2D, texture);
+    }
+    bool Preserved()
+    {
+        GLint value = 0;
+        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &value);
+        bool okay = value == static_cast<GLint>(buffer);
+        for (int i = 0; i < 6; ++i) {
+            glGetIntegerv(fields[i], &value); okay &= value == values[i];
+        }
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &value); okay &= value == GL_TEXTURE12;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &value);
+        return okay && value == static_cast<GLint>(texture);
+    }
+    static bool NoError()
+    {
+        bool okay = true;
+        for (int i = 0; i < 32; ++i) {
+            if (glGetError() == GL_NO_ERROR) return okay;
+            okay = false;
+        }
+        return false;
+    }
+    ~FHostileUploadFixture()
+    {
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        for (int i = 0; i < 6; ++i) glPixelStorei(fields[i], i == 0 ? 4 : 0);
+        glActiveTexture(GL_TEXTURE12); glBindTexture(GL_TEXTURE_2D, 0);
+        glDeleteTextures(1, &texture); glDeleteBuffers(1, &buffer);
+        glActiveTexture(GL_TEXTURE0);
+        NoError();
+    }
+};
+
+// Observe the real atlas upload boundary, including 3D-only IMAGE_HEIGHT and
+// SKIP_IMAGES (2D readback alone cannot detect those fields). Always call GL.
+static PFNGLTEXIMAGE3DPROC originalAtlasUpload = nullptr;
+static unsigned atlasUploadCalls = 0, invalidAtlasUnpack = 0;
+static void __stdcall ObserveAtlasUpload(GLenum target, GLint level, GLint internal,
+    GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format,
+    GLenum type, const void* pixels)
+{
+    ++atlasUploadCalls;
+    const GLenum queries[] = {GL_PIXEL_UNPACK_BUFFER_BINDING, GL_UNPACK_ALIGNMENT,
+        GL_UNPACK_ROW_LENGTH, GL_UNPACK_IMAGE_HEIGHT, GL_UNPACK_SKIP_PIXELS,
+        GL_UNPACK_SKIP_ROWS, GL_UNPACK_SKIP_IMAGES};
+    for (int i = 0; i < 7; ++i) {
+        GLint value = 0; glGetIntegerv(queries[i], &value);
+        if (value != (i == 1 ? 1 : 0)) ++invalidAtlasUnpack;
+    }
+    originalAtlasUpload(target, level, internal, width, height, depth, border, format, type, pixels);
+}
+
 class FRayEffectsSelfTestApp final : public Engine
 {
 public:
@@ -3324,6 +3414,9 @@ public:
         FRayEffectOutputs schedulerFailure, schedulerRetry;
         const bool schedulerNeutral = retryScheduler.Execute(
             retryInputs, retrySelection, schedulerFailure);
+        check("failed real effect pass exposes disabled effective backend with persistent reason",
+              retryScheduler.ActiveKind() == ERayTracingBackend::Auto &&
+              retryScheduler.BackendReason().find("retaining raster") != std::string::npos);
         check("GL33 failed upload counts allocated rollback objects",
               retryScheduler.Stats().resourceAllocations == 25u &&
               retryScheduler.Stats().sceneUploads == 0u);
@@ -3556,6 +3649,164 @@ public:
                   backend.Stats().resourceAllocations == backend.Stats().releasedResources &&
                   backend.Stats().residentBLAS == 0 && backend.Stats().ownedOutputTextures == 0 &&
                   glGetError() == GL_NO_ERROR);
+        }
+
+        // New allocation, refresh, resize and rollback under complete hostile
+        // unpack state. Removing any normalizing field or binding restore fails.
+        {
+            auto readTarget = FRenderTarget::TextureViewport(16, 16, ContextGeneration());
+            auto drawTarget = FRenderTarget::TextureViewport(16, 16, ContextGeneration());
+            auto bindSeparate = [&] {
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, readTarget.Identity());
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, drawTarget.Identity());
+            };
+            auto separatePreserved = [&] {
+                GLint read = 0, draw = 0;
+                glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
+                glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+                return read == static_cast<GLint>(readTarget.Identity()) &&
+                    draw == static_cast<GLint>(drawTarget.Identity());
+            };
+            bindSeparate();
+            auto nested = FRenderTarget::TextureViewport(16, 16, ContextGeneration());
+            check("target allocation preserves distinct READ=A DRAW=B", separatePreserved());
+            bindSeparate();
+            const bool began = nested.Begin(); nested.End();
+            check("target Begin/End preserves distinct READ=A DRAW=B", began && separatePreserved());
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            {
+                FHostileUploadFixture hostile;
+                originalAtlasUpload = __glewTexImage3D;
+                atlasUploadCalls = invalidAtlasUnpack = 0;
+                __glewTexImage3D = ObserveAtlasUpload;
+                bindSeparate();
+                auto firstHostile = FRenderTarget::TextureViewport(32, 32, ContextGeneration());
+                check("target first allocation normalizes full unpack and preserves READ/DRAW",
+                      firstHostile.IsValid() && hostile.Preserved() && separatePreserved() && hostile.NoError());
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                UHardwareGBuffer uploadGBuffer;
+                UHardwareRasterizer uploadRaster;
+                URasterLightingPass uploadLighting;
+                UGL33RayTracingBackend uploadRays;
+                UGPUMeshCache uploadMeshes(adapter);
+                Material textured = cubeMaterial;
+                textured.texWidth = textured.texHeight = 2; textured.texChannels = 3;
+                textured.texData.assign(12, 120);
+                FRenderScene uploadScene = scene;
+                uploadScene.meshes[0].materialOverride = resolved(textured);
+                const char* uploadHDR = "task13_final_upload.tmp.hdr";
+                {
+                    std::ofstream hdr(uploadHDR, std::ios::binary);
+                    hdr << "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 2 +X 2\n";
+                    const unsigned char pixels[16] = {120,80,60,129,120,80,60,129,120,80,60,129,120,80,60,129};
+                    hdr.write(reinterpret_cast<const char*>(pixels), sizeof(pixels));
+                }
+                uploadScene.environment.skyPath = uploadHDR;
+                for (int width : {64, 96, 64}) {
+                    hostile.Set(); bindSeparate();
+                    const bool targetOkay = nested.Resize(width, 64, ContextGeneration());
+                    check("target resize normalizes unpack and preserves independent bindings",
+                          targetOkay && hostile.Preserved() && separatePreserved() && hostile.NoError());
+                    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                    hostile.Set();
+                    const bool gbOkay = uploadGBuffer.Resize(width, 64, ContextGeneration());
+                    check("G-buffer allocation/resize accepts hostile unpack state", gbOkay && hostile.Preserved() && hostile.NoError());
+                    hostile.Set();
+                    uploadScene.environment.skyPath.clear();
+                    uploadLighting.PrepareEnvironment(uploadScene, ContextGeneration(), &diagnostic);
+                    uploadScene.environment.skyPath = uploadHDR;
+                    const bool envOkay = uploadLighting.PrepareEnvironment(uploadScene, ContextGeneration(), &diagnostic);
+                    check("HDRI upload/cache preserves caller unit 12 and full unpack state", envOkay && hostile.Preserved() && hostile.NoError());
+                    glActiveTexture(GL_TEXTURE0);
+                    glBindTexture(GL_TEXTURE_2D, uploadLighting.EnvironmentTexture());
+                    float environmentPixels[12] = {};
+                    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGB, GL_FLOAT, environmentPixels);
+                    bool environmentExact = envOkay;
+                    for (int pixel = 0; pixel < 4; ++pixel)
+                        environmentExact &= std::fabs(environmentPixels[pixel * 3] - .9375f) < .002f &&
+                            std::fabs(environmentPixels[pixel * 3 + 1] - .625f) < .002f &&
+                            std::fabs(environmentPixels[pixel * 3 + 2] - .46875f) < .002f;
+                    check("HDRI first/refresh content ignores hostile row/image/skip layout", environmentExact);
+                    hostile.Set();
+                    for (auto& channel : textured.texData) ++channel;
+                    uploadMeshes.BeginFrame();
+                    const bool geometryOkay = uploadRaster.RenderGeometry(uploadScene, quality, uploadMeshes,
+                        uploadGBuffer, uploadLighting.EnvironmentTexture(), ContextGeneration(), &diagnostic);
+                    check("material first upload/refresh preserves full unpack state", geometryOkay && hostile.Preserved() && hostile.NoError());
+                    glBindFramebuffer(GL_READ_FRAMEBUFFER, uploadGBuffer.Framebuffer());
+                    glReadBuffer(uploadGBuffer.ColorAttachment(EHardwareGBufferSemantic::AlbedoShininess));
+                    float centerAlbedo[4] = {};
+                    glReadPixels(width / 2, 32, 1, 1, GL_RGBA, GL_FLOAT, centerAlbedo);
+                    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+                    const float texel = std::pow(textured.texData[0] / 255.f, 2.2f);
+                    check("material first/refresh sampled texels ignore hostile row/skip layout",
+                          geometryOkay && std::fabs(centerAlbedo[0] - textured.kd.x * texel) < .002f &&
+                          std::fabs(centerAlbedo[1] - textured.kd.y * texel) < .002f);
+                    hostile.Set();
+                    FRasterLightingOutput uploadLit;
+                    const bool litOkay = uploadLighting.Render(uploadScene, quality, uploadGBuffer, ContextGeneration(), uploadLit, &diagnostic);
+                    check("lighting allocation/resize preserves caller unit 12 and unpack state", litOkay && hostile.Preserved() && hostile.NoError());
+                    FRayEffectInputs uploadInputs = retryInputs;
+                    uploadInputs.scene = &uploadScene; uploadInputs.gbuffer = &uploadGBuffer;
+                    uploadInputs.rasterLighting = &uploadLit; uploadInputs.width = width;
+                    hostile.Set();
+                    FRayEffectOutputs effects;
+                    const bool rayOkay = uploadRays.RenderEffects(uploadInputs, effects, &diagnostic);
+                    check("Compatible allocation/scene refresh/resize preserves full unpack state", rayOkay && hostile.Preserved() && hostile.NoError());
+                }
+                hostile.Set(); ++textured.texData[0];
+                uploadRaster.InjectNextMaterialTextureUploadFailureForTesting(); uploadMeshes.BeginFrame();
+                const bool materialFailed = !uploadRaster.RenderGeometry(uploadScene, quality, uploadMeshes,
+                    uploadGBuffer, uploadLighting.EnvironmentTexture(), ContextGeneration(), &diagnostic);
+                check("material rollback restores hostile state", materialFailed && hostile.Preserved() && hostile.NoError());
+                uploadScene.environment.skyPath.clear();
+                uploadLighting.PrepareEnvironment(uploadScene, ContextGeneration(), &diagnostic);
+                uploadScene.environment.skyPath = uploadHDR;
+                hostile.Set(); uploadLighting.InjectNextEnvironmentTextureUploadFailureForTesting();
+                const bool envFailed = !uploadLighting.PrepareEnvironment(uploadScene, ContextGeneration(), &diagnostic);
+                check("HDRI rollback restores hostile state and unit 12", envFailed && hostile.Preserved() && hostile.NoError());
+                hostile.Set(); uploadRays.InjectNextUploadFailureForTesting();
+                uploadScene.meshes[0].modelTransform[3].x += .125f;
+                FRayEffectInputs failInputs = retryInputs; failInputs.scene = &uploadScene;
+                FRayEffectOutputs failOutputs;
+                const bool rayFailed = !uploadRays.RenderEffects(failInputs, failOutputs, &diagnostic);
+                check("Compatible upload rollback restores complete hostile state", rayFailed && hostile.Preserved() && hostile.NoError());
+                hostile.Set();
+                GLint maxSize = 0; glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxSize);
+                const bool invalidGB = !uploadGBuffer.Resize(maxSize + 1, 64, ContextGeneration());
+                const bool invalidLighting = !uploadLighting.Resize(maxSize + 1, 64, ContextGeneration(), &diagnostic);
+                check("G-buffer/lighting rejected resize preserves hostile state", invalidGB && invalidLighting && hostile.Preserved() && hostile.NoError());
+                bindSeparate();
+                const bool invalidTarget = !nested.Resize(maxSize + 1, 64, ContextGeneration());
+                check("target failed GL allocation restores unpack and separate READ/DRAW",
+                      invalidTarget && hostile.Preserved() && separatePreserved());
+                hostile.NoError(); // Expected GL_INVALID_VALUE from deliberately oversized storage.
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                std::remove(uploadHDR);
+                __glewTexImage3D = originalAtlasUpload;
+                check("real Compatible atlas uploads normalize every unpack field at GL boundary",
+                      atlasUploadCalls >= 3 && invalidAtlasUnpack == 0);
+                uploadRays.Shutdown(); uploadRaster.Shutdown(); uploadLighting.Shutdown();
+            }
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        }
+        {
+            strictOriginalFramebufferStatus = __glewCheckFramebufferStatus;
+            __glewCheckFramebufferStatus = StrictGL33FramebufferStatus;
+            UGL33RayTracingBackend maskRays;
+            for (unsigned mask = 0; mask < 8; ++mask) {
+                FRayEffectInputs maskInputs = retryInputs;
+                maskInputs.features.rayTracedShadows = (mask & 1) != 0;
+                maskInputs.features.rayTracedGI = (mask & 2) != 0;
+                maskInputs.features.rayTracedReflections = (mask & 4) != 0;
+                FRayEffectOutputs maskOutputs;
+                const bool maskOkay = maskRays.RenderEffects(maskInputs, maskOutputs, &diagnostic);
+                check(("GL33 baseline read-buffer rule effect mask " + std::to_string(mask)).c_str(),
+                      maskOkay && bool(maskOutputs.shadowVisibilityTarget) == bool(mask & 1) &&
+                      bool(maskOutputs.globalIlluminationTarget) == bool(mask & 2) &&
+                      bool(maskOutputs.reflectionTarget) == bool(mask & 4));
+            }
+            __glewCheckFramebufferStatus = strictOriginalFramebufferStatus;
         }
 
         FRenderScene sharedScene;

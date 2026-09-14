@@ -117,6 +117,7 @@ bool FRayEffectsScheduler::Execute(const FRayEffectInputs& inputs,
                                    FRayEffectOutputs& outputs)
 {
     outputs = {};
+    effectsActive_ = false;
     if (!HasRequestedEffects(inputs.features))
     {
         backendReason_ = inputs.features.rayTracing
@@ -202,6 +203,7 @@ bool FRayEffectsScheduler::Execute(const FRayEffectInputs& inputs,
             " failed; retaining raster output: " + diagnostic);
         return true;
     }
+    effectsActive_ = true;
     if (automaticComputeFallback_)
         backendReason_ = automaticFallbackReason_;
     else
@@ -212,6 +214,7 @@ bool FRayEffectsScheduler::Execute(const FRayEffectInputs& inputs,
 
 void FRayEffectsScheduler::Shutdown() noexcept
 {
+    effectsActive_ = false;
     if (backend_) { backend_->Shutdown(); CollectBackendStats(); }
     backend_.reset();
     activeKind_ = ERayTracingBackend::Auto;

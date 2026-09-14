@@ -1,5 +1,6 @@
 #include "UHardwareGBuffer.h"
 #include "FRenderTarget.h"
+#include "FPixelUnpackGuard.h"
 
 #include <GL/glew.h>
 
@@ -72,6 +73,7 @@ bool UHardwareGBuffer::Resize(int width, int height,
         else ForgetCurrentResources(); // old names belong to the destroyed context
     }
 
+    FPixelUnpackGuard unpack;
     GLint previousDrawFramebuffer = 0;
     GLint previousReadFramebuffer = 0;
     GLint previousActiveTexture = 0;

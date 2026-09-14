@@ -221,6 +221,7 @@
     <ClInclude Include="Engine\Render\Shaders\RayEffectsFragmentShaders.h" />
     <ClInclude Include="Engine\Render\Shaders\RayEffectsComputeShaders.h" />
     <ClInclude Include="Engine\Render\FRenderTarget.h" />
+    <ClInclude Include="Engine\Render\FPixelUnpackGuard.h" />
     <ClInclude Include="Engine\Render\FGPUMeshResource.h" />
     <ClInclude Include="Engine\Render\FRenderFeatures.h" />
     <ClInclude Include="Engine\Render\FRenderPipelinePlan.h" />

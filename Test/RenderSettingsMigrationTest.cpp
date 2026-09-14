@@ -15,6 +15,8 @@
 #include <cstdio>
 #include <fstream>
 #include <memory>
+#include <iostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -239,11 +241,15 @@ int main()
         FProjectDescriptor project;
         project.defaultRenderFeatures.rayTracing = true;
         project.defaultRenderFeatures.rayTracingBackend = ERayTracingBackend::ComputeGL43;
+        std::ostringstream warning;
+        auto* previous = std::cerr.rdbuf(warning.rdbuf());
         project.LoadSettings("render_settings_unknown.tmp");
+        std::cerr.rdbuf(previous);
         std::remove("render_settings_unknown.tmp");
-        Check("unknown project values retain safe existing defaults",
+        Check("unknown project backend warns and falls back to Auto while other invalid values retain defaults",
             project.defaultRenderFeatures.hardwareRaster && project.defaultRenderFeatures.rayTracing &&
-            project.defaultRenderFeatures.rayTracingBackend == ERayTracingBackend::ComputeGL43);
+            project.defaultRenderFeatures.rayTracingBackend == ERayTracingBackend::Auto &&
+            warning.str().find("Metal") != std::string::npos && warning.str().find("Auto") != std::string::npos);
     }
 
     std::printf("=== render settings migration: %d passed, %d failed ===\n", passed, failed);

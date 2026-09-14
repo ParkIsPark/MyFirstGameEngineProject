@@ -2,6 +2,7 @@
 // Prerequisite: Engine.sln Debug|Win32. Older direct compile examples follow.
 // & 'C:\msys64\ucrt64\bin\g++.exe' -std=c++17 -Wall -Wextra -pedantic -I./include -I./Engine/Render -I./Engine/Core Test/RayEffectsSchedulingTest.cpp Engine/Render/IRayTracingBackend.cpp -o RayEffectsSchedulingTest.exe; if ($LASTEXITCODE -eq 0) { .\RayEffectsSchedulingTest.exe }
 #include "IRayTracingBackend.h"
+#include "UWorldRenderer.h"
 
 #include <cassert>
 #include <iostream>
@@ -119,6 +120,16 @@ FRayEffectInputs Inputs(const FRenderFeatures& features)
     return result;
 }
 
+void CheckStatus(const FRayEffectsScheduler& scheduler, const FRenderFeatures& features,
+                 const char* effective, const char* reason)
+{
+    FWorldRendererStats stats;
+    stats.activeRayBackend = scheduler.ActiveKind();
+    stats.backendReason = scheduler.BackendReason();
+    assert(DescribeRayTracingStatus(features, stats).find(effective) != std::string::npos);
+    assert(stats.backendReason.find(reason) != std::string::npos);
+}
+
 void CheckNoWorkCombinations()
 {
     FFakeFactory factory;
@@ -202,11 +213,13 @@ void CheckAutoFallsBackOnceAndForcedComputeDoesNot()
         assert(factory.compatibleCreates == 1);
         assert(factory.renderCalls == 1);
         assert(warnings.messages.size() == 1);
+        CheckStatus(scheduler, features, "On (Compatible)", "falling back");
         assert(scheduler.Execute(Inputs(features), automatic, outputs));
         assert(factory.computeCreates == 1);
         assert(factory.compatibleCreates == 1);
         assert(factory.renderCalls == 2);
         assert(warnings.messages.size() == 1);
+        CheckStatus(scheduler, features, "On (Compatible)", "falling back");
     }
 
     {
@@ -225,6 +238,7 @@ void CheckAutoFallsBackOnceAndForcedComputeDoesNot()
         assert(scheduler.Execute(Inputs(features), forced, outputs));
         assert(factory.computeCreates == 1);
         assert(warnings.messages.size() == 1);
+        CheckStatus(scheduler, features, "Disabled", "failed to initialize");
     }
 }
 
@@ -246,9 +260,11 @@ void CheckPermanentInitFailureIsNeutralWarnedAndLatched()
     assert(!outputs.shadowVisibilityTarget && !outputs.shadows);
     assert(factory.initCalls == 1 && factory.renderCalls == 0);
     assert(warnings.messages.size() == 1);
+    CheckStatus(scheduler, features, "Disabled", "injected initialization failure");
     assert(scheduler.Execute(Inputs(features), selection, outputs));
     assert(factory.initCalls == 1 && factory.renderCalls == 0);
     assert(warnings.messages.size() == 1);
+    CheckStatus(scheduler, features, "Disabled", "injected initialization failure");
 
     FRayEffectInputs nextContext = Inputs(features);
     nextContext.contextGeneration = 8;
@@ -273,6 +289,9 @@ void CheckAvailabilityChangeInvalidatesPermanentFailureLatch()
     unavailable.fallbackReason = "injected capability unavailable";
     assert(scheduler.Execute(Inputs(features), unavailable, outputs));
     assert(factory.calls == 0 && factory.renderCalls == 0);
+    CheckStatus(scheduler, features, "Disabled", "injected capability unavailable");
+    assert(scheduler.Execute(Inputs(features), unavailable, outputs));
+    CheckStatus(scheduler, features, "Disabled", "injected capability unavailable");
 
     const FBackendSelection available = Selection(
         ERayTracingBackend::CompatibleGL33, ERayTracingBackend::CompatibleGL33);
@@ -284,7 +303,7 @@ void CheckAvailabilityChangeInvalidatesPermanentFailureLatch()
 void CheckTransientRenderFailureRetriesNextFrame()
 {
     FFakeFactory factory;
-    factory.renderFailuresRemaining = 1;
+    factory.renderFailuresRemaining = 2;
     FWarnings warnings;
     FRayEffectsScheduler scheduler(factory, warnings);
     FRenderFeatures features;
@@ -297,8 +316,20 @@ void CheckTransientRenderFailureRetriesNextFrame()
     assert(scheduler.Execute(Inputs(features), selection, outputs));
     assert(!outputs.shadowVisibilityTarget && !outputs.shadows);
     assert(factory.renderCalls == 1 && warnings.messages.size() == 1);
+    assert(scheduler.ActiveKind() == ERayTracingBackend::Auto);
+    const auto failureReason = scheduler.BackendReason();
+    assert(failureReason.find("retaining raster") != std::string::npos);
+    FWorldRendererStats display;
+    display.activeRayBackend = scheduler.ActiveKind(); display.backendReason = failureReason;
+    assert(DescribeRayTracingStatus(features, display).find("Disabled") != std::string::npos);
     assert(scheduler.Execute(Inputs(features), selection, outputs));
     assert(factory.renderCalls == 2);
+    assert(scheduler.BackendReason() == failureReason && warnings.messages.size() == 1);
+    CheckStatus(scheduler, features, "Disabled", "retaining raster");
+    assert(scheduler.Execute(Inputs(features), selection, outputs));
+    assert(factory.renderCalls == 3);
+    display.activeRayBackend = scheduler.ActiveKind();
+    assert(DescribeRayTracingStatus(features, display).find("On (Compatible)") != std::string::npos);
     assert(outputs.shadowVisibilityTarget || outputs.shadows);
     assert(warnings.messages.size() == 1);
 }

@@ -236,6 +236,7 @@
     <ClInclude Include="Engine\Render\Shaders\RayEffectsFragmentShaders.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\Shaders\RayEffectsComputeShaders.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderTarget.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="Engine\Render\FPixelUnpackGuard.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FGPUMeshResource.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderFeatures.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="Engine\Render\FRenderPipelinePlan.h"><Filter>Engine\Render</Filter></ClInclude>

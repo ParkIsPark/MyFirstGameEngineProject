@@ -5,6 +5,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <iostream>
 
 namespace
 {
@@ -75,6 +76,11 @@ namespace
             ERayTracingBackend backend;
             if (parseBackend(ini.GetString(section, "RayTracingBackend"), backend))
                 features.rayTracingBackend = backend;
+            else {
+                features.rayTracingBackend = ERayTracingBackend::Auto;
+                std::cerr << "[Project] Unknown RayTracingBackend '"
+                    << ini.GetString(section, "RayTracingBackend") << "'; using Auto\n";
+            }
         }
         features.hardwareRaster = true;
     }

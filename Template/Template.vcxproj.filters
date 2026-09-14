@@ -221,6 +221,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\RayEffectsFragmentShaders.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\RayEffectsComputeShaders.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderTarget.h"><Filter>Engine\Render</Filter></ClInclude>
+    <ClInclude Include="$(EngineRootDir)Engine\Render\FPixelUnpackGuard.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FGPUMeshResource.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderFeatures.h"><Filter>Engine\Render</Filter></ClInclude>
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderPipelinePlan.h"><Filter>Engine\Render</Filter></ClInclude>

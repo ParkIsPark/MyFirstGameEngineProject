@@ -125,7 +125,7 @@ public:
     IRayTracingBackend* ActiveBackend() const { return backend_.get(); }
     ERayTracingBackend ActiveKind() const
     {
-        return backend_ ? activeKind_ : ERayTracingBackend::Auto;
+        return effectsActive_ && backend_ ? activeKind_ : ERayTracingBackend::Auto;
     }
 
 private:
@@ -144,6 +144,7 @@ private:
     std::string failureKey_;
     std::string warningKeys_;
     bool automaticComputeFallback_ = false;
+    bool effectsActive_ = false; // Last execution produced effects, not merely an initialized backend.
     std::string backendReason_;
     std::string failureReason_;
     std::string automaticFallbackReason_;

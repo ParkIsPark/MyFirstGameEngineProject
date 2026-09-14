@@ -235,6 +235,7 @@
     <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\RayEffectsFragmentShaders.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\Shaders\RayEffectsComputeShaders.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderTarget.h" />
+    <ClInclude Include="$(EngineRootDir)Engine\Render\FPixelUnpackGuard.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\FGPUMeshResource.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderFeatures.h" />
     <ClInclude Include="$(EngineRootDir)Engine\Render\FRenderPipelinePlan.h" />

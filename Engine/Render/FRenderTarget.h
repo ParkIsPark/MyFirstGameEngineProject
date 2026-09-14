@@ -17,8 +17,9 @@ struct FRenderTargetAttachments
 
 struct FRenderTargetBindingState
 {
-    int framebuffer = 0;
+    int framebuffer = 0; // Draw framebuffer; retained name for adapter source compatibility.
     int viewport[4] = {0, 0, 0, 0};
+    int readFramebuffer = 0;
 };
 
 class IRenderTargetGLAdapter
@@ -81,7 +82,7 @@ public:
     std::uint64_t ContextGeneration() const { return contextGeneration_; }
 
     // UWorldRenderer pairs Begin/End around every executor call. End restores
-    // the caller's framebuffer and viewport, including failure paths.
+    // the caller's independent read/draw framebuffers and viewport, including failures.
     bool Begin();
     void End() noexcept;
     void Release() noexcept;

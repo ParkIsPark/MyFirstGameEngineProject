@@ -1,4 +1,5 @@
 #include "FRenderTarget.h"
+#include "FPixelUnpackGuard.h"
 
 #include <GL/glew.h>
 
@@ -22,10 +23,12 @@ public:
     bool AllocateTextureViewport(int width, int height,
                                  FRenderTargetAttachments& out) override
     {
-        GLint previousFramebuffer = 0;
+        FPixelUnpackGuard unpack;
+        GLint previousFramebuffer = 0, previousReadFramebuffer = 0;
         GLint previousTexture = 0;
         GLint previousRenderbuffer = 0;
         glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFramebuffer);
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previousReadFramebuffer);
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &previousTexture);
         glGetIntegerv(GL_RENDERBUFFER_BINDING, &previousRenderbuffer);
 
@@ -56,7 +59,8 @@ public:
             && created.depthAttachment
             && glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
 
-        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<unsigned>(previousFramebuffer));
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<unsigned>(previousFramebuffer));
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<unsigned>(previousReadFramebuffer));
         glBindTexture(GL_TEXTURE_2D, static_cast<unsigned>(previousTexture));
         glBindRenderbuffer(GL_RENDERBUFFER, static_cast<unsigned>(previousRenderbuffer));
         if (!complete)
@@ -83,6 +87,7 @@ public:
     {
         FRenderTargetBindingState state;
         glGetIntegerv(GL_FRAMEBUFFER_BINDING, &state.framebuffer);
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &state.readFramebuffer);
         glGetIntegerv(GL_VIEWPORT, state.viewport);
         return state;
     }
@@ -95,7 +100,8 @@ public:
 
     void RestoreBindingState(const FRenderTargetBindingState& state) noexcept override
     {
-        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<unsigned>(state.framebuffer));
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<unsigned>(state.framebuffer));
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<unsigned>(state.readFramebuffer));
         glViewport(state.viewport[0], state.viewport[1],
                    state.viewport[2], state.viewport[3]);
     }

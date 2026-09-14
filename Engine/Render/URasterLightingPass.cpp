@@ -3,6 +3,7 @@
 #include "FRenderQuality.h"
 #include "FRenderScene.h"
 #include "FRenderTarget.h"
+#include "FPixelUnpackGuard.h"
 #include "Shaders/RasterLightingShaders.h"
 #include "UHardwareGBuffer.h"
 
@@ -422,6 +423,8 @@ bool URasterLightingPass::Resize(int width, int height,
         if (diagnostic) *diagnostic = "Raster lighting output exceeds GL_MAX_TEXTURE_SIZE";
         return false;
     }
+    FPixelUnpackGuard unpack;
+    glActiveTexture(GL_TEXTURE0); // Captured by FStateGuard; never touch caller unit 10+.
     glGenFramebuffers(1, &framebuffer_);
     glGenTextures(1, &colorTexture_);
     glBindTexture(GL_TEXTURE_2D, colorTexture_);
@@ -493,6 +496,8 @@ bool URasterLightingPass::LoadEnvironmentTexture(
         ++stats_.environmentTextureUploadFailures;
         return false;
     }
+    FPixelUnpackGuard unpack;
+    glActiveTexture(GL_TEXTURE0);
     unsigned candidate = 0;
     glGenTextures(1, &candidate);
     glBindTexture(GL_TEXTURE_2D, candidate);
