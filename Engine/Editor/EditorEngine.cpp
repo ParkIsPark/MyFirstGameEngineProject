@@ -856,16 +856,19 @@ void EditorEngine::DrawRenderSettings()
             const char* aaItems[] = { "Off (1x)", "SSAA 2x" };
             if (ImGui::Combo("Anti-Aliasing", &aaIdx, aaItems, 2)) { rs.ssaa = (aaIdx == 1) ? 2 : 1; changed = true; }
             changed |= ImGui::SliderFloat("Ambient Strength", &rs.ambientStrength, 0.0f, 3.0f);
+            changed |= ImGui::SliderFloat("Exposure EV", &rs.exposureEV, -16.0f, 16.0f);
+            changed |= ImGui::SliderFloat("Anisotropy", &rs.anisotropy, 1.0f, 16.0f, "%.0fx");
         }
         if (ImGui::CollapsingHeader("Ray Tracing", ImGuiTreeNodeFlags_DefaultOpen))
         {
             changed |= ImGui::SliderInt  ("GI Samples",        &rs.giSamples,   0, 32);
             changed |= ImGui::SliderInt  ("GI Bounces",        &rs.giBounces,   0, 4);
             changed |= ImGui::SliderFloat("GI Strength",       &rs.giStrength,  0.0f, 3.0f);
-            changed |= ImGui::SliderFloat("Reflection Strength", &rs.reflStrength, 0.0f, 2.0f);
+            changed |= ImGui::SliderFloat("Reflection Strength", &rs.reflStrength, 0.0f, 1.0f);
             changed |= ImGui::SliderFloat("Shininess",         &rs.shininess, 1.0f, 256.0f);
             changed |= ImGui::SliderInt  ("Shadow Samples",    &rs.shadowSamples, 1, 16);
             changed |= ImGui::SliderFloat("Shadow Softness",   &rs.shadowSoftness, 0.0f, 0.3f);
+            changed |= ImGui::SliderInt  ("Temporal Frames",    &rs.temporalFrames, 1, 32);
         }
 
         ImGui::EndDisabled();
@@ -1115,15 +1118,48 @@ void EditorEngine::ApplyMaterialToSelected(const std::string& path)
 
 // Shared kd/ks/shininess/mirror/texture widgets (Details + Material Editor).
 // Returns true if any field changed this frame.
-bool EditorEngine::DrawMaterialFields(Material& m)
+bool EditorEngine::DrawMaterialFields(Material& m, bool snapshotUndo)
 {
     bool ch = false;
-    ch |= ImGui::ColorEdit3("Diffuse",   &m.kd.x);
-    ch |= ImGui::ColorEdit3("Specular",  &m.ks.x);
-    ch |= ImGui::DragFloat ("Shininess", &m.shininess, 1.0f, 0.0f, 256.0f);
+    auto track = [&](bool changed)
+    {
+        if (snapshotUndo && ImGui::IsItemActivated()) PushUndo();
+        ch |= changed;
+    };
+
+    int blendMode = m.blendMode == EMaterialBlendMode::Translucent ? 1 : 0;
+    const char* blendModes[] = { "Opaque", "Translucent" };
+    const bool blendChanged = ImGui::Combo("Blend Mode", &blendMode, blendModes, 2);
+    track(blendChanged);
+    if (blendChanged)
+        m.blendMode = blendMode == 1 ? EMaterialBlendMode::Translucent : EMaterialBlendMode::Opaque;
+
+    ImGui::BeginDisabled(m.blendMode != EMaterialBlendMode::Translucent);
+    track(ImGui::SliderFloat("Opacity", &m.opacity, 0.0f, 1.0f));
+    track(ImGui::DragFloat("Refraction", &m.refraction, 0.01f, 1.0f, 2.42f, "%.2f"));
+    track(ImGui::ColorEdit3("Transmittance Color", &m.transmittanceColor.x));
+    track(ImGui::DragFloat("Transmittance Distance", &m.transmittanceDistance,
+                           0.05f, 0.0001f, 10000.0f, "%.3f"));
+    track(ImGui::Checkbox("Cast Ray Traced Shadows", &m.castRayTracedShadows));
+    ImGui::EndDisabled();
+    if (m.blendMode == EMaterialBlendMode::Translucent)
+    {
+        const FRenderFeatures& features = ActiveWorld().GetScene().renderFeatures;
+        const bool available = features.rayTracing && features.rayTracedTranslucency &&
+            worldRenderer_.Stats().activeRayBackend != ERayTracingBackend::Auto;
+        if (!available)
+            ImGui::TextColored(ImVec4(0.88f, 0.66f, 0.35f, 1.0f),
+                "Ray-traced translucency unavailable: using safe opaque/local fallback.");
+    }
+
+    track(ImGui::ColorEdit3("Diffuse",   &m.kd.x));
+    track(ImGui::ColorEdit3("Specular",  &m.ks.x));
+    track(ImGui::DragFloat ("Shininess", &m.shininess, 1.0f, 0.0f, 256.0f));
     float mir = glm::max(m.km.x, glm::max(m.km.y, m.km.z));
-    if (ImGui::SliderFloat("Mirror", &mir, 0.0f, 1.0f)) { m.km = glm::vec3(mir); ch = true; }
-    ImGui::TextDisabled("(Mirror reflection shows in GPU RT mode)");
+    const bool mirrorChanged = ImGui::SliderFloat("Legacy Mirror", &mir, 0.0f, 1.0f);
+    track(mirrorChanged);
+    if (mirrorChanged) m.km = glm::vec3(mir);
+    ImGui::TextDisabled("Legacy control; future PBR migration uses Metallic/Roughness.");
 
     const std::string tex = m.diffuseTexPath.empty() ? "(none)" : m.diffuseTexPath;
     ImGui::Text("Texture: %s", tex.c_str());
@@ -1131,16 +1167,21 @@ bool EditorEngine::DrawMaterialFields(Material& m)
     if (ImGui::BeginDragDropTarget())
     {
         if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_TEX"))
-        { m.diffuseTexPath = CopyToContent(std::string((const char*)pl->Data)); UMaterial::LoadTexture(m); content_.clear(); ScanContent(); ch = true; }
+        { if (snapshotUndo) PushUndo(); m.diffuseTexPath = CopyToContent(std::string((const char*)pl->Data)); UMaterial::LoadTexture(m); content_.clear(); ScanContent(); ch = true; }
         ImGui::EndDragDropTarget();
     }
     if (ImGui::IsItemClicked())
     {
         std::string p = FFileDialog::OpenAsset();
-        if (!p.empty()) { m.diffuseTexPath = CopyToContent(p); UMaterial::LoadTexture(m); content_.clear(); ScanContent(); ch = true; }
+        if (!p.empty()) { if (snapshotUndo) PushUndo(); m.diffuseTexPath = CopyToContent(p); UMaterial::LoadTexture(m); content_.clear(); ScanContent(); ch = true; }
     }
     if (!m.diffuseTexPath.empty() && ImGui::SmallButton("Clear Texture"))
-    { m.texData.clear(); m.texWidth = m.texHeight = 0; m.diffuseTexPath.clear(); ch = true; }
+    { if (snapshotUndo) PushUndo(); m.texData.clear(); m.texWidth = m.texHeight = m.texChannels = 0; m.diffuseTexPath.clear(); ch = true; }
+    if (ch)
+    {
+        m.SanitizeOptics();
+        m.MarkRuntimeDirty();
+    }
     return ch;
 }
 
@@ -1152,7 +1193,7 @@ void EditorEngine::DrawProjectSettings()
     namespace fs = std::filesystem;
     static char buf[128];
     static FRenderFeatures projectFeatures;
-    ImGui::SetNextWindowSize(ImVec2(520, 330), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(560, 480), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Project Settings", &showProjectSettings_))
     {
         if (ImGui::IsWindowAppearing())
@@ -1185,25 +1226,35 @@ void EditorEngine::DrawProjectSettings()
         ImGui::Checkbox("Ray-Traced Shadows", &projectFeatures.rayTracedShadows);
         ImGui::Checkbox("Ray-Traced GI", &projectFeatures.rayTracedGI);
         ImGui::Checkbox("Ray-Traced Reflections", &projectFeatures.rayTracedReflections);
+        ImGui::Checkbox("Ray-Traced Translucency", &projectFeatures.rayTracedTranslucency);
         int backend = BackendIndex(projectFeatures.rayTracingBackend);
         if (ImGui::Combo("Ray Tracing Backend", &backend, kBackends, 3))
             projectFeatures.rayTracingBackend = BackendFromIndex(backend);
         ImGui::EndDisabled();
+        ImGui::TextDisabled("Requested backend: %s",
+            projectFeatures.rayTracing ? FProjectDescriptor::RayTracingBackendName(projectFeatures.rayTracingBackend) : "Off");
+        ImGui::TextWrapped("Current viewport: %s", DescribeRayTracingStatus(
+            ActiveWorld().GetScene().renderFeatures, worldRenderer_.Stats()).c_str());
+        if (!worldRenderer_.Stats().backendReason.empty())
+            ImGui::TextWrapped("Backend note: %s", worldRenderer_.Stats().backendReason.c_str());
         ImGui::Separator();
         if (ImGui::Button("Save"))
         {
             FIniFile ini; ini.LoadFromFile("Setting/DefaultEngine.ini");   // preserve existing keys
             const std::string title = ini.GetString("Display", "Title", "MyEngine Editor");
             const int dw = ini.GetInt("Display", "Width", 1280), dh = ini.GetInt("Display", "Height", 800);
+            const FRenderQuality quality = ReadRenderQuality(ini, "Render", FRenderQuality{});
             std::error_code ec; fs::create_directories("Setting", ec);
             std::ofstream f("Setting/DefaultEngine.ini");
             if (f) f << "# Engine boot settings (edited via Project Settings).\n"
-                     << "[Display]\nTitle = " << title << "\nWidth = " << dw << "\nHeight = " << dh << "\n\n"
-                     << "[Render]\nHardwareRaster = 1\n"
+                     << "[Display]\nTitle = " << title << "\nWidth = " << dw << "\nHeight = " << dh << "\n\n";
+            if (f) WriteRenderQuality(f, "Render", quality);
+            if (f) f << "HardwareRaster = 1\n"
                      << "RayTracing = " << (projectFeatures.rayTracing ? 1 : 0) << "\n"
                      << "RayTracedShadows = " << (projectFeatures.rayTracedShadows ? 1 : 0) << "\n"
                      << "RayTracedGI = " << (projectFeatures.rayTracedGI ? 1 : 0) << "\n"
                      << "RayTracedReflections = " << (projectFeatures.rayTracedReflections ? 1 : 0) << "\n"
+                     << "RayTracedTranslucency = " << (projectFeatures.rayTracedTranslucency ? 1 : 0) << "\n"
                      << "RayTracingBackend = " << FProjectDescriptor::RayTracingBackendName(projectFeatures.rayTracingBackend) << "\n\n"
                      << "[Startup]\nDefaultWorld = " << buf << "\n";
             proj_.defaultRenderFeatures = projectFeatures;
@@ -1295,7 +1346,8 @@ void EditorEngine::DrawToolbar()
     ImGui::BeginDisabled(!features.rayTracing);
     ImGui::Checkbox("Shadows", &features.rayTracedShadows); ImGui::SameLine();
     ImGui::Checkbox("GI", &features.rayTracedGI); ImGui::SameLine();
-    ImGui::Checkbox("Reflections", &features.rayTracedReflections);
+    ImGui::Checkbox("Reflections", &features.rayTracedReflections); ImGui::SameLine();
+    ImGui::Checkbox("Ray-Traced Translucency", &features.rayTracedTranslucency);
     ImGui::SameLine();
     int backend = BackendIndex(features.rayTracingBackend);
     ImGui::SetNextItemWidth(110.0f);
@@ -1623,30 +1675,7 @@ void EditorEngine::DrawDetails()
             else                      // per-instance override (or the mesh's own default)
             {
                 Material& m = mc->hasMaterialOverride ? mc->materialOverride : mc->mesh->material;
-                ImGui::ColorEdit3("Diffuse",   &m.kd.x);       snap();
-                ImGui::ColorEdit3("Specular",  &m.ks.x);       snap();
-                ImGui::DragFloat ("Shininess", &m.shininess, 1.0f, 0.0f, 256.0f); snap();
-                float mir = glm::max(m.km.x, glm::max(m.km.y, m.km.z));
-                if (ImGui::SliderFloat("Mirror", &mir, 0.0f, 1.0f)) m.km = glm::vec3(mir);
-                snap();
-                ImGui::TextDisabled("(Mirror reflection shows in GPU RT mode)");
-
-                const std::string tex = m.diffuseTexPath.empty() ? "(none)" : m.diffuseTexPath;
-                ImGui::Text("Texture: %s", tex.c_str());
-                ImGui::Button("Set Diffuse Texture  (drop image / click)", ImVec2(-1, 0));
-                if (ImGui::BeginDragDropTarget())
-                {
-                    if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("ASSET_TEX"))
-                    { PushUndo(); LoadMaterialTexture(m, CopyToContent(std::string((const char*)pl->Data))); content_.clear(); ScanContent(); }
-                    ImGui::EndDragDropTarget();
-                }
-                if (ImGui::IsItemClicked())
-                {
-                    std::string p = FFileDialog::OpenAsset();
-                    if (!p.empty()) { PushUndo(); LoadMaterialTexture(m, CopyToContent(p)); content_.clear(); ScanContent(); }
-                }
-                if (!m.diffuseTexPath.empty() && ImGui::SmallButton("Clear Texture"))
-                { PushUndo(); m.texData.clear(); m.texWidth = m.texHeight = 0; m.diffuseTexPath.clear(); }
+                DrawMaterialFields(m, true);
             }
         }
     }

@@ -79,7 +79,7 @@ private:
     void DrawBuildLog();                  // background-build output panel
     void DrawProjectSettings();           // set the DefaultWorld (Setting/DefaultEngine.ini)
     void DrawMaterialEditor();            // double-click a .material -> edit the shared asset
-    bool DrawMaterialFields(Material& m); // shared kd/ks/shininess/mirror/texture widgets (returns changed)
+    bool DrawMaterialFields(Material& m, bool snapshotUndo = false); // shared material widgets (returns changed)
     void DrawRenderSettings();            // AA / GI quality popup (persisted to ini)
     void LoadRenderSettings();            // Config/EditorSettings.ini -> members
     void SaveRenderSettings();            // members -> Config/EditorSettings.ini

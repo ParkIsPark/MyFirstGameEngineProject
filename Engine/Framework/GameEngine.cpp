@@ -15,9 +15,12 @@ void GameEngine::OnStartup()
 {
     worldRenderer_.Init();   // compile GPU passes now that GL is ready
     backbufferTarget_ = FRenderTarget::DefaultFramebuffer(Width(), Height(), ContextGeneration());
-    FIniFile ini;
-    if (ini.LoadFromFile("Config/GameSettings.ini"))
-        renderQuality_ = ReadRenderQuality(ini, "Render", renderQuality_);
+    FIniFile defaults;
+    if (defaults.LoadFromFile("Setting/DefaultGame.ini"))
+        renderQuality_ = ReadRenderQuality(defaults, "Render", renderQuality_);
+    FIniFile overrides;
+    if (overrides.LoadFromFile("Config/GameSettings.ini"))
+        renderQuality_ = ReadRenderQuality(overrides, "Render", renderQuality_);
 }
 
 void GameEngine::OnShutdown()

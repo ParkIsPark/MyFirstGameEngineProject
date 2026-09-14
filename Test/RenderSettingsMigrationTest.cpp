@@ -8,6 +8,7 @@
 //   set PATH=%CD%\bin;%PATH% && render_settings_migration_test.exe
 // ---------------------------------------------------------------------------
 #include "FProjectDescriptor.h"
+#include "FIniFile.h"
 #include "FWorldSerializer.h"
 #include "UWorld.h"
 #include "UScene.h"
@@ -49,6 +50,20 @@ namespace
         return f.hardwareRaster && f.rayTracing && f.rayTracedShadows &&
                f.rayTracedGI && f.rayTracedReflections && f.rayTracedTranslucency &&
                f.rayTracingBackend == ERayTracingBackend::Auto;
+    }
+
+    bool HasCorrectedQualityDefaults(const FIniFile& ini)
+    {
+        return ini.Has("Render", "SSAA") && ini.GetInt("Render", "SSAA") == 1 &&
+            ini.Has("Render", "ShadowSamples") && ini.GetInt("Render", "ShadowSamples") == 4 &&
+            ini.Has("Render", "ShadowSoftness") && ini.GetFloat("Render", "ShadowSoftness") == 0.05f &&
+            ini.Has("Render", "GISamples") && ini.GetInt("Render", "GISamples") == 4 &&
+            ini.Has("Render", "GIBounces") && ini.GetInt("Render", "GIBounces") == 1 &&
+            ini.Has("Render", "GIStrength") && ini.GetFloat("Render", "GIStrength") == 1.0f &&
+            ini.Has("Render", "ReflectionStrength") && ini.GetFloat("Render", "ReflectionStrength") == 1.0f &&
+            ini.Has("Render", "ExposureEV") && ini.GetFloat("Render", "ExposureEV") == 0.0f &&
+            ini.Has("Render", "TemporalFrames") && ini.GetInt("Render", "TemporalFrames") == 32 &&
+            ini.Has("Render", "Anisotropy") && ini.GetFloat("Render", "Anisotropy") == 8.0f;
     }
 }
 
@@ -271,6 +286,18 @@ int main()
         std::remove("render_settings_absent.tmp");
         Check("absent project translucency field preserves caller value",
             loaded && !project.defaultRenderFeatures.rayTracedTranslucency);
+    }
+
+    // Mutation caught: generated projects omitting the visible translucency
+    // feature or any corrected quality default from their shipped profiles.
+    {
+        FIniFile engine;
+        FIniFile game;
+        const bool loaded = engine.LoadFromFile("Template/Setting/DefaultEngine.ini") &&
+                            game.LoadFromFile("Template/Setting/DefaultGame.ini");
+        Check("template defaults expose translucency and corrected Editor/Game quality",
+            loaded && engine.GetBool("Render", "RayTracedTranslucency", false) &&
+            HasCorrectedQualityDefaults(engine) && HasCorrectedQualityDefaults(game));
     }
 
     std::printf("=== render settings migration: %d passed, %d failed ===\n", passed, failed);
