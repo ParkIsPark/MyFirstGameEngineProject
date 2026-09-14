@@ -318,10 +318,10 @@ bool UGL33RayTracingBackend::Init(std::uint64_t contextGeneration,
     contextGeneration_ = contextGeneration;
 
     glUseProgram(program_);
-    const char* names[] = {"uPositionCoverage", "uShadingNormalModel",
-        "uAlbedoShininess", "uSpecularMirror", "uIdentity",
-        "uUnshadowedDirect", "uSky", "uTriangles", "uBLASNodes", "uBLASIndices",
-        "uInstances", "uTLASNodes", "uTLASIndices", "uInstanceIdentities",
+    const char* names[] = {"uPositionCoverage", "uGeometricNormal",
+        "uShadingNormalModel", "uAlbedoShininess", "uSpecularMirror",
+        "uIdentity", "uUnshadowedDirect", "uSky", "uTriangles", "uBLASNodes",
+        "uBLASIndices", "uInstances", "uTLASNodes", "uTLASIndices",
         "uMaterials", "uMaterialAtlas"};
     for (int unit = 0; unit < UsedTextureUnits; ++unit)
         glUniform1i(glGetUniformLocation(program_, names[unit]), unit);
@@ -622,6 +622,7 @@ bool UGL33RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
     glBindVertexArray(fullscreenVAO_);
     const GLuint textures2D[] = {
         inputs.gbuffer->Texture(EHardwareGBufferSemantic::PositionCoverage),
+        inputs.gbuffer->Texture(EHardwareGBufferSemantic::GeometricNormal),
         inputs.gbuffer->Texture(EHardwareGBufferSemantic::ShadingNormalModel),
         inputs.gbuffer->Texture(EHardwareGBufferSemantic::AlbedoShininess),
         inputs.gbuffer->Texture(EHardwareGBufferSemantic::SpecularMirror),
@@ -629,7 +630,7 @@ bool UGL33RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
         static_cast<GLuint>(inputs.rasterLighting->unshadowedDirectTarget.identity),
         inputs.environmentTexture,
     };
-    for (int unit = 0; unit < 7; ++unit)
+    for (int unit = 0; unit < 8; ++unit)
     {
         glActiveTexture(GL_TEXTURE0 + unit);
         glBindTexture(GL_TEXTURE_2D, textures2D[unit]);
@@ -637,10 +638,10 @@ bool UGL33RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
     }
     const GLuint bufferTextures[] = {triangleTexture_, blasNodeTexture_,
         blasIndexTexture_, instanceTexture_, tlasNodeTexture_, tlasIndexTexture_,
-        instanceIdentityTexture_, materialTexture_};
-    for (int index = 0; index < 8; ++index)
+        materialTexture_};
+    for (int index = 0; index < 7; ++index)
     {
-        const int unit = 7 + index;
+        const int unit = 8 + index;
         glActiveTexture(GL_TEXTURE0 + unit);
         glBindTexture(GL_TEXTURE_BUFFER, bufferTextures[index]);
         glBindSampler(unit, 0);

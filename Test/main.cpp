@@ -3181,6 +3181,146 @@ public:
         controlledInputs.environmentTexture = 0;
         glDeleteTextures(1, &controlledHDRITexture);
 
+        GLuint lowEnergyDirectTexture = 0;
+        const GLfloat lowEnergyPrecomputed[4] = {0.8f, 0.6f, 0.4f, 1.0f};
+        glGenTextures(1, &lowEnergyDirectTexture);
+        glBindTexture(GL_TEXTURE_2D, lowEnergyDirectTexture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, 1, 1, 0, GL_RGBA,
+            GL_FLOAT, lowEnergyPrecomputed);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        controlledLighting.unshadowedDirectTarget =
+            FRenderOutputView{lowEnergyDirectTexture, 1, 1, true};
+        if (controlledGBuffer.BindForGeometry())
+        {
+            const GLfloat geometric[4] = {0.0f, 0.0f, 1.0f, 0.0f};
+            const GLfloat flatNormal[4] = {0.0f, 0.0f, 1.0f, 0.0f};
+            glClearBufferfv(GL_COLOR, 1, geometric);
+            glClearBufferfv(GL_COLOR, 2, flatNormal);
+            controlledGBuffer.EndGeometry();
+        }
+        controlledScene.pointLights = {{glm::vec3(0.0f, 0.0f, 4.0f),
+            glm::vec3(8.0e-5f, 0.0f, 0.0f)}};
+        controlledInputs.features.rayTracedReflections = false;
+        controlledInputs.features.rayTracedShadows = true;
+        controlledInputs.features.rayTracedGI = false;
+        controlledInputs.quality.shadowSamples = 4;
+        controlledInputs.quality.shadowSoftness = 0.0f;
+        FRayEffectOutputs lowEnergy33, lowEnergy43;
+        const bool lowEnergy33OK = controlledRays.RenderEffects(
+            controlledInputs, lowEnergy33, &diagnostic);
+        const bool lowEnergy43OK = computeQualityAvailable &&
+            computeControlledRays.RenderEffects(
+                controlledInputs, lowEnergy43, &diagnostic);
+        const auto lowEnergy33Pixel = readTarget(
+            lowEnergy33.shadowedDirectTarget, GL_RGBA, 4, 1, 1);
+        const auto lowEnergy43Pixel = readComputeTarget(
+            lowEnergy43.shadowedDirectTarget, GL_RGBA, 4, 1, 1);
+        check("sub-epsilon nonzero Flat direct channels remain fully shadowable",
+              lowEnergy33OK && lowEnergy33Pixel[0] < 0.01f &&
+              std::fabs(lowEnergy33Pixel[1] - 0.6f) < 0.01f &&
+              std::fabs(lowEnergy33Pixel[2] - 0.4f) < 0.01f);
+        if (computeQualityAvailable)
+            check("GL43 sub-epsilon Flat shadow ratio matches GL33",
+                  lowEnergy43OK && nearImages(lowEnergy33Pixel, lowEnergy43Pixel));
+        controlledLighting.unshadowedDirectTarget = {};
+        glDeleteTextures(1, &lowEnergyDirectTexture);
+
+        controlledSurface.vertices = {
+            {glm::vec3(0.003f, -1.0f, -1.0f), glm::vec3(-1.0f, 0.0f, 0.0f), {}},
+            {glm::vec3(0.003f,  1.0f, -1.0f), glm::vec3(-1.0f, 0.0f, 0.0f), {}},
+            {glm::vec3(0.003f,  0.0f,  1.0f), glm::vec3(-1.0f, 0.0f, 0.0f), {}},
+        };
+        controlledSurface.MarkGeometryDirty();
+        if (controlledGBuffer.BindForGeometry())
+        {
+            const GLfloat geometric[4] = {0.0f, 0.0f, 1.0f, 0.0f};
+            const GLfloat divergentShading[4] = {1.0f, 0.0f, 0.0f, 2.0f};
+            glClearBufferfv(GL_COLOR, 1, geometric);
+            glClearBufferfv(GL_COLOR, 2, divergentShading);
+            controlledGBuffer.EndGeometry();
+        }
+        controlledScene.pointLights = {{glm::vec3(4.0f, 0.0f, 0.0f),
+            glm::vec3(16.0f, 0.0f, 0.0f)}};
+        FRayEffectOutputs geometricBias33, geometricBias43;
+        const bool geometricBias33OK = controlledRays.RenderEffects(
+            controlledInputs, geometricBias33, &diagnostic);
+        const bool geometricBias43OK = computeQualityAvailable &&
+            computeControlledRays.RenderEffects(
+                controlledInputs, geometricBias43, &diagnostic);
+        const auto geometricBias33Pixel = readTarget(
+            geometricBias33.shadowedDirectTarget, GL_RGBA, 4, 1, 1);
+        const auto geometricBias43Pixel = readComputeTarget(
+            geometricBias43.shadowedDirectTarget, GL_RGBA, 4, 1, 1);
+        check("divergent shading normal keeps shadow origin on geometric side",
+              geometricBias33OK && geometricBias33Pixel[0] < 0.01f);
+        if (computeQualityAvailable)
+            check("GL43 divergent-normal shadow bias matches GL33",
+                  geometricBias43OK &&
+                  nearImages(geometricBias33Pixel, geometricBias43Pixel));
+
+        controlledSurface.vertices = {
+            {glm::vec3(-2.0f, -2.0f, -100.0f), glm::vec3(0.0f, 0.0f, 1.0f), {}},
+            {glm::vec3( 2.0f, -2.0f, -100.0f), glm::vec3(0.0f, 0.0f, 1.0f), {}},
+            {glm::vec3( 0.0f,  2.0f, -100.0f), glm::vec3(0.0f, 0.0f, 1.0f), {}},
+        };
+        controlledSurface.MarkGeometryDirty();
+        if (controlledGBuffer.BindForGeometry())
+        {
+            const GLfloat geometric[4] = {0.0f, 1.0f, 0.0f, 0.0f};
+            const GLfloat oppositeShading[4] = {0.0f, -1.0f, 0.0f, 2.0f};
+            glClearBufferfv(GL_COLOR, 1, geometric);
+            glClearBufferfv(GL_COLOR, 2, oppositeShading);
+            controlledGBuffer.EndGeometry();
+        }
+        controlledScene.pointLights.clear();
+        controlledScene.environment.tint = glm::vec3(1.0f);
+        controlledScene.environment.horizon = glm::vec3(0.0f);
+        controlledScene.environment.zenith = glm::vec3(1.0f);
+        controlledScene.environment.exponent = 1.0f;
+        controlledInputs.features.rayTracedShadows = false;
+        controlledInputs.features.rayTracedGI = true;
+        controlledInputs.quality.giSamples = 32;
+        controlledInputs.quality.giBounces = 0;
+        FRayEffectOutputs geometricGI33, geometricGI43;
+        const bool geometricGI33OK = controlledRays.RenderEffects(
+            controlledInputs, geometricGI33, &diagnostic);
+        const bool geometricGI43OK = computeQualityAvailable &&
+            computeControlledRays.RenderEffects(
+                controlledInputs, geometricGI43, &diagnostic);
+        const auto geometricGI33Pixel = readTarget(
+            geometricGI33.globalIlluminationTarget, GL_RGBA, 4, 1, 1);
+        const auto geometricGI43Pixel = readComputeTarget(
+            geometricGI43.globalIlluminationTarget, GL_RGBA, 4, 1, 1);
+        check("divergent shading normal keeps GI hemisphere on geometric side",
+              geometricGI33OK && geometricGI33Pixel[0] > 0.6f);
+        if (computeQualityAvailable)
+            check("GL43 divergent-normal GI hemisphere matches GL33",
+                  geometricGI43OK &&
+                  nearImages(geometricGI33Pixel, geometricGI43Pixel));
+
+        controlledSurface.vertices = {
+            {glm::vec3(-2.0f, -2.0f, 2.0f), glm::vec3(0.0f, 0.0f, -1.0f), {}},
+            {glm::vec3( 2.0f, -2.0f, 2.0f), glm::vec3(0.0f, 0.0f, -1.0f), {}},
+            {glm::vec3( 0.0f,  2.0f, 2.0f), glm::vec3(0.0f, 0.0f, -1.0f), {}},
+        };
+        controlledSurface.MarkGeometryDirty();
+        if (controlledGBuffer.BindForGeometry())
+        {
+            const GLfloat geometric[4] = {0.0f, 0.0f, 1.0f, 0.0f};
+            const GLfloat phongNormal[4] = {0.0f, 0.0f, 1.0f, 2.0f};
+            glClearBufferfv(GL_COLOR, 1, geometric);
+            glClearBufferfv(GL_COLOR, 2, phongNormal);
+            controlledGBuffer.EndGeometry();
+        }
+        controlledScene.environment.tint = glm::vec3(0.0f);
+        controlledScene.environment.horizon = glm::vec3(0.0f);
+        controlledScene.environment.zenith = glm::vec3(0.0f);
+        controlledScene.pointLights.clear();
+        controlledInputs.features.rayTracedGI = false;
+        controlledInputs.features.rayTracedShadows = true;
+        controlledInputs.quality.giSamples = 0;
+
         auto readControlledShadow = [&](int lightCount, int samples,
                                         float softness)
         {

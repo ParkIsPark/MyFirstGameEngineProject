@@ -20,7 +20,7 @@ namespace
 constexpr unsigned ShadowBit = 1u;
 constexpr unsigned GIBit = 2u;
 constexpr unsigned ReflectionBit = 4u;
-constexpr int UsedTextureUnits = 8;
+constexpr int UsedTextureUnits = 9;
 constexpr int UsedSSBOBindings = 8;
 constexpr int UsedImageUnits = 3;
 constexpr int MaxShaderLights = 16;
@@ -401,7 +401,7 @@ bool UGL43RayTracingBackend::Init(std::uint64_t contextGeneration,
         maxWorkGroupCountX_ <= 0 || maxWorkGroupCountY_ <= 0 || maxBlock <= 0)
     {
         if (diagnostic)
-            *diagnostic = "GL43 ray effects need 8 SSBO bindings, 8 compute textures, "
+            *diagnostic = "GL43 ray effects need 8 SSBO bindings, 9 compute textures, "
                 "3 image units, 192 uniforms, and 8x8 compute work groups";
         return false;
     }
@@ -433,9 +433,9 @@ bool UGL43RayTracingBackend::Init(std::uint64_t contextGeneration,
     maxLights_ = MaxShaderLights;
 
     glUseProgram(program_);
-    const char* names[] = {"uPositionCoverage", "uShadingNormalModel",
-        "uAlbedoShininess", "uSpecularMirror", "uIdentity",
-        "uUnshadowedDirect", "uSky", "uMaterialAtlas"};
+    const char* names[] = {"uPositionCoverage", "uGeometricNormal",
+        "uShadingNormalModel", "uAlbedoShininess", "uSpecularMirror",
+        "uIdentity", "uUnshadowedDirect", "uSky", "uMaterialAtlas"};
     for (int unit = 0; unit < UsedTextureUnits; ++unit)
         glUniform1i(glGetUniformLocation(program_, names[unit]), unit);
     if (!CollectError("GL43 ray-effects sampler setup", diagnostic))
@@ -699,6 +699,7 @@ bool UGL43RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
     glUseProgram(program_);
     const GLuint textures2D[] = {
         inputs.gbuffer->Texture(EHardwareGBufferSemantic::PositionCoverage),
+        inputs.gbuffer->Texture(EHardwareGBufferSemantic::GeometricNormal),
         inputs.gbuffer->Texture(EHardwareGBufferSemantic::ShadingNormalModel),
         inputs.gbuffer->Texture(EHardwareGBufferSemantic::AlbedoShininess),
         inputs.gbuffer->Texture(EHardwareGBufferSemantic::SpecularMirror),
@@ -706,15 +707,15 @@ bool UGL43RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
         static_cast<GLuint>(inputs.rasterLighting->unshadowedDirectTarget.identity),
         inputs.environmentTexture,
     };
-    for (int unit = 0; unit < 7; ++unit)
+    for (int unit = 0; unit < 8; ++unit)
     {
         glActiveTexture(GL_TEXTURE0 + unit);
         glBindTexture(GL_TEXTURE_2D, textures2D[unit]);
         glBindSampler(unit, 0);
     }
-    glActiveTexture(GL_TEXTURE7);
+    glActiveTexture(GL_TEXTURE8);
     glBindTexture(GL_TEXTURE_2D_ARRAY, materialAtlasTexture_);
-    glBindSampler(7, 0);
+    glBindSampler(8, 0);
 
     const GLuint buffers[UsedSSBOBindings] = {triangleBuffer_, blasNodeBuffer_,
         blasIndexBuffer_, instanceBuffer_, tlasNodeBuffer_, tlasIndexBuffer_,

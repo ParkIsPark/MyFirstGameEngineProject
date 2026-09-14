@@ -412,6 +412,10 @@ const FPackedRayScene& FRaySceneCache::Prepare(const FRenderScene& scene)
             const std::uint64_t asset = instance->mesh->AssetId();
             const FBLAS& blas = blas_.at(asset);
             const FOffset offset = offsets.at(asset);
+            const std::uint32_t materialCount = static_cast<std::uint32_t>(
+                MaterialCount(*instance));
+            const std::uint32_t overridden =
+                instance->materialOverride.has_value() ? 1u : 0u;
             const glm::mat4 inverse = glm::inverse(instance->modelTransform);
             packed_.instanceTexels.emplace_back(inverse[0][0], inverse[1][0],
                 inverse[2][0], inverse[3][0]);
@@ -419,7 +423,13 @@ const FPackedRayScene& FRaySceneCache::Prepare(const FRenderScene& scene)
                 inverse[2][1], inverse[3][1]);
             packed_.instanceTexels.emplace_back(inverse[0][2], inverse[1][2],
                 inverse[2][2], inverse[3][2]);
-            packed_.instanceTexels.emplace_back(0.0f);
+            // The fourth inverse-transform row is unused by affine traversal.
+            // Mirror exact identity bits here so GL3.3 can stay within its
+            // minimum 16 fragment-texture-unit budget without a separate
+            // instance-identity sampler. GL4.3 retains the typed identity SSBO.
+            packed_.instanceTexels.emplace_back(EncodeUInt(instance->objectIdentity),
+                EncodeUInt(materialBase), EncodeUInt(materialCount),
+                EncodeUInt(overridden));
             packed_.instanceTexels.emplace_back(static_cast<float>(offset.node),
                 static_cast<float>(offset.triangle), static_cast<float>(offset.index),
                 static_cast<float>(instance->mesh->triangleCount()));
@@ -436,11 +446,8 @@ const FPackedRayScene& FRaySceneCache::Prepare(const FRenderScene& scene)
             }
             packed_.instanceTexels.emplace_back(worldMinimum, 0.0f);
             packed_.instanceTexels.emplace_back(worldMaximum, 0.0f);
-            const std::uint32_t materialCount = static_cast<std::uint32_t>(
-                MaterialCount(*instance));
             packed_.instanceIdentityTexels.emplace_back(instance->objectIdentity,
-                materialBase, materialCount,
-                instance->materialOverride.has_value() ? 1u : 0u);
+                materialBase, materialCount, overridden);
             materialBase += materialCount;
             boxes.push_back({worldMinimum, worldMaximum,
                 (worldMinimum + worldMaximum) * 0.5f, instanceIndex++});
