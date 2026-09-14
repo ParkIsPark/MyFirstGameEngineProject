@@ -656,7 +656,8 @@ bool UGL33RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
     glBindSampler(15, 0);
     glUniform1i(glGetUniformLocation(program_, "uDoShadows"), mask & ShadowBit ? 1 : 0);
     glUniform1i(glGetUniformLocation(program_, "uDoGI"), mask & GIBit ? 1 : 0);
-    glUniform1i(glGetUniformLocation(program_, "uDoReflections"), mask & ReflectionBit ? 1 : 0);
+    glUniform1i(glGetUniformLocation(program_, "uDoReflections"),
+        inputs.features.rayTracedReflections && inputs.quality.reflStrength > 0.0f ? 1 : 0);
     glUniform1i(glGetUniformLocation(program_, "uDoTranslucency"),
         inputs.features.rayTracedTranslucency ? 1 : 0);
     glUniform1i(glGetUniformLocation(program_, "uPrimaryOpticsBase"),

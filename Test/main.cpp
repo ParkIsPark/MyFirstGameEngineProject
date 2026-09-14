@@ -2231,6 +2231,9 @@ public:
               firstMaterialPack.materialTexels[13].x == 2.0f &&
               firstMaterialPack.materialTexels[13].y == 2.0f &&
               firstMaterialPack.primaryOpticsTexels.size() == 4u);
+        check("closed-volume validity is packed per ray instance",
+              firstMaterialPack.instanceTexels.size() == 7u &&
+              firstMaterialPack.instanceTexels[5].w == 1.0f);
         const std::uint64_t materialBLASRevision = firstMaterialPack.blasRevision;
         const std::uint64_t materialInstanceRevision =
             firstMaterialPack.instanceRevision;
@@ -2286,7 +2289,9 @@ public:
               !IsClosedTriangleMesh(*openGlass));
         check("open-mesh glass retains translucent packing",
               openGlassPack.valid && openGlassPack.materialTexels.size() == 8u &&
-              openGlassPack.materialTexels[7].z == 1.0f);
+              openGlassPack.materialTexels[7].z == 1.0f &&
+              openGlassPack.instanceTexels.size() == 7u &&
+              openGlassPack.instanceTexels[5].w == 0.0f);
         check("open-mesh glass selects deterministic reflection fallback diagnostic",
               openGlassPack.warnings.size() == 1u &&
               openGlassPack.warnings.front().find("reflection fallback") != std::string::npos);
@@ -3233,6 +3238,179 @@ public:
                                         GL_RGBA, 4, 1, 1)));
         controlledInputs.environmentTexture = 0;
         glDeleteTextures(1, &controlledHDRITexture);
+
+        auto renderControlledPixel = [&](IRayTracingBackend& backend,
+                                         const FRayEffectInputs& inputs,
+                                         bool optical)
+        {
+            FRayEffectOutputs output;
+            glm::vec4 pixel(-1.0f);
+            const bool okay = backend.RenderEffects(inputs, output, &diagnostic);
+            const std::optional<FRenderOutputView>& target = optical
+                ? output.opticalContributionTarget : output.shadowedDirectTarget;
+            if (okay && target)
+            {
+                glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
+                glBindTexture(GL_TEXTURE_2D,
+                    static_cast<GLuint>(target->identity));
+                glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, &pixel[0]);
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+            return std::make_pair(okay && target.has_value(), pixel);
+        };
+
+        // Translucency requests share the optical target allocation but must
+        // not silently enable the independent legacy mirror control.
+        controlledInputs.features.rayTracedReflections = false;
+        controlledInputs.features.rayTracedTranslucency = true;
+        const auto translucencyOnly33 = renderControlledPixel(
+            controlledRays, controlledInputs, true);
+        const auto translucencyOnly43 = computeQualityAvailable
+            ? renderControlledPixel(computeControlledRays, controlledInputs, true)
+            : std::make_pair(false, glm::vec4(0.0f));
+        check("translucency-only keeps opaque mirror contribution zero on GL33",
+              translucencyOnly33.first &&
+              glm::length(glm::vec3(translucencyOnly33.second)) < 0.001f &&
+              std::fabs(translucencyOnly33.second.a - 1.0f) < 0.001f);
+        if (computeQualityAvailable)
+            check("GL43 translucency-only mirror-zero result matches GL33",
+                  translucencyOnly43.first &&
+                  glm::length(glm::vec3(translucencyOnly43.second)) < 0.001f &&
+                  std::fabs(translucencyOnly43.second.a - 1.0f) < 0.001f &&
+                  glm::length(glm::vec4(translucencyOnly43.second -
+                                        translucencyOnly33.second)) < 0.015f);
+
+        // Two opposing sheets can provide a plausible exit even though the
+        // mesh is open. Closed-volume validity must force reflected green sky
+        // rather than allowing the red continuation marker to transmit.
+        UMesh openSlab;
+        openSlab.vertices = {
+            {{-2.0f, -2.0f,  0.0f}, {0.0f, 0.0f,  1.0f}, {}},
+            {{ 2.0f, -2.0f,  0.0f}, {0.0f, 0.0f,  1.0f}, {}},
+            {{ 0.0f,  2.0f,  0.0f}, {0.0f, 0.0f,  1.0f}, {}},
+            {{-2.0f, -2.0f, -1.0f}, {0.0f, 0.0f, -1.0f}, {}},
+            {{ 0.0f,  2.0f, -1.0f}, {0.0f, 0.0f, -1.0f}, {}},
+            {{ 2.0f, -2.0f, -1.0f}, {0.0f, 0.0f, -1.0f}, {}},
+        };
+        openSlab.indices = {0u, 1u, 2u, 3u, 4u, 5u};
+        openSlab.FinalizeGeometry();
+        UMesh redMarker;
+        redMarker.vertices = {
+            {{-3.0f, -3.0f, -2.0f}, {0.0f, 0.0f, 1.0f}, {}},
+            {{ 3.0f, -3.0f, -2.0f}, {0.0f, 0.0f, 1.0f}, {}},
+            {{ 0.0f,  3.0f, -2.0f}, {0.0f, 0.0f, 1.0f}, {}},
+        };
+        redMarker.indices = {0u, 1u, 2u};
+        redMarker.FinalizeGeometry();
+        Material glassMaterial;
+        glassMaterial.blendMode = EMaterialBlendMode::Translucent;
+        glassMaterial.opacity = 0.0f;
+        glassMaterial.refraction = 1.52f;
+        glassMaterial.transmittanceColor = glm::vec3(1.0f);
+        glassMaterial.castRayTracedShadows = true;
+        Material markerMaterial;
+        markerMaterial.emissive = glm::vec3(1.0f, 0.0f, 0.0f);
+        FRenderMeshInstance openSlabInstance;
+        openSlabInstance.mesh = &openSlab;
+        openSlabInstance.materialOverride = resolved(glassMaterial);
+        openSlabInstance.materialOverrideIdentity = 72u;
+        openSlabInstance.objectIdentity = 71u;
+        FRenderMeshInstance markerInstance;
+        markerInstance.mesh = &redMarker;
+        markerInstance.materialOverride = resolved(markerMaterial);
+        markerInstance.materialOverrideIdentity = 73u;
+        markerInstance.objectIdentity = 73u;
+        FRenderScene openFallbackScene;
+        openFallbackScene.camera.eye = glm::vec3(0.0f, 0.0f, 1.0f);
+        openFallbackScene.environment.tint = glm::vec3(1.0f);
+        openFallbackScene.environment.horizon = glm::vec3(0.0f, 1.0f, 0.0f);
+        openFallbackScene.environment.zenith = glm::vec3(0.0f, 1.0f, 0.0f);
+        openFallbackScene.meshes = {openSlabInstance, markerInstance};
+        openFallbackScene.materialsByIdentity.resize(73u);
+        openFallbackScene.materialsByIdentity[71] = *openSlabInstance.materialOverride;
+        openFallbackScene.materialsByIdentity[72] = *markerInstance.materialOverride;
+        FRayEffectInputs openFallbackInputs = controlledInputs;
+        openFallbackInputs.scene = &openFallbackScene;
+        const auto openFallback33 = renderControlledPixel(
+            controlledRays, openFallbackInputs, true);
+        const auto openFallback43 = computeQualityAvailable
+            ? renderControlledPixel(computeControlledRays, openFallbackInputs, true)
+            : std::make_pair(false, glm::vec4(0.0f));
+        check("open transmissive mesh renders reflection fallback on GL33",
+              openFallback33.first && openFallback33.second.g > 0.9f &&
+              openFallback33.second.r < 0.05f);
+        if (computeQualityAvailable)
+            check("GL43 open-volume reflection fallback matches GL33",
+                  openFallback43.first && openFallback43.second.g > 0.9f &&
+                  openFallback43.second.r < 0.05f &&
+                  glm::length(glm::vec3(openFallback43.second -
+                                        openFallback33.second)) < 0.015f);
+
+        // Non-casting dielectric surfaces are ignored wherever they occur in
+        // the bounded shadow walk, without needing to discover a paired exit.
+        UMesh nonCastingSheet;
+        nonCastingSheet.vertices = {
+            {{-2.0f, -2.0f, 2.0f}, {0.0f, 0.0f, -1.0f}, {}},
+            {{ 2.0f, -2.0f, 2.0f}, {0.0f, 0.0f, -1.0f}, {}},
+            {{ 0.0f,  2.0f, 2.0f}, {0.0f, 0.0f, -1.0f}, {}},
+        };
+        nonCastingSheet.indices = {0u, 1u, 2u};
+        nonCastingSheet.FinalizeGeometry();
+        std::unique_ptr<UMesh> castingVolume(
+            UMesh::GenerateCube(glm::vec3(0.5f)));
+        Material nonCastingGlass = glassMaterial;
+        nonCastingGlass.castRayTracedShadows = false;
+        FRenderMeshInstance nonCastingInstance;
+        nonCastingInstance.mesh = &nonCastingSheet;
+        nonCastingInstance.materialOverride = resolved(nonCastingGlass);
+        nonCastingInstance.materialOverrideIdentity = 1u;
+        nonCastingInstance.objectIdentity = 810u;
+        FRenderMeshInstance castingInstance;
+        castingInstance.mesh = castingVolume.get();
+        castingInstance.modelTransform = glm::translate(
+            glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        castingInstance.materialOverride = resolved(glassMaterial);
+        castingInstance.materialOverrideIdentity = 2u;
+        castingInstance.objectIdentity = 811u;
+        FRenderScene shadowSkipScene;
+        shadowSkipScene.camera.eye = glm::vec3(0.0f, 0.0f, 1.0f);
+        shadowSkipScene.pointLights = {{glm::vec3(0.0f, 0.0f, 4.0f),
+                                        glm::vec3(16.0f, 0.0f, 0.0f)}};
+        FRayEffectInputs shadowSkipInputs = controlledInputs;
+        shadowSkipInputs.scene = &shadowSkipScene;
+        shadowSkipInputs.features.rayTracedShadows = true;
+        shadowSkipInputs.features.rayTracedTranslucency = false;
+        shadowSkipInputs.quality.shadowSamples = 1;
+        shadowSkipInputs.quality.shadowSoftness = 0.0f;
+        shadowSkipScene.meshes = {nonCastingInstance};
+        const auto nonCastingFirst33 = renderControlledPixel(
+            controlledRays, shadowSkipInputs, false);
+        const auto nonCastingFirst43 = computeQualityAvailable
+            ? renderControlledPixel(computeControlledRays, shadowSkipInputs, false)
+            : std::make_pair(false, glm::vec4(0.0f));
+        check("first non-casting glass surface is ignored on GL33",
+              nonCastingFirst33.first && nonCastingFirst33.second.r > 0.95f);
+        if (computeQualityAvailable)
+            check("GL43 first non-casting glass skip matches GL33",
+                  nonCastingFirst43.first && nonCastingFirst43.second.r > 0.95f &&
+                  glm::length(glm::vec3(nonCastingFirst43.second -
+                                        nonCastingFirst33.second)) < 0.015f);
+        shadowSkipScene.meshes = {castingInstance, nonCastingInstance};
+        const auto nonCastingLater33 = renderControlledPixel(
+            controlledRays, shadowSkipInputs, false);
+        const auto nonCastingLater43 = computeQualityAvailable
+            ? renderControlledPixel(computeControlledRays, shadowSkipInputs, false)
+            : std::make_pair(false, glm::vec4(0.0f));
+        check("later non-casting glass surface is ignored after one volume on GL33",
+              nonCastingLater33.first && nonCastingLater33.second.r > 0.85f);
+        if (computeQualityAvailable)
+            check("GL43 later non-casting glass skip matches GL33",
+                  nonCastingLater43.first && nonCastingLater43.second.r > 0.85f &&
+                  glm::length(glm::vec3(nonCastingLater43.second -
+                                        nonCastingLater33.second)) < 0.015f);
+
+        controlledInputs.features.rayTracedTranslucency = false;
+        controlledInputs.scene = &controlledScene;
 
         GLuint lowEnergyDirectTexture = 0;
         const GLfloat lowEnergyPrecomputed[4] = {0.8f, 0.6f, 0.4f, 1.0f};

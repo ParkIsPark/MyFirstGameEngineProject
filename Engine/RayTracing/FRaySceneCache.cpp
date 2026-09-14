@@ -456,7 +456,7 @@ const FPackedRayScene& FRaySceneCache::Prepare(const FRenderScene& scene)
                 worldMinimum = glm::min(worldMinimum, world);
                 worldMaximum = glm::max(worldMaximum, world);
             }
-            packed_.instanceTexels.emplace_back(worldMinimum, 0.0f);
+            packed_.instanceTexels.emplace_back(worldMinimum, blas.closed ? 1.0f : 0.0f);
             packed_.instanceTexels.emplace_back(worldMaximum, 0.0f);
             packed_.instanceIdentityTexels.emplace_back(instance->objectIdentity,
                 materialBase, materialCount, overridden);

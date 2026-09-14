@@ -28,7 +28,8 @@ struct FPackedRayScene
     std::vector<glm::vec4> blasNodeTexels;
     std::vector<float> blasTriangleIndices;
     // Seven texels per instance. Texel 3 mirrors exact identity bits for the
-    // sampler-limited GL3.3 path; GL4.3 also consumes the typed vector below.
+    // sampler-limited GL3.3 path; texel 5.w is closed-volume validity. GL4.3
+    // also consumes the typed identity vector below.
     std::vector<glm::vec4> instanceTexels;
     std::vector<glm::uvec4> instanceIdentityTexels;
     std::vector<glm::vec4> tlasNodeTexels;
