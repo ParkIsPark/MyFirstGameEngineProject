@@ -15,8 +15,8 @@ public:
 };
 
 // Deliberately narrow OpenGL 4.3 surface. The repository keeps its historical
-// GLEW headers; only entry points required by the optional Compute backend are
-// loaded at runtime and validated before any call is made.
+// GLEW headers, validates every extension entry point used by this backend at
+// runtime, and stores only the Compute dispatch absent from the bundled GLEW.
 struct FGL43ComputeApi
 {
 #if defined(_WIN32)
@@ -27,7 +27,7 @@ struct FGL43ComputeApi
 #else
     using FDispatchCompute = void (*)(GLuint, GLuint, GLuint);
 #endif
-    static const std::array<const char*, 1>& RequiredEntryPointNames();
+    static const std::array<const char*, 33>& RequiredEntryPointNames();
     bool Load(const IGL43ProcAddressSource& source,
               std::string* diagnostic = nullptr);
     bool IsLoaded() const;

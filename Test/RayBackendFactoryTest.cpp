@@ -117,6 +117,15 @@ void CheckLoaderNamesMissingEntryPoint()
     assert(!api.Load(source, &diagnostic));
     assert(diagnostic.find("glDispatchCompute") != std::string::npos);
     assert(!api.IsLoaded());
+
+    source.entries.clear();
+    for (const char* name : FGL43ComputeApi::RequiredEntryPointNames())
+        source.entries.emplace(name, &StubProc);
+    source.entries.erase("glGetInteger64v");
+    diagnostic.clear();
+    assert(!api.Load(source, &diagnostic));
+    assert(diagnostic.find("glGetInteger64v") != std::string::npos);
+    assert(!api.IsLoaded());
 }
 
 class FFakeBackend final : public IRayTracingBackend
@@ -149,13 +158,16 @@ private:
 class FFakeFactory final : public IRayTracingBackendFactory
 {
 public:
+    explicit FFakeFactory(bool computeInit = false) : computeInit_(computeInit) {}
+
     std::unique_ptr<IRayTracingBackend> Create(
         ERayTracingBackend backend, std::string*) override
     {
         if (backend == ERayTracingBackend::ComputeGL43)
         {
             ++computeCreates;
-            return std::make_unique<FFakeBackend>(false, computeInits, computeRenders);
+            return std::make_unique<FFakeBackend>(computeInit_, computeInits,
+                                                  computeRenders);
         }
         ++compatibleCreates;
         return std::make_unique<FFakeBackend>(true, compatibleInits,
@@ -164,6 +176,8 @@ public:
     int computeCreates = 0, compatibleCreates = 0;
     int computeInits = 0, compatibleInits = 0;
     int computeRenders = 0, compatibleRenders = 0;
+private:
+    bool computeInit_ = false;
 };
 
 class FWarnings final : public IRayEffectsWarningSink
@@ -210,6 +224,28 @@ void CheckSchedulerFallbackAndLazyWork()
     }
 
     {
+        FFakeFactory factory(true);
+        FWarnings warnings;
+        FRayEffectsScheduler scheduler(factory, warnings);
+        FRayEffectOutputs outputs;
+        FBackendSelection compatible = Selection(
+            ERayTracingBackend::CompatibleGL33);
+        compatible.selected = ERayTracingBackend::CompatibleGL33;
+        assert(scheduler.Execute(Inputs(true, true), compatible, outputs));
+        assert(factory.compatibleCreates == 1 && factory.compatibleRenders == 1);
+        assert(scheduler.ActiveKind() == ERayTracingBackend::CompatibleGL33);
+
+        const FBackendSelection automatic = Selection(
+            ERayTracingBackend::Auto);
+        assert(scheduler.Execute(Inputs(true, true), automatic, outputs));
+        assert(factory.computeCreates == 1 && factory.computeInits == 1);
+        assert(factory.computeRenders == 1);
+        assert(factory.compatibleRenders == 1);
+        assert(scheduler.ActiveKind() == ERayTracingBackend::ComputeGL43);
+        assert(warnings.messages.empty());
+    }
+
+    {
         FFakeFactory factory;
         FWarnings warnings;
         FRayEffectsScheduler scheduler(factory, warnings);
@@ -220,6 +256,7 @@ void CheckSchedulerFallbackAndLazyWork()
         assert(factory.computeCreates == 1 && factory.computeInits == 1);
         assert(factory.compatibleCreates == 1 && factory.compatibleInits == 1);
         assert(factory.compatibleRenders == 2);
+        assert(scheduler.ActiveKind() == ERayTracingBackend::CompatibleGL33);
         assert(warnings.messages.size() == 1);
     }
 
@@ -235,6 +272,7 @@ void CheckSchedulerFallbackAndLazyWork()
         assert(factory.computeCreates == 1 && factory.computeInits == 1);
         assert(factory.compatibleCreates == 0 && factory.compatibleRenders == 0);
         assert(!outputs.shadowVisibilityTarget && !outputs.shadows);
+        assert(scheduler.ActiveKind() == ERayTracingBackend::Auto);
         assert(warnings.messages.size() == 1);
     }
 }
@@ -244,8 +282,8 @@ int main()
 {
     CheckSyntheticSelectionMatrix();
     CheckProductionFactoryRoutesDistinctRegisteredBackends();
-    CheckLoaderNamesMissingEntryPoint();
     CheckSchedulerFallbackAndLazyWork();
+    CheckLoaderNamesMissingEntryPoint();
     std::cout << "RayBackendFactoryTest passed\n";
     return 0;
 }

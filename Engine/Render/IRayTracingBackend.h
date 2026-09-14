@@ -95,6 +95,10 @@ public:
     void Shutdown() noexcept;
     const FRayEffectsSchedulerStats& Stats() const { return stats_; }
     IRayTracingBackend* ActiveBackend() const { return backend_.get(); }
+    ERayTracingBackend ActiveKind() const
+    {
+        return backend_ ? activeKind_ : ERayTracingBackend::Auto;
+    }
 
 private:
     bool EnsureBackend(ERayTracingBackend backend,
@@ -110,5 +114,6 @@ private:
     std::uint64_t contextGeneration_ = 0;
     std::string failureKey_;
     std::string warningKeys_;
+    bool automaticComputeFallback_ = false;
     FRayEffectsSchedulerStats stats_;
 };

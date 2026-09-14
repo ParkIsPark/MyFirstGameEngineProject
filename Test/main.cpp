@@ -1791,7 +1791,7 @@ public:
                   normalStats.rasterLightingPasses == 3u &&
                   normalStats.compositePasses == 3u &&
                   normalStats.rayResourceAllocations > 0u &&
-                  normalStats.rayDispatches == 1u &&
+                  normalStats.rayBackendCalls == 1u &&
                   normalStats.cpuFramebufferGenerations == 0u &&
                   normalStats.cpuReadbacks == 0u &&
                   normalStats.cpuFramebufferUploads == 0u);
@@ -2071,6 +2071,16 @@ public:
             }
             return pixels;
         };
+        auto readComputeTarget = [&](const std::optional<FRenderOutputView>& target,
+                                     GLenum format, int channels, int width = 64,
+                                     int height = 64)
+        {
+            // Shader image writes are made visible to CPU texture-transfer
+            // commands explicitly; the production barrier remains scoped to
+            // compositor texture sampling.
+            glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
+            return readTarget(target, format, channels, width, height);
+        };
         auto nearImages = [](const std::vector<float>& a,
                              const std::vector<float>& b)
         {
@@ -2321,23 +2331,26 @@ public:
                 computeAll;
             const bool computeShadowOK = executeCompute(
                 true, false, false, computeShadow);
-            const std::vector<float> gl43Shadow = readTarget(
+            const std::vector<float> gl43Shadow = readComputeTarget(
                 computeShadow.shadowVisibilityTarget, GL_RED, 1);
             const bool computeGIOK = executeCompute(
                 false, true, false, computeGI);
-            const std::vector<float> gl43GI = readTarget(
+            const std::vector<float> gl43GI = readComputeTarget(
                 computeGI.globalIlluminationTarget, GL_RGBA, 4);
             const bool computeReflectionOK = executeCompute(
                 false, false, true, computeReflection);
-            const std::vector<float> gl43Reflection = readTarget(
+            const std::vector<float> gl43Reflection = readComputeTarget(
                 computeReflection.reflectionTarget, GL_RGBA, 4);
             const bool computeAllOK = executeCompute(
                 true, true, true, computeAll);
-            const std::vector<float> gl43AllShadow = readTarget(
+            // Exercise the production texture-fetch barrier before any
+            // test-only CPU texture-transfer barrier is issued.
+            const auto computeComposite = composite(computeAll);
+            const std::vector<float> gl43AllShadow = readComputeTarget(
                 computeAll.shadowVisibilityTarget, GL_RED, 1);
-            const std::vector<float> gl43AllGI = readTarget(
+            const std::vector<float> gl43AllGI = readComputeTarget(
                 computeAll.globalIlluminationTarget, GL_RGBA, 4);
-            const std::vector<float> gl43AllReflection = readTarget(
+            const std::vector<float> gl43AllReflection = readComputeTarget(
                 computeAll.reflectionTarget, GL_RGBA, 4);
 
             check("GL43 shadows-only mask and values match GL33 tolerance",
@@ -2368,6 +2381,14 @@ public:
                   computeRays.Stats().rayDispatches == 4u &&
                   computeRays.Stats().memoryBarriers == 4u &&
                   glGetError() == GL_NO_ERROR);
+            bool compositeNear = computeComposite.second.size() == combined.second.size();
+            for (std::size_t i = 0; compositeNear &&
+                 i < computeComposite.second.size(); ++i)
+                compositeNear = std::abs(int(computeComposite.second[i]) -
+                                         int(combined.second[i])) <= 8;
+            check("GL43 outputs are sampled by the compositor",
+                  computeComposite.first && compositeNear &&
+                  computeComposite.second != rasterOnlyA.second);
             computeRays.Shutdown();
         }
         check("primary G-buffer identity remains unchanged",
@@ -2446,7 +2467,7 @@ public:
                 FRayEffectOutputs computeBounced;
                 const bool computeBouncedOK = executeComputeQuality(
                     false, true, false, computeBounced);
-                const std::vector<float> computePixels = readTarget(
+                const std::vector<float> computePixels = readComputeTarget(
                     computeBounced.globalIlluminationTarget, GL_RGBA, 4);
                 computeBounceParity = computeBounceParity && computeBouncedOK &&
                     computeBounced.globalIlluminationTarget &&
@@ -2497,7 +2518,7 @@ public:
             FRayEffectOutputs computeMaximum;
             computeMaximumGI = executeComputeQuality(
                 false, true, false, computeMaximum);
-            computeThirtyTwoByFour = readTarget(
+            computeThirtyTwoByFour = readComputeTarget(
                 computeMaximum.globalIlluminationTarget, GL_RGBA, 4);
         }
         double maximumSampleDifference = 0.0;
@@ -2564,7 +2585,7 @@ public:
         {
             FRayEffectOutputs output;
             const bool okay = executeComputeQuality(false, true, false, output);
-            computeBlueSecondary = readTarget(
+            computeBlueSecondary = readComputeTarget(
                 output.globalIlluminationTarget, GL_RGBA, 4);
             if (!okay) computeBlueSecondary.clear();
         }
@@ -2579,7 +2600,7 @@ public:
         {
             FRayEffectOutputs output;
             const bool okay = executeComputeQuality(false, true, false, output);
-            computeRedSecondary = readTarget(
+            computeRedSecondary = readComputeTarget(
                 output.globalIlluminationTarget, GL_RGBA, 4);
             if (!okay) computeRedSecondary.clear();
         }
@@ -2633,11 +2654,11 @@ public:
                   computeMaximumQualityOK &&
                   nearImages(readTarget(maximumQuality.shadowVisibilityTarget,
                                         GL_RED, 1),
-                             readTarget(computeMaximumQuality.shadowVisibilityTarget,
+                              readComputeTarget(computeMaximumQuality.shadowVisibilityTarget,
                                         GL_RED, 1)) &&
                   nearImages(readTarget(maximumQuality.globalIlluminationTarget,
                                         GL_RGBA, 4),
-                             readTarget(computeMaximumQuality.globalIlluminationTarget,
+                              readComputeTarget(computeMaximumQuality.globalIlluminationTarget,
                                         GL_RGBA, 4)));
         scene.pointLights = savedLights;
         quality.giSamples = savedGISamples;
@@ -2768,6 +2789,7 @@ public:
         if (computeControlledReflectionOK &&
             computeControlledReflection.reflectionTarget)
         {
+            glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
             glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(
                 computeControlledReflection.reflectionTarget->identity));
             glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT,
@@ -2804,7 +2826,7 @@ public:
                   controlledHDRIGL33OK && controlledHDRIGL43OK &&
                   nearImages(readTarget(controlledHDRIGL33.reflectionTarget,
                                         GL_RGBA, 4, 1, 1),
-                             readTarget(controlledHDRIGL43.reflectionTarget,
+                              readComputeTarget(controlledHDRIGL43.reflectionTarget,
                                         GL_RGBA, 4, 1, 1)));
         controlledInputs.environmentTexture = 0;
         glDeleteTextures(1, &controlledHDRITexture);
@@ -2853,6 +2875,7 @@ public:
                     controlledInputs, output, &diagnostic) &&
                 output.shadowVisibilityTarget)
             {
+                glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
                 glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(
                     output.shadowVisibilityTarget->identity));
                 glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_FLOAT, &pixel);
@@ -3039,6 +3062,17 @@ public:
                          std::begin(restoredHostilePixel)));
         if (computeQualityAvailable)
         {
+            GLuint hostilePixelUnpackBuffer = 0;
+            glGenBuffers(1, &hostilePixelUnpackBuffer);
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, hostilePixelUnpackBuffer);
+            const unsigned char hostileUnpackBytes[4] = {1u, 2u, 3u, 4u};
+            glBufferData(GL_PIXEL_UNPACK_BUFFER, sizeof(hostileUnpackBytes),
+                hostileUnpackBytes, GL_STATIC_DRAW);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, 17);
+            glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, 19);
+            glPixelStorei(GL_UNPACK_SKIP_PIXELS, 3);
+            glPixelStorei(GL_UNPACK_SKIP_ROWS, 5);
+            glPixelStorei(GL_UNPACK_SKIP_IMAGES, 7);
             UGL43RayTracingBackend computeHostileRays;
             FRayEffectOutputs computeHostileOutput;
             const bool computeHostileOK = computeHostileRays.RenderEffects(
@@ -3063,9 +3097,27 @@ public:
                 &restoredImageFormat);
             GLint computeRestoredActiveTexture = 0;
             GLint computeRestoredUnpackAlignment = 0;
+            GLint computeRestoredPixelUnpackBuffer = 0;
+            GLint computeRestoredUnpackRowLength = 0;
+            GLint computeRestoredUnpackImageHeight = 0;
+            GLint computeRestoredUnpackSkipPixels = 0;
+            GLint computeRestoredUnpackSkipRows = 0;
+            GLint computeRestoredUnpackSkipImages = 0;
             glGetIntegerv(GL_ACTIVE_TEXTURE, &computeRestoredActiveTexture);
             glGetIntegerv(GL_UNPACK_ALIGNMENT,
                 &computeRestoredUnpackAlignment);
+            glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING,
+                &computeRestoredPixelUnpackBuffer);
+            glGetIntegerv(GL_UNPACK_ROW_LENGTH,
+                &computeRestoredUnpackRowLength);
+            glGetIntegerv(GL_UNPACK_IMAGE_HEIGHT,
+                &computeRestoredUnpackImageHeight);
+            glGetIntegerv(GL_UNPACK_SKIP_PIXELS,
+                &computeRestoredUnpackSkipPixels);
+            glGetIntegerv(GL_UNPACK_SKIP_ROWS,
+                &computeRestoredUnpackSkipRows);
+            glGetIntegerv(GL_UNPACK_SKIP_IMAGES,
+                &computeRestoredUnpackSkipImages);
             check("GL43 restores hostile indexed SSBO image and pixel-store state",
                   computeHostileOK && computeHostileOutput.shadowVisibilityTarget &&
                   restoredGenericSSBO == static_cast<GLint>(hostileSSBOs[1]) &&
@@ -3077,6 +3129,13 @@ public:
                   restoredImageFormat == GL_R32F &&
                   computeRestoredActiveTexture == GL_TEXTURE0 + hostileUnit &&
                   computeRestoredUnpackAlignment == 8 &&
+                  computeRestoredPixelUnpackBuffer ==
+                      static_cast<GLint>(hostilePixelUnpackBuffer) &&
+                  computeRestoredUnpackRowLength == 17 &&
+                  computeRestoredUnpackImageHeight == 19 &&
+                  computeRestoredUnpackSkipPixels == 3 &&
+                  computeRestoredUnpackSkipRows == 5 &&
+                  computeRestoredUnpackSkipImages == 7 &&
                   computeHostileRays.Stats().memoryBarriers == 1u);
 
             computeHostileRays.InjectNextUploadFailureForTesting();
@@ -3087,12 +3146,41 @@ public:
             glGetIntegerv(testShaderStorageBufferBinding,
                 &restoredGenericSSBO);
             glGetIntegeri_v(GL_IMAGE_BINDING_NAME, 0, &restoredImageName);
+            glGetIntegerv(GL_UNPACK_ALIGNMENT,
+                &computeRestoredUnpackAlignment);
+            glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING,
+                &computeRestoredPixelUnpackBuffer);
+            glGetIntegerv(GL_UNPACK_ROW_LENGTH,
+                &computeRestoredUnpackRowLength);
+            glGetIntegerv(GL_UNPACK_IMAGE_HEIGHT,
+                &computeRestoredUnpackImageHeight);
+            glGetIntegerv(GL_UNPACK_SKIP_PIXELS,
+                &computeRestoredUnpackSkipPixels);
+            glGetIntegerv(GL_UNPACK_SKIP_ROWS,
+                &computeRestoredUnpackSkipRows);
+            glGetIntegerv(GL_UNPACK_SKIP_IMAGES,
+                &computeRestoredUnpackSkipImages);
             check("failed GL43 upload is transactional and restores hostile state",
                   computeHostileFailed &&
                   !computeHostileFailure.shadowVisibilityTarget &&
                   restoredGenericSSBO == static_cast<GLint>(hostileSSBOs[1]) &&
-                  restoredImageName == static_cast<GLint>(hostileImageTexture));
+                  restoredImageName == static_cast<GLint>(hostileImageTexture) &&
+                  computeRestoredUnpackAlignment == 8 &&
+                  computeRestoredPixelUnpackBuffer ==
+                      static_cast<GLint>(hostilePixelUnpackBuffer) &&
+                  computeRestoredUnpackRowLength == 17 &&
+                  computeRestoredUnpackImageHeight == 19 &&
+                  computeRestoredUnpackSkipPixels == 3 &&
+                  computeRestoredUnpackSkipRows == 5 &&
+                  computeRestoredUnpackSkipImages == 7);
             computeHostileRays.Shutdown();
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+            glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0);
+            glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+            glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+            glPixelStorei(GL_UNPACK_SKIP_IMAGES, 0);
+            glDeleteBuffers(1, &hostilePixelUnpackBuffer);
         }
         UGL33RayTracingBackend hostileFailureRays;
         hostileFailureRays.InjectNextUploadFailureForTesting();
@@ -3579,7 +3667,11 @@ public:
             routedQuality.giBounces = 2;
             routedRayEffects = worldRenderer.Render(*routedWorld, routedCamera,
                 routedTarget, routedFeatures, routedQuality, routedSelection,
-                ContextGeneration()) && worldRenderer.Stats().rayDispatches == 1u &&
+                ContextGeneration()) &&
+                worldRenderer.Stats().rayBackendCalls == 1u &&
+                worldRenderer.Stats().rayDispatches == 0u &&
+                worldRenderer.Stats().activeRayBackend ==
+                    ERayTracingBackend::CompatibleGL33 &&
                 worldRenderer.Stats().rayResourceAllocations > 0u &&
                 worldRenderer.Stats().cpuReadbacks == 0u;
             worldRenderer.Shutdown();
@@ -3618,7 +3710,17 @@ public:
                 FRenderQuality computeRoutedQuality = quality;
                 computeRoutedQuality.giSamples = 2;
                 computeRoutedQuality.giBounces = 2;
-                const bool renderOK = computeWorldRenderer.Render(
+                FBackendSelection explicitCompatible = computeRoutedSelection;
+                explicitCompatible.requested =
+                    ERayTracingBackend::CompatibleGL33;
+                explicitCompatible.selected =
+                    ERayTracingBackend::CompatibleGL33;
+                const bool compatibleOK = computeWorldRenderer.Render(
+                    *computeRoutedWorld, computeRoutedCamera,
+                    computeRoutedTarget, computeRoutedFeatures,
+                    computeRoutedQuality, explicitCompatible,
+                    ContextGeneration());
+                const bool renderOK = compatibleOK && computeWorldRenderer.Render(
                     *computeRoutedWorld, computeRoutedCamera,
                     computeRoutedTarget, computeRoutedFeatures,
                     computeRoutedQuality, computeRoutedSelection,
@@ -3626,14 +3728,18 @@ public:
                 const FWorldRendererStats& routedStats =
                     computeWorldRenderer.Stats();
                 computeRoutedRayEffects = renderOK &&
+                    routedStats.rayBackendCalls == 2u &&
                     routedStats.rayDispatches == 1u &&
+                    routedStats.rayMemoryBarriers == 1u &&
+                    routedStats.activeRayBackend ==
+                        ERayTracingBackend::ComputeGL43 &&
                     routedStats.rayResourceAllocations > 0u &&
                     routedStats.cpuFramebufferGenerations == 0u &&
                     routedStats.cpuReadbacks == 0u &&
                     routedStats.cpuFramebufferUploads == 0u;
                 computeWorldRenderer.Shutdown();
             }
-            check("UWorldRenderer Auto executes Compute with zero CPU bridges",
+            check("UWorldRenderer explicit Compatible then Auto promotes to Compute with zero CPU bridges",
                   computeRoutedWorld != nullptr && computeRoutedRayEffects);
         }
 

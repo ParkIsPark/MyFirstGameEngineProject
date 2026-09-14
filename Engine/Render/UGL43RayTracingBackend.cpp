@@ -121,6 +121,12 @@ struct FState
     GLint activeTexture = GL_TEXTURE0;
     GLint packAlignment = 4;
     GLint unpackAlignment = 4;
+    GLint pixelUnpackBuffer = 0;
+    GLint unpackRowLength = 0;
+    GLint unpackImageHeight = 0;
+    GLint unpackSkipPixels = 0;
+    GLint unpackSkipRows = 0;
+    GLint unpackSkipImages = 0;
     GLint genericSSBO = 0;
     GLint textures2D[UsedTextureUnits] = {};
     GLint textures2DArray[UsedTextureUnits] = {};
@@ -138,6 +144,13 @@ FState CaptureState()
     glGetIntegerv(GL_ACTIVE_TEXTURE, &state.activeTexture);
     glGetIntegerv(GL_PACK_ALIGNMENT, &state.packAlignment);
     glGetIntegerv(GL_UNPACK_ALIGNMENT, &state.unpackAlignment);
+    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING,
+                  &state.pixelUnpackBuffer);
+    glGetIntegerv(GL_UNPACK_ROW_LENGTH, &state.unpackRowLength);
+    glGetIntegerv(GL_UNPACK_IMAGE_HEIGHT, &state.unpackImageHeight);
+    glGetIntegerv(GL_UNPACK_SKIP_PIXELS, &state.unpackSkipPixels);
+    glGetIntegerv(GL_UNPACK_SKIP_ROWS, &state.unpackSkipRows);
+    glGetIntegerv(GL_UNPACK_SKIP_IMAGES, &state.unpackSkipImages);
     glGetIntegerv(ShaderStorageBufferBinding, &state.genericSSBO);
     for (int unit = 0; unit < UsedTextureUnits; ++unit)
     {
@@ -203,6 +216,24 @@ void RestoreState(const FState& state)
     }
     glPixelStorei(GL_PACK_ALIGNMENT, state.packAlignment);
     glPixelStorei(GL_UNPACK_ALIGNMENT, state.unpackAlignment);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, state.unpackRowLength);
+    glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, state.unpackImageHeight);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, state.unpackSkipPixels);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, state.unpackSkipRows);
+    glPixelStorei(GL_UNPACK_SKIP_IMAGES, state.unpackSkipImages);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER,
+                 static_cast<GLuint>(state.pixelUnpackBuffer));
+}
+
+void NormalizePixelUnpackState()
+{
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+    glPixelStorei(GL_UNPACK_SKIP_IMAGES, 0);
 }
 
 class FStateGuard
@@ -282,12 +313,38 @@ bool UGL43RayTracingBackend::Init(std::uint64_t contextGeneration,
         const char* name;
         bool available;
     } requiredGLEW[] = {
+        {"glActiveTexture", glActiveTexture != nullptr},
+        {"glTexImage3D", glTexImage3D != nullptr},
+        {"glBindBuffer", glBindBuffer != nullptr},
+        {"glBufferData", glBufferData != nullptr},
+        {"glDeleteBuffers", glDeleteBuffers != nullptr},
+        {"glGenBuffers", glGenBuffers != nullptr},
+        {"glAttachShader", glAttachShader != nullptr},
+        {"glCompileShader", glCompileShader != nullptr},
+        {"glCreateProgram", glCreateProgram != nullptr},
+        {"glCreateShader", glCreateShader != nullptr},
+        {"glDeleteProgram", glDeleteProgram != nullptr},
+        {"glDeleteShader", glDeleteShader != nullptr},
+        {"glGetProgramInfoLog", glGetProgramInfoLog != nullptr},
+        {"glGetProgramiv", glGetProgramiv != nullptr},
+        {"glGetShaderInfoLog", glGetShaderInfoLog != nullptr},
+        {"glGetShaderiv", glGetShaderiv != nullptr},
+        {"glGetUniformLocation", glGetUniformLocation != nullptr},
+        {"glLinkProgram", glLinkProgram != nullptr},
+        {"glShaderSource", glShaderSource != nullptr},
+        {"glUniform1f", glUniform1f != nullptr},
+        {"glUniform1i", glUniform1i != nullptr},
+        {"glUniform2i", glUniform2i != nullptr},
+        {"glUniform3fv", glUniform3fv != nullptr},
+        {"glUseProgram", glUseProgram != nullptr},
         {"glMemoryBarrier", glMemoryBarrier != nullptr},
         {"glBindBufferBase", glBindBufferBase != nullptr},
         {"glBindBufferRange", glBindBufferRange != nullptr},
         {"glBindImageTexture", glBindImageTexture != nullptr},
         {"glGetIntegeri_v", glGetIntegeri_v != nullptr},
         {"glGetInteger64i_v", glGetInteger64i_v != nullptr},
+        {"glGetInteger64v", glGetInteger64v != nullptr},
+        {"glBindSampler", glBindSampler != nullptr},
     };
     for (const auto& entryPoint : requiredGLEW)
     {
@@ -590,6 +647,7 @@ bool UGL43RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
     if (!Init(inputs.contextGeneration, diagnostic)) return false;
     FStateGuard restore;
     glActiveTexture(GL_TEXTURE0);
+    NormalizePixelUnpackState();
     const FPackedRayScene& packed = sceneCache_.Prepare(*inputs.scene);
     stats_.residentBLAS = sceneCache_.Stats().residentBLAS;
     if (!packed.valid)

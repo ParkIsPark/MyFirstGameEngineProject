@@ -51,6 +51,7 @@ void FRayEffectsScheduler::ResetForContext(
     contextGeneration_ = contextGeneration;
     failureKey_.clear();
     warningKeys_.clear();
+    automaticComputeFallback_ = false;
 }
 
 bool FRayEffectsScheduler::EnsureBackend(ERayTracingBackend kind,
@@ -99,9 +100,12 @@ bool FRayEffectsScheduler::Execute(const FRayEffectInputs& inputs,
         return true;
     }
 
+    const bool automaticComputeRequest =
+        selection.requested == ERayTracingBackend::Auto &&
+        selection.selected == ERayTracingBackend::ComputeGL43;
+    if (!automaticComputeRequest) automaticComputeFallback_ = false;
     ERayTracingBackend selected = selection.selected;
-    if (selection.requested == ERayTracingBackend::Auto &&
-        selection.selected == ERayTracingBackend::ComputeGL43 && backend_ &&
+    if (automaticComputeRequest && automaticComputeFallback_ && backend_ &&
         activeKind_ == ERayTracingBackend::CompatibleGL33)
         selected = ERayTracingBackend::CompatibleGL33;
     std::string diagnostic;
@@ -123,6 +127,7 @@ bool FRayEffectsScheduler::Execute(const FRayEffectInputs& inputs,
                     "Compatible ray-effects fallback failed: " + diagnostic);
                 return true;
             }
+            automaticComputeFallback_ = true;
         }
         else
         {
@@ -159,4 +164,5 @@ void FRayEffectsScheduler::Shutdown() noexcept
     contextGeneration_ = 0;
     failureKey_.clear();
     warningKeys_.clear();
+    automaticComputeFallback_ = false;
 }

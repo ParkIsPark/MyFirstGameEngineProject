@@ -332,7 +332,14 @@ public:
             rayInputs.contextGeneration = generation;
             rayEffects_.Execute(rayInputs, request.backendSelection, rayOutputs);
             stats_.rayResourceAllocations = rayEffects_.Stats().resourceAllocations;
-            stats_.rayDispatches = rayEffects_.Stats().backendCalls;
+            stats_.rayBackendCalls = rayEffects_.Stats().backendCalls;
+            stats_.activeRayBackend = rayEffects_.ActiveKind();
+            const IRayTracingBackend* activeBackend =
+                rayEffects_.ActiveBackend();
+            stats_.rayDispatches = activeBackend
+                ? activeBackend->Stats().rayDispatches : 0u;
+            stats_.rayMemoryBarriers = activeBackend
+                ? activeBackend->Stats().memoryBarriers : 0u;
         }
         FCompositeOutput composite;
         if (!lighting_.Composite(request.target, rasterOutput, rayOutputs,

@@ -38,7 +38,10 @@ struct FWorldRendererStats
     std::uint64_t rasterLightingPasses = 0;
     std::uint64_t compositePasses = 0;
     std::uint64_t rayResourceAllocations = 0;
+    std::uint64_t rayBackendCalls = 0;
     std::uint64_t rayDispatches = 0;
+    std::uint64_t rayMemoryBarriers = 0;
+    ERayTracingBackend activeRayBackend = ERayTracingBackend::Auto;
     std::uint64_t cpuFramebufferGenerations = 0;
     std::uint64_t cpuReadbacks = 0;
     std::uint64_t cpuFramebufferUploads = 0;

@@ -1,9 +1,41 @@
 #include "FGL43ComputeApi.h"
 
-const std::array<const char*, 1>& FGL43ComputeApi::RequiredEntryPointNames()
+const std::array<const char*, 33>& FGL43ComputeApi::RequiredEntryPointNames()
 {
-    static const std::array<const char*, 1> names = {{
+    static const std::array<const char*, 33> names = {{
         "glDispatchCompute",
+        "glActiveTexture",
+        "glTexImage3D",
+        "glBindBuffer",
+        "glBufferData",
+        "glDeleteBuffers",
+        "glGenBuffers",
+        "glAttachShader",
+        "glCompileShader",
+        "glCreateProgram",
+        "glCreateShader",
+        "glDeleteProgram",
+        "glDeleteShader",
+        "glGetProgramInfoLog",
+        "glGetProgramiv",
+        "glGetShaderInfoLog",
+        "glGetShaderiv",
+        "glGetUniformLocation",
+        "glLinkProgram",
+        "glShaderSource",
+        "glUniform1f",
+        "glUniform1i",
+        "glUniform2i",
+        "glUniform3fv",
+        "glUseProgram",
+        "glGetInteger64i_v",
+        "glBindSampler",
+        "glBindImageTexture",
+        "glMemoryBarrier",
+        "glGetInteger64v",
+        "glBindBufferBase",
+        "glBindBufferRange",
+        "glGetIntegeri_v",
     }};
     return names;
 }
@@ -13,7 +45,7 @@ bool FGL43ComputeApi::Load(const IGL43ProcAddressSource& source,
 {
     Reset();
     const auto& names = RequiredEntryPointNames();
-    std::array<FGL43GenericProc, 1> resolved = {};
+    std::array<FGL43GenericProc, 33> resolved = {};
     for (std::size_t i = 0; i < names.size(); ++i)
     {
         resolved[i] = source.Resolve(names[i]);
