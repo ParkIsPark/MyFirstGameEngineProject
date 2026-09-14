@@ -41,6 +41,8 @@ Hardware geometry at internal resolution
 
 The OpenGL 3.3 and OpenGL 4.3 ray backends must produce identical logical outputs. Backend-specific code may differ only in how work is submitted: fullscreen fragment draw versus compute dispatch.
 
+`FRenderFeatures` gains `rayTracedTranslucency`, serialized as `RayTracedTranslucency` and defaulting to true whenever the ray-tracing master feature is enabled. It is a fourth optional secondary effect beside shadows, GI, and reflections. A scene with only ray-traced translucency enabled still schedules the ray-effects pass. The Editor and Project Settings label is `Ray-Traced Translucency`.
+
 ## Shared Lighting Contract
 
 Raster Phong lighting and secondary ray-hit lighting must use a shared GLSL source fragment defining point-light evaluation. A point-light sample contains its normalized light direction, distance, attenuation, and radiance. The contract is:
@@ -226,7 +228,7 @@ Consequences:
 
 This milestone supports one perfect reflection ray and one dielectric entry/exit traversal. Recursive mirrors, metallic response, roughness-filtered reflections, frosted transmission, nested dielectric media, and caustics belong to the later PBR milestone.
 
-If ray reflections/transmission are disabled or unavailable, effective `kr` and `kt` are zero so the material remains locally visible instead of turning black or disappearing.
+If ray reflections are disabled, effective `kr` is zero. If ray-traced translucency is disabled, effective `kt` is zero. If the ray backend is unavailable, both are zero so the material remains locally visible instead of turning black or disappearing.
 
 ## Linear HDR Composition and Presentation
 
