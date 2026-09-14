@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 
 namespace
 {
@@ -93,6 +94,50 @@ int main()
 
     sequence.Reset();
     assert(sequence.Begin(original, 32).reset);
+
+    // Boundary contract: the shader-visible sequence wraps with defined
+    // unsigned arithmetic, while ping-pong parity keeps alternating and the
+    // independent accumulation count/weight remains capped.
+    const FTemporalFrame nearSignedBoundary{
+        original, static_cast<std::uint32_t>(std::numeric_limits<int>::max() - 1),
+        false, 32};
+    const FTemporalFrame atSignedBoundary = AdvanceTemporalFrame(
+        nearSignedBoundary, 32);
+    const FTemporalFrame pastSignedBoundary = AdvanceTemporalFrame(
+        atSignedBoundary, 32);
+    assert(atSignedBoundary.frameIndex ==
+        static_cast<std::uint32_t>(std::numeric_limits<int>::max()));
+    assert(pastSignedBoundary.frameIndex ==
+        static_cast<std::uint32_t>(std::numeric_limits<int>::max()) + 1u);
+    assert(TemporalHistorySlot(nearSignedBoundary) == 0u);
+    assert(TemporalHistorySlot(atSignedBoundary) == 1u);
+    assert(TemporalHistorySlot(pastSignedBoundary) == 0u);
+    assert(TemporalShaderFrameIndex(atSignedBoundary) ==
+        std::numeric_limits<int>::max());
+    assert(TemporalShaderFrameIndex(pastSignedBoundary) == 0);
+    assert(TemporalCurrentWeight(pastSignedBoundary, 32) == 1.0f / 32.0f);
+
+    const FTemporalFrame nearUnsignedWrap{
+        original, std::numeric_limits<std::uint32_t>::max() - 1u, false, 32};
+    const FTemporalFrame atUnsignedWrap = AdvanceTemporalFrame(
+        nearUnsignedWrap, 32);
+    const FTemporalFrame afterUnsignedWrap = AdvanceTemporalFrame(
+        atUnsignedWrap, 32);
+    const FTemporalFrame afterUnsignedWrapAgain = AdvanceTemporalFrame(
+        afterUnsignedWrap, 32);
+    assert(atUnsignedWrap.frameIndex ==
+        std::numeric_limits<std::uint32_t>::max());
+    assert(afterUnsignedWrap.frameIndex == 0u && !afterUnsignedWrap.reset);
+    assert(afterUnsignedWrapAgain.frameIndex == 1u);
+    assert(TemporalHistorySlot(atUnsignedWrap) == 1u);
+    assert(TemporalHistorySlot(afterUnsignedWrap) == 0u);
+    assert(TemporalHistorySlot(afterUnsignedWrapAgain) == 1u);
+    assert(TemporalShaderFrameIndex(atUnsignedWrap) ==
+        std::numeric_limits<int>::max());
+    assert(TemporalShaderFrameIndex(afterUnsignedWrap) == 0);
+    assert(afterUnsignedWrap.accumulatedFrames == 32u);
+    assert(TemporalCurrentWeight(afterUnsignedWrap, 32) == 1.0f / 32.0f);
+
     std::filesystem::remove(texture);
     std::cout << "RenderHistoryTest passed\n";
 }

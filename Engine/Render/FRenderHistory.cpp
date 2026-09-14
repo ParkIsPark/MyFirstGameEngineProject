@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
-#include <limits>
 #include <string>
 
 namespace
@@ -138,17 +137,60 @@ FTemporalFrame FTemporalSequence::Begin(std::uint64_t signature,
         signature_ = signature;
         frameCap_ = frameCap;
         frameIndex_ = 0;
+        accumulatedFrames_ = 1;
         valid_ = true;
     }
-    else if (frameIndex_ != std::numeric_limits<std::uint32_t>::max())
-        ++frameIndex_;
-    return {signature_, frameIndex_, reset};
+    else
+    {
+        const FTemporalFrame advanced = AdvanceTemporalFrame(
+            {signature_, frameIndex_, false, accumulatedFrames_}, frameCap_);
+        frameIndex_ = advanced.frameIndex;
+        accumulatedFrames_ = advanced.accumulatedFrames;
+    }
+    return {signature_, frameIndex_, reset, accumulatedFrames_};
+}
+
+FTemporalFrame AdvanceTemporalFrame(const FTemporalFrame& current,
+                                    std::uint32_t frameCap) noexcept
+{
+    frameCap = std::max<std::uint32_t>(1, frameCap);
+    FTemporalFrame next = current;
+    next.frameIndex = current.frameIndex + std::uint32_t{1};
+    const std::uint32_t accumulated =
+        std::max<std::uint32_t>(1, current.accumulatedFrames);
+    next.accumulatedFrames = accumulated < frameCap
+        ? accumulated + std::uint32_t{1} : frameCap;
+    next.reset = false;
+    return next;
+}
+
+unsigned TemporalHistorySlot(const FTemporalFrame& frame) noexcept
+{
+    return frame.frameIndex & 1u;
+}
+
+int TemporalShaderFrameIndex(const FTemporalFrame& frame) noexcept
+{
+    constexpr std::uint32_t ShaderIndexMask = 0x7fffffffu;
+    return static_cast<int>(frame.frameIndex & ShaderIndexMask);
+}
+
+float TemporalCurrentWeight(const FTemporalFrame& frame,
+                            int temporalFrames) noexcept
+{
+    const std::uint32_t cap = temporalFrames > 0
+        ? static_cast<std::uint32_t>(temporalFrames) : 1u;
+    const std::uint32_t accumulated =
+        std::max<std::uint32_t>(1, frame.accumulatedFrames);
+    const std::uint32_t sampleCount = std::min(accumulated, cap);
+    return 1.0f / static_cast<float>(sampleCount);
 }
 
 void FTemporalSequence::Reset() noexcept
 {
     signature_ = 0;
     frameIndex_ = 0;
+    accumulatedFrames_ = 1;
     frameCap_ = 0;
     valid_ = false;
 }

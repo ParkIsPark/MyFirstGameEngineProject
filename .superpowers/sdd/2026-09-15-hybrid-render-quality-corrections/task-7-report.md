@@ -43,3 +43,12 @@ Implemented shared OpenGL 3.3-compatible temporal reconstruction for both ray ba
 - Corrected cross-effect scratch aliasing by giving shadow and GI disjoint filter scratch pairs.
 - Background identity is handled explicitly to prevent undefined normalization from contaminating empty pixels.
 - No known functional blockers. The build continues to emit repository-existing CP949/code-page warnings.
+
+## Fix round 1: integer-boundary sequencing
+
+- RED 1: boundary tests near `INT_MAX` and `UINT32_MAX` failed to compile before the wrap-safe sequencing, history-slot, and bounded-weight contracts existed. Evidence: `renderer-standalone-487c468c-8cc8-44dc-be76-602b41ed85ad`.
+- RED 2: the shader-visible index boundary contract failed to compile before its bounded mapping existed. Evidence: `renderer-standalone-a550cf0a-c33f-47c7-a169-bf4dc61f9396`.
+- GREEN: `frameIndex` now advances with defined unsigned modulo arithmetic, preserving ping-pong parity across `UINT32_MAX -> 0`; a separate `accumulatedFrames` count saturates at the requested temporal cap and exclusively determines averaging weight. Shader indices are masked to the bounded non-negative signed range before conversion.
+- `RenderHistoryTest`: 1 source, 0 failures; directly jumps across both boundaries and verifies alternating slots, wrap without reset, bounded shader indices, and persistent `1 / 32` weight. Evidence: `renderer-standalone-20e571c5-4df3-4712-8cf3-06c74c88c750`.
+- Integrated verification: ray-effects 180/180, render-performance 389/389, standalone 34/34 (`renderer-standalone-30c9b051-53a3-4268-b0d7-085ea3cd0f8c`), and Win32 Debug MSBuild with zero errors.
+- Self-review: all history-signature fields, bilateral/A-trous filters, optical pass-through, GL state/resource ownership, and `Test/Config/` are unchanged. No new functional concern; existing code-page warnings remain.

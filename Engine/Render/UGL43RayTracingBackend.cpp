@@ -3,6 +3,7 @@
 #include "FRenderScene.h"
 #include "FRenderTarget.h"
 #include "Shaders/RayEffectsComputeShaders.h"
+#include "FRenderHistory.h"
 #include "Shaders/SharedLightingShaderSource.h"
 #include "UHardwareGBuffer.h"
 
@@ -764,7 +765,8 @@ bool UGL43RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
     glUniform1i(glGetUniformLocation(program_, "uGIBounces"),
                 std::clamp(inputs.quality.giBounces, 0, 4));
     glUniform1i(glGetUniformLocation(program_, "uFrameIndex"),
-                static_cast<GLint>(inputs.frameIndex & 0x7fffffffu));
+                TemporalShaderFrameIndex({inputs.historySignature,
+                                          inputs.frameIndex, false, 1}));
     glUniform1f(glGetUniformLocation(program_, "uGIStrength"),
                 inputs.quality.giStrength);
     glUniform1f(glGetUniformLocation(program_, "uReflectionStrength"),
