@@ -20,6 +20,7 @@ class UGPUMeshCache;
 class UHardwareGBuffer;
 class UHardwareRasterizer;
 class URasterLightingPass;
+class UHybridPresentationPass;
 class UWorld;
 
 struct FWorldRenderRequest
@@ -28,6 +29,8 @@ struct FWorldRenderRequest
     FRenderTarget& target;
     FRenderFeatures features;
     FRenderQuality quality;
+    int internalWidth;
+    int internalHeight;
     FBackendSelection backendSelection;
     std::vector<ERenderPass> passPlan;
 };
@@ -41,6 +44,10 @@ struct FWorldRendererStats
     std::uint64_t hardwareGBufferPasses = 0;
     std::uint64_t rasterLightingPasses = 0;
     std::uint64_t compositePasses = 0;
+    int outputWidth = 0;
+    int outputHeight = 0;
+    int internalWidth = 0;
+    int internalHeight = 0;
     // Actual GL work, including rollback; ray*Uploads below are committed transactions.
     std::uint64_t rayResourceAllocations = 0;
     std::uint64_t rayReleasedResources = 0;
@@ -73,6 +80,8 @@ struct FWorldRendererStats
     std::size_t liveEnvironmentTextures = 0;
     std::size_t liveRasterOutputTextures = 0;
     std::size_t liveRasterFramebuffers = 0;
+    std::size_t liveHybridHDRTextures = 0;
+    std::size_t liveHybridFramebuffers = 0;
     std::size_t liveRayOutputTextures = 0;
     std::size_t liveRayBLAS = 0;
     std::uint64_t cpuFramebufferGenerations = 0;
@@ -139,6 +148,7 @@ private:
     std::unique_ptr<UHardwareGBuffer> hardwareGBuffer_;
     std::unique_ptr<UHardwareRasterizer> hardwareRasterizer_;
     std::unique_ptr<URasterLightingPass> rasterLightingPass_;
+    std::unique_ptr<UHybridPresentationPass> hybridPresentationPass_;
     std::unique_ptr<FOpenGLRayTracingBackendFactory> rayBackendFactory_;
     std::unique_ptr<FStderrRayEffectsWarningSink> rayWarningSink_;
     std::unique_ptr<FRayEffectsScheduler> rayEffectsScheduler_;

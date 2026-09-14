@@ -347,13 +347,10 @@ bool URasterLightingPass::Init(std::uint64_t contextGeneration,
     const std::string lightingSource =
         SharedLightingShaderSource::BuildRasterLightingFragmentShader();
     if (!LinkProgram(lightingSource.c_str(), "lighting fragment",
-                     lightingProgram_, error) ||
-        !LinkProgram(RasterLightingShaders::CompositeFragment, "composite fragment",
-                     compositeProgram_, error))
+                     lightingProgram_, error))
     {
         if (lightingProgram_) glDeleteProgram(lightingProgram_);
-        if (compositeProgram_) glDeleteProgram(compositeProgram_);
-        lightingProgram_ = compositeProgram_ = 0;
+        lightingProgram_ = 0;
         if (diagnostic) *diagnostic = error;
         return false;
     }
@@ -388,12 +385,6 @@ bool URasterLightingPass::Init(std::uint64_t contextGeneration,
         "uIdentity", "uPrecomputedLighting", "uEmissive", "uDepth", "uSky"};
     for (int unit = 0; unit < TextureUnitCount; ++unit)
         glUniform1i(glGetUniformLocation(lightingProgram_, samplers[unit]), unit);
-    glUseProgram(compositeProgram_);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uEnvironmentAmbient"), 0);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uSelectedDirect"), 1);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uGIRadiance"), 2);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uOpticalContribution"), 3);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uEmissive"), 4);
     if (diagnostic) diagnostic->clear();
     return CollectError("Raster lighting initialization", diagnostic);
 }
@@ -668,79 +659,6 @@ bool URasterLightingPass::Render(const FRenderScene& scene,
     return true;
 }
 
-bool URasterLightingPass::Composite(const FRenderTarget& target,
-                                    const FRasterLightingOutput& rasterLighting,
-                                    const FRayEffectOutputs& rayEffects,
-                                    std::uint64_t contextGeneration,
-                                    FCompositeOutput& output,
-                                    std::string* diagnostic)
-{
-    output = {};
-    if (!IsReady() || contextGeneration_ != contextGeneration ||
-        !target.IsValidForContext(contextGeneration) || !rasterLighting.valid ||
-        !rasterLighting.environmentAmbientTarget.valid ||
-        !rasterLighting.unshadowedDirectTarget.valid ||
-        !rasterLighting.emissiveTarget.valid ||
-        rasterLighting.environmentAmbientTarget.identity != environmentAmbientTexture_ ||
-        rasterLighting.unshadowedDirectTarget.identity != unshadowedDirectTexture_ ||
-        rasterLighting.emissiveTarget.identity == 0 ||
-        rasterLighting.environmentAmbientTarget.width != width_ ||
-        rasterLighting.environmentAmbientTarget.height != height_ ||
-        rasterLighting.unshadowedDirectTarget.width != width_ ||
-        rasterLighting.unshadowedDirectTarget.height != height_ ||
-        rasterLighting.emissiveTarget.width != width_ ||
-        rasterLighting.emissiveTarget.height != height_)
-    {
-        if (diagnostic) *diagnostic = "Raster composite rejected invalid inputs/context";
-        return false;
-    }
-    FStateGuard restore;
-    glViewport(0, 0, target.Width(), target.Height());
-    glDrawBuffer(target.Kind() == ERenderTargetKind::DefaultFramebuffer
-        ? GL_BACK : GL_COLOR_ATTACHMENT0);
-    ConfigureFullscreenState();
-    glUseProgram(compositeProgram_);
-    glBindVertexArray(fullscreenVAO_);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, environmentAmbientTexture_);
-    glBindSampler(0, 0);
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, unshadowedDirectTexture_);
-    glBindSampler(1, 0);
-    auto validEffectTarget = [&](const std::optional<FRenderOutputView>& view)
-    {
-        return view.has_value() && view->valid && view->identity != 0 &&
-            view->width == target.Width() && view->height == target.Height();
-    };
-    const bool hasShadowedDirect = validEffectTarget(rayEffects.shadowedDirectTarget);
-    const bool hasGI = validEffectTarget(rayEffects.globalIlluminationTarget);
-    const bool hasOptical = validEffectTarget(rayEffects.opticalContributionTarget);
-    const unsigned textures[] = {
-        environmentAmbientTexture_,
-        hasShadowedDirect
-            ? static_cast<unsigned>(rayEffects.shadowedDirectTarget->identity)
-            : unshadowedDirectTexture_,
-        hasGI ? static_cast<unsigned>(rayEffects.globalIlluminationTarget->identity) : 0u,
-        hasOptical ? static_cast<unsigned>(rayEffects.opticalContributionTarget->identity) : 0u,
-        static_cast<unsigned>(rasterLighting.emissiveTarget.identity),
-    };
-    for (int unit = 1; unit < 5; ++unit)
-    {
-        glActiveTexture(GL_TEXTURE0 + unit);
-        glBindTexture(GL_TEXTURE_2D, textures[unit]);
-        glBindSampler(unit, 0);
-    }
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uHasGIRadiance"), hasGI ? 1 : 0);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uHasOpticalContribution"), hasOptical ? 1 : 0);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
-    if (!CollectError("Raster composite pass", diagnostic)) return false;
-    ++stats_.compositePasses;
-    output.valid = true;
-    output.finalColorTarget = {target.Identity(), target.Width(), target.Height(), true};
-    if (diagnostic) diagnostic->clear();
-    return true;
-}
-
 void URasterLightingPass::Shutdown() noexcept
 {
     if (contextGeneration_ != 0 &&
@@ -758,14 +676,12 @@ void URasterLightingPass::DeleteCurrentResources() noexcept
     if (framebuffer_) glDeleteFramebuffers(1, &framebuffer_);
     if (fullscreenVAO_) glDeleteVertexArrays(1, &fullscreenVAO_);
     if (lightingProgram_) glDeleteProgram(lightingProgram_);
-    if (compositeProgram_) glDeleteProgram(compositeProgram_);
     ForgetCurrentResources();
 }
 
 void URasterLightingPass::ForgetCurrentResources() noexcept
 {
     lightingProgram_ = 0;
-    compositeProgram_ = 0;
     fullscreenVAO_ = 0;
     framebuffer_ = 0;
     environmentAmbientTexture_ = 0;

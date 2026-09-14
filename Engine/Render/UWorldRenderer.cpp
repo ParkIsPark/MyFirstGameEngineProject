@@ -2,8 +2,10 @@
 
 #include "ACamera.h"
 #include "IRayTracingBackend.h"
+#include "FRenderMath.h"
 #include "UHardwareGBuffer.h"
 #include "UHardwareRasterizer.h"
+#include "UHybridPresentationPass.h"
 #include "URasterLightingPass.h"
 #include "UGL33RayTracingBackend.h"
 #include "UGPUMeshCache.h"
@@ -11,6 +13,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -25,10 +28,12 @@ public:
                                  UHardwareGBuffer& gbuffer,
                                  UHardwareRasterizer& rasterizer,
                                  URasterLightingPass& lighting,
+                                 UHybridPresentationPass& presentation,
                                  FRayEffectsScheduler& rayEffects,
                                  FWorldRendererStats& stats)
         : meshCache_(meshCache), gbuffer_(gbuffer), rasterizer_(rasterizer),
-          lighting_(lighting), rayEffects_(rayEffects), stats_(stats)
+          lighting_(lighting), presentation_(presentation), rayEffects_(rayEffects),
+          stats_(stats)
     {
     }
 
@@ -37,7 +42,8 @@ public:
         std::string diagnostic;
         const std::uint64_t generation = ActiveRenderTargetContextGeneration();
         if (!rasterizer_.Init(generation, &diagnostic) ||
-            !lighting_.Init(generation, &diagnostic))
+            !lighting_.Init(generation, &diagnostic) ||
+            !presentation_.Init(generation, &diagnostic))
             throw std::runtime_error(diagnostic.empty()
                 ? "Hardware renderer initialization failed" : diagnostic);
     }
@@ -50,7 +56,7 @@ public:
         std::string diagnostic;
         meshCache_.BeginFrame();
         if (!lighting_.PrepareEnvironment(request.scene, generation, &diagnostic) ||
-            !gbuffer_.Resize(request.target.Width(), request.target.Height(), generation) ||
+            !gbuffer_.Resize(request.internalWidth, request.internalHeight, generation) ||
             !rasterizer_.RenderGeometry(request.scene, request.quality, meshCache_,
                                         gbuffer_, lighting_.EnvironmentTexture(),
                                         generation, &diagnostic))
@@ -74,7 +80,8 @@ public:
         ++stats_.rasterLightingPasses;
 
         FRayEffectOutputs rayOutputs;
-        if (std::find(request.passPlan.begin(), request.passPlan.end(),
+        if (!request.quality.depthView &&
+            std::find(request.passPlan.begin(), request.passPlan.end(),
                       ERenderPass::RayTracedEffects) != request.passPlan.end())
         {
             FRayEffectInputs rayInputs;
@@ -84,23 +91,40 @@ public:
             rayInputs.features = request.features;
             rayInputs.quality = request.quality;
             rayInputs.environmentTexture = lighting_.EnvironmentTexture();
-            rayInputs.width = request.target.Width();
-            rayInputs.height = request.target.Height();
+            rayInputs.width = request.internalWidth;
+            rayInputs.height = request.internalHeight;
             rayInputs.contextGeneration = generation;
             rayEffects_.Execute(rayInputs, request.backendSelection, rayOutputs);
             stats_.activeRayBackend = rayEffects_.ActiveKind();
             stats_.backendReason = rayEffects_.BackendReason();
         }
-        FCompositeOutput composite;
-        if (!lighting_.Composite(request.target, rasterOutput, rayOutputs,
-                                 generation, composite, &diagnostic))
+        if (!presentation_.Resize(request.internalWidth, request.internalHeight,
+                                  generation, &diagnostic))
+        {
+            if (!diagnostic.empty())
+                std::cerr << "[Renderer] " << diagnostic << '\n';
+            return false;
+        }
+        FRenderOutputView presentationInput;
+        if (request.quality.depthView)
+            presentationInput = rasterOutput.environmentAmbientTarget;
+        else if (!presentation_.CompositeHDR(gbuffer_, rasterOutput, rayOutputs,
+                                              request.quality, presentationInput,
+                                              &diagnostic))
+        {
+            if (!diagnostic.empty())
+                std::cerr << "[Renderer] " << diagnostic << '\n';
+            return false;
+        }
+        if (!presentation_.Present(presentationInput, request.target,
+                                   request.quality, &diagnostic))
         {
             if (!diagnostic.empty())
                 std::cerr << "[Renderer] " << diagnostic << '\n';
             return false;
         }
         ++stats_.compositePasses;
-        return composite.valid;
+        return true;
     }
 
 private:
@@ -108,6 +132,7 @@ private:
     UHardwareGBuffer& gbuffer_;
     UHardwareRasterizer& rasterizer_;
     URasterLightingPass& lighting_;
+    UHybridPresentationPass& presentation_;
     FRayEffectsScheduler& rayEffects_;
     FWorldRendererStats& stats_;
 };
@@ -128,6 +153,7 @@ UWorldRenderer::UWorldRenderer()
       hardwareGBuffer_(std::make_unique<UHardwareGBuffer>()),
       hardwareRasterizer_(std::make_unique<UHardwareRasterizer>()),
       rasterLightingPass_(std::make_unique<URasterLightingPass>()),
+      hybridPresentationPass_(std::make_unique<UHybridPresentationPass>()),
       rayBackendFactory_(std::make_unique<FOpenGLRayTracingBackendFactory>()),
       rayWarningSink_(std::make_unique<FStderrRayEffectsWarningSink>()),
       rayEffectsScheduler_(std::make_unique<FRayEffectsScheduler>(
@@ -135,7 +161,7 @@ UWorldRenderer::UWorldRenderer()
 {
     executor_ = std::make_unique<FHardwareWorldRenderExecutor>(
         *hardwareMeshCache_, *hardwareGBuffer_, *hardwareRasterizer_,
-        *rasterLightingPass_, *rayEffectsScheduler_, stats_);
+        *rasterLightingPass_, *hybridPresentationPass_, *rayEffectsScheduler_, stats_);
 }
 
 UWorldRenderer::UWorldRenderer(std::unique_ptr<IWorldRenderExecutor> executor)
@@ -162,6 +188,7 @@ void UWorldRenderer::Shutdown() noexcept
     if (hardwareMeshCache_) hardwareMeshCache_->Clear();
     if (hardwareGBuffer_) hardwareGBuffer_->Release();
     if (rasterLightingPass_) rasterLightingPass_->Shutdown();
+    if (hybridPresentationPass_) hybridPresentationPass_->Shutdown();
     if (hardwareRasterizer_) hardwareRasterizer_->Shutdown();
     executor_->Shutdown();
     initialized_ = false;
@@ -183,6 +210,8 @@ const FWorldRendererStats& UWorldRenderer::Stats() const
         stats_.liveEnvironmentTextures = rasterLightingPass_->EnvironmentTexture() ? 1u : 0u;
         stats_.liveRasterOutputTextures = rasterLightingPass_->OwnedTextureCount();
         stats_.liveRasterFramebuffers = rasterLightingPass_->Framebuffer() ? 1u : 0u;
+        stats_.liveHybridHDRTextures = hybridPresentationPass_->HDRTexture() ? 1u : 0u;
+        stats_.liveHybridFramebuffers = hybridPresentationPass_->Framebuffer() ? 1u : 0u;
         const auto& ray = rayEffectsScheduler_->Stats();
         stats_.rayResourceAllocations = ray.resourceAllocations;
         stats_.rayReleasedResources = ray.releasedResources;
@@ -233,8 +262,18 @@ bool UWorldRenderer::Render(UWorld& world,
         (!backendSelection.fallbackReason.empty() ? backendSelection.fallbackReason :
          "No secondary ray effects requested");
     const FRenderScene scene = ExtractRenderScene(world, camera);
+    const FRenderQuality sanitizedQuality = SanitizeRenderQuality(quality);
+    const FInternalRenderSize internalSize = ResolveInternalRenderSize(
+        target.Width(), target.Height(), sanitizedQuality.ssaa,
+        std::numeric_limits<int>::max());
+    if (internalSize.width == 0 || internalSize.height == 0) return false;
+    stats_.outputWidth = target.Width();
+    stats_.outputHeight = target.Height();
+    stats_.internalWidth = internalSize.width;
+    stats_.internalHeight = internalSize.height;
     FWorldRenderRequest request{
-        scene, target, normalized, quality, backendSelection, passPlan,
+        scene, target, normalized, sanitizedQuality,
+        internalSize.width, internalSize.height, backendSelection, passPlan,
     };
 
     if (!executor_->RequiresOpenGLTargetBinding()) return executor_->Execute(request);

@@ -9,6 +9,7 @@
 #include "UPhysicsWorld.h"
 #include "FWorldSerializer.h"
 #include "FIniFile.h"
+#include "FRenderQualitySettings.h"
 
 void GameEngine::OnStartup()
 {
@@ -16,15 +17,7 @@ void GameEngine::OnStartup()
     backbufferTarget_ = FRenderTarget::DefaultFramebuffer(Width(), Height(), ContextGeneration());
     FIniFile ini;
     if (ini.LoadFromFile("Config/GameSettings.ini"))
-    {
-        renderQuality_.giSamples      = ini.GetInt  ("Render", "GISamples", renderQuality_.giSamples);
-        renderQuality_.giBounces      = ini.GetInt  ("Render", "GIBounces", renderQuality_.giBounces);
-        renderQuality_.giStrength     = ini.GetFloat("Render", "GIStrength", renderQuality_.giStrength);
-        renderQuality_.reflStrength   = ini.GetFloat("Render", "ReflectionStrength", renderQuality_.reflStrength);
-        renderQuality_.shininess      = ini.GetFloat("Render", "Shininess", renderQuality_.shininess);
-        renderQuality_.shadowSamples  = ini.GetInt  ("Render", "ShadowSamples", renderQuality_.shadowSamples);
-        renderQuality_.shadowSoftness = ini.GetFloat("Render", "ShadowSoftness", renderQuality_.shadowSoftness);
-    }
+        renderQuality_ = ReadRenderQuality(ini, "Render", renderQuality_);
 }
 
 void GameEngine::OnShutdown()

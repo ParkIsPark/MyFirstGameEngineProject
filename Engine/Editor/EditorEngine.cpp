@@ -1855,13 +1855,9 @@ void EditorEngine::DrawViewport()
     cam.SetOrientation(camYaw_, camPitch_);
     cam.SetFOV(60.0f, (float)w / (float)h);
 
-    // Super-sample AA: render at ssaa_x resolution; the LINEAR-filtered Image draws
-    // it back at screen size (downscale = antialiasing). UI/picking use screen w/h.
-    int rw = w * activeRS().ssaa, rh = h * activeRS().ssaa;
-
     if (viewportTarget_.Kind() != ERenderTargetKind::TextureViewport ||
-        !viewportTarget_.Resize(rw, rh, ContextGeneration()))
-        viewportTarget_ = FRenderTarget::TextureViewport(rw, rh, ContextGeneration());
+        !viewportTarget_.Resize(w, h, ContextGeneration()))
+        viewportTarget_ = FRenderTarget::TextureViewport(w, h, ContextGeneration());
 
     FRenderQuality frameQuality = activeRS();
     frameQuality.depthView = depthView_;

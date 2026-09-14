@@ -116,7 +116,7 @@ void main()
     int model = int(normalModel.w + 0.5);
     vec3 ambientNormal = model == 0 ? geometricNormal.xyz : normalModel.xyz;
     oEnvironmentAmbient = vec4(
-        ambientAt(ambientNormal, ambientCoefficient) + emissiveData.rgb, 1.0);
+        ambientAt(ambientNormal, ambientCoefficient), 1.0);
     if (model == 0 || model == 1)
     {
         oUnshadowedDirect = vec4(precomputedLighting.rgb, 1.0);
@@ -130,29 +130,4 @@ void main()
 }
 )GLSL";
 
-inline constexpr const char* CompositeFragment = R"GLSL(#version 330 core
-in vec2 vUV;
-layout(location = 0) out vec4 oColor;
-uniform sampler2D uEnvironmentAmbient;
-uniform sampler2D uSelectedDirect;
-uniform sampler2D uGIRadiance;
-uniform sampler2D uOpticalContribution;
-uniform sampler2D uEmissive;
-uniform bool uHasGIRadiance;
-uniform bool uHasOpticalContribution;
-void main()
-{
-    vec3 environmentAmbient = max(texture(uEnvironmentAmbient, vUV).rgb, vec3(0.0));
-    vec3 direct = max(texture(uSelectedDirect, vUV).rgb, vec3(0.0));
-    vec3 gi = uHasGIRadiance ? texture(uGIRadiance, vUV).rgb : vec3(0.0);
-    vec3 emissive = max(texture(uEmissive, vUV).rgb, vec3(0.0));
-    vec4 optical = uHasOpticalContribution
-        ? texture(uOpticalContribution, vUV) : vec4(0.0, 0.0, 0.0, 1.0);
-    vec3 localLighting = environmentAmbient - emissive + direct + gi;
-    vec3 linearColor = max(emissive + optical.a * localLighting + optical.rgb,
-                           vec3(0.0));
-    vec3 displayColor = pow(clamp(linearColor, 0.0, 1.0), vec3(1.0 / 2.2));
-    oColor = vec4(displayColor, 1.0);
-}
-)GLSL";
 }

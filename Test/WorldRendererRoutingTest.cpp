@@ -190,6 +190,8 @@ public:
         target = &request.target;
         features = request.features;
         quality = request.quality;
+        internalWidth = request.internalWidth;
+        internalHeight = request.internalHeight;
         backend = request.backendSelection;
         plan = request.passPlan;
         return true;
@@ -200,6 +202,8 @@ public:
     const FRenderTarget* target = nullptr;
     FRenderFeatures features;
     FRenderQuality quality;
+    int internalWidth = 0;
+    int internalHeight = 0;
     FBackendSelection backend;
     std::vector<ERenderPass> plan;
 };
@@ -289,6 +293,8 @@ void CheckSceneExtractionAndRouting()
     assert(renderer.Render(world, camera, target, features, quality, backend));
     assert(observed->calls == 1);
     assert(observed->target == &target);
+    assert(observed->target->Width() == 800 && observed->target->Height() == 400);
+    assert(observed->internalWidth == 1600 && observed->internalHeight == 800);
     assert(observed->features.hardwareRaster);
     assert(observed->features.rayTracing);
     assert(!observed->features.rayTracedShadows);

@@ -16,7 +16,6 @@ struct FRasterLightingPassStats
 {
     std::uint64_t outputAllocations = 0;
     std::uint64_t lightingPasses = 0;
-    std::uint64_t compositePasses = 0;
     std::uint64_t environmentTextureUploads = 0;
     std::uint64_t environmentTextureUploadFailures = 0;
     std::size_t pointLightLimit = 0;
@@ -44,15 +43,9 @@ public:
                 std::uint64_t contextGeneration,
                 FRasterLightingOutput& output,
                 std::string* diagnostic = nullptr);
-    bool Composite(const FRenderTarget& target,
-                   const FRasterLightingOutput& rasterLighting,
-                   const FRayEffectOutputs& rayEffects,
-                   std::uint64_t contextGeneration,
-                   FCompositeOutput& output,
-                   std::string* diagnostic = nullptr);
     void Shutdown() noexcept;
 
-    bool IsReady() const { return lightingProgram_ != 0 && compositeProgram_ != 0; }
+    bool IsReady() const { return lightingProgram_ != 0; }
     unsigned EnvironmentAmbientTexture() const { return environmentAmbientTexture_; }
     unsigned UnshadowedDirectTexture() const { return unshadowedDirectTexture_; }
     unsigned Framebuffer() const { return framebuffer_; }
@@ -78,7 +71,6 @@ private:
     void ForgetCurrentResources() noexcept;
 
     unsigned lightingProgram_ = 0;
-    unsigned compositeProgram_ = 0;
     unsigned fullscreenVAO_ = 0;
     unsigned framebuffer_ = 0;
     unsigned environmentAmbientTexture_ = 0;

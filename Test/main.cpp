@@ -56,6 +56,7 @@
 #include "FWorldSerializer.h"
 #include "URenderer.h"
 #include "URasterLightingPass.h"
+#include "UHybridPresentationPass.h"
 #include "USkyHDRI.h"
 #include "UWorldRenderer.h"
 #include "FRenderTarget.h"
@@ -996,10 +997,13 @@ public:
         UHardwareGBuffer gbuffer;
         UHardwareRasterizer rasterizer;
         URasterLightingPass lighting;
+        UHybridPresentationPass presentation;
         FRenderQuality quality;
         std::string diagnostic;
         check("lighting shaders compile and link",
-              lighting.Init(ContextGeneration(), &diagnostic));
+              lighting.Init(ContextGeneration(), &diagnostic) &&
+              presentation.Init(ContextGeneration(), &diagnostic) &&
+              presentation.Resize(64, 64, ContextGeneration(), &diagnostic));
         check("lighting output allocation",
               lighting.Resize(64, 64, ContextGeneration(), &diagnostic));
         check("lighting G-buffer allocation",
@@ -1112,16 +1116,52 @@ public:
         FRenderTarget target = FRenderTarget::DefaultFramebuffer(
             64, 64, ContextGeneration());
         check("default target binds", target.Begin());
-        FCompositeOutput composite;
-        const bool hostileCompositeOK = lighting.Composite(
-            target, hostileLit, FRayEffectOutputs{}, ContextGeneration(),
-            composite, &diagnostic) && composite.valid;
+        GLint beforePresentationFramebuffer = 0;
+        GLint beforePresentationReadFramebuffer = 0;
+        GLint beforePresentationViewport[4] = {};
+        GLint beforePresentationProgram = 0;
+        GLint beforePresentationVAO = 0;
+        GLint beforePresentationActiveTexture = 0;
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &beforePresentationFramebuffer);
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &beforePresentationReadFramebuffer);
+        glGetIntegerv(GL_VIEWPORT, beforePresentationViewport);
+        glGetIntegerv(GL_CURRENT_PROGRAM, &beforePresentationProgram);
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &beforePresentationVAO);
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &beforePresentationActiveTexture);
+        FRenderOutputView hostileHDR;
+        const bool hostileCompositeOK = presentation.CompositeHDR(
+            gbuffer, hostileLit, FRayEffectOutputs{}, quality,
+            hostileHDR, &diagnostic) &&
+            presentation.Present(hostileHDR, target, quality, &diagnostic);
         std::vector<unsigned char> pixels(64u * 64u * 3u);
         glReadPixels(0, 0, 64, 64, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
         GLint restoredCompositeDrawBuffer = 0;
+        GLint restoredPresentationFramebuffer = 0;
+        GLint restoredPresentationReadFramebuffer = 0;
+        GLint restoredPresentationViewport[4] = {};
+        GLint restoredPresentationProgram = 0;
+        GLint restoredPresentationVAO = 0;
+        GLint restoredPresentationActiveTexture = 0;
         glGetIntegerv(GL_DRAW_BUFFER0, &restoredCompositeDrawBuffer);
-        check("composite selects color zero under hostile state and restores draw buffer",
-              hostileCompositeOK && restoredCompositeDrawBuffer == GL_NONE);
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &restoredPresentationFramebuffer);
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &restoredPresentationReadFramebuffer);
+        glGetIntegerv(GL_VIEWPORT, restoredPresentationViewport);
+        glGetIntegerv(GL_CURRENT_PROGRAM, &restoredPresentationProgram);
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &restoredPresentationVAO);
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &restoredPresentationActiveTexture);
+        check("HDR composite and presentation restore caller GL state",
+              hostileCompositeOK && restoredCompositeDrawBuffer == GL_NONE &&
+              restoredPresentationFramebuffer == beforePresentationFramebuffer &&
+              restoredPresentationReadFramebuffer == beforePresentationReadFramebuffer &&
+              std::equal(std::begin(restoredPresentationViewport),
+                         std::end(restoredPresentationViewport),
+                         std::begin(beforePresentationViewport)) &&
+              restoredPresentationProgram == beforePresentationProgram &&
+              restoredPresentationVAO == beforePresentationVAO &&
+              restoredPresentationActiveTexture == beforePresentationActiveTexture &&
+              glIsEnabled(GL_RASTERIZER_DISCARD) && glIsEnabled(GL_STENCIL_TEST) &&
+              glIsEnabled(GL_SCISSOR_TEST) && glIsEnabled(GL_DEPTH_TEST) &&
+              glIsEnabled(GL_CULL_FACE) && glIsEnabled(GL_FRAMEBUFFER_SRGB));
         target.End();
 
         glDrawBuffer(GL_BACK);
@@ -1169,11 +1209,16 @@ public:
             const bool lightingOK = geometryOK && lighting.Render(
                 frameScene, frameQuality, gbuffer, ContextGeneration(),
                 frameLighting, &diagnostic);
-            FCompositeOutput frameComposite;
+            FRenderOutputView frameHDR;
             const bool bound = target.Begin();
-            const bool compositeOK = bound && lightingOK && lighting.Composite(
-                target, frameLighting, FRayEffectOutputs{}, ContextGeneration(),
-                frameComposite, &diagnostic);
+            const bool compositeOK = bound && lightingOK &&
+                (frameQuality.depthView
+                    ? presentation.Present(frameLighting.environmentAmbientTarget,
+                                           target, frameQuality, &diagnostic)
+                    : (presentation.CompositeHDR(gbuffer, frameLighting,
+                          FRayEffectOutputs{}, frameQuality, frameHDR, &diagnostic) &&
+                       presentation.Present(frameHDR, target, frameQuality,
+                                            &diagnostic)));
             if (compositeOK)
                 glReadPixels(0, 0, 64, 64, GL_RGB, GL_UNSIGNED_BYTE, result.data());
             if (bound) target.End();
@@ -1203,6 +1248,7 @@ public:
             bool valid = false;
             glm::vec3 environmentAmbient = glm::vec3(0.0f);
             glm::vec3 unshadowedDirect = glm::vec3(0.0f);
+            glm::vec3 emissive = glm::vec3(0.0f);
         };
         auto renderSplitProbe = [&](FRenderScene& probeScene,
                                     const FRenderQuality& probeQuality)
@@ -1230,6 +1276,10 @@ public:
                 glReadBuffer(GL_COLOR_ATTACHMENT1);
                 glReadPixels(32, 32, 1, 1, GL_RGBA, GL_FLOAT, pixel);
                 probe.unshadowedDirect = glm::vec3(pixel[0], pixel[1], pixel[2]);
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, gbuffer.Framebuffer());
+                glReadBuffer(gbuffer.ColorAttachment(EHardwareGBufferSemantic::Emissive));
+                glReadPixels(32, 32, 1, 1, GL_RGBA, GL_FLOAT, pixel);
+                probe.emissive = glm::vec3(pixel[0], pixel[1], pixel[2]);
                 glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
             }
             return probe;
@@ -1282,8 +1332,25 @@ public:
             ambientEmissiveScene, quality);
         check("ambient and emissive stay separate from zero direct light",
               ambientEmissive.valid &&
-              ambientEmissive.environmentAmbient.r > 0.2f &&
+              ambientEmissive.environmentAmbient.r > 0.0f &&
+              ambientEmissive.environmentAmbient.r < 0.2f &&
+              ambientEmissive.emissive.r > 0.19f &&
               glm::length(ambientEmissive.unshadowedDirect) < 0.001f);
+
+        FRenderScene hdrScene = distanceScene;
+        hdrScene.meshes.front().materialOverride->emissive = glm::vec3(2.0f);
+        hdrScene.pointLights = {{glm::vec3(0.0f, 0.0f, -3.0f), glm::vec3(2.0f)}};
+        const auto hdrFrame = renderFrame(hdrScene, quality);
+        std::vector<float> hdrPixels(64u * 64u * 4u);
+        glBindTexture(GL_TEXTURE_2D, presentation.HDRTexture());
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, hdrPixels.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+        const std::size_t hdrCenter = (32u * 64u + 32u) * 4u;
+        check("linear HDR remains above one until ACES presentation",
+              hdrFrame.first && hdrPixels[hdrCenter] > 1.0f &&
+              hdrFrame.second[center] > 0u && hdrFrame.second[center] < 255u &&
+              hdrFrame.second[center + 1] < 255u &&
+              hdrFrame.second[center + 2] < 255u);
 
         scene.meshes.front().shadingModel = ERenderShadingModel::Flat;
         const auto flat = renderFrame(scene, quality);
@@ -1561,6 +1628,20 @@ public:
               lighting.ResourceRevision() == lightingRevision + 2u &&
               lighting.Resize(64, 64, ContextGeneration(), &diagnostic) &&
               lighting.ResourceRevision() == lightingRevision + 2u);
+        const std::uint64_t presentationRevision = presentation.ResourceRevision();
+        const unsigned committedHDR = presentation.HDRTexture();
+        check("failed HDR resize preserves the committed target",
+              !presentation.Resize(maximumTextureSize + 1, 48,
+                                   ContextGeneration(), &diagnostic) &&
+              presentation.HDRTexture() == committedHDR &&
+              presentation.Width() == 64 && presentation.Height() == 64 &&
+              presentation.ResourceRevision() == presentationRevision);
+        check("HDR output resize recreates once and then reuses",
+              presentation.Resize(80, 48, ContextGeneration(), &diagnostic) &&
+              presentation.Resize(64, 64, ContextGeneration(), &diagnostic) &&
+              presentation.ResourceRevision() == presentationRevision + 2u &&
+              presentation.Resize(64, 64, ContextGeneration(), &diagnostic) &&
+              presentation.ResourceRevision() == presentationRevision + 2u);
 
         std::unique_ptr<UMesh> slottedCube(UMesh::GenerateCube(glm::vec3(0.8f)));
         Material redSlot;
@@ -2150,6 +2231,7 @@ public:
         UHardwareGBuffer gbuffer;
         UHardwareRasterizer rasterizer;
         URasterLightingPass lighting;
+        UHybridPresentationPass presentation;
         UGL33RayTracingBackend rays;
         FRenderQuality quality;
         quality.giSamples = 2;
@@ -2157,6 +2239,9 @@ public:
         quality.shadowSamples = 2;
         quality.shadowSoftness = 0.03f;
         std::string diagnostic;
+        check("ray-effects presentation initializes",
+              presentation.Init(ContextGeneration(), &diagnostic) &&
+              presentation.Resize(64, 64, ContextGeneration(), &diagnostic));
         auto invalidRayMesh = [&](UMesh& mesh)
         {
             FRenderScene invalidScene;
@@ -2331,10 +2416,11 @@ public:
         auto composite = [&](const FRayEffectOutputs& effects)
         {
             std::vector<unsigned char> pixels(64u * 64u * 3u);
-            FCompositeOutput output;
+            FRenderOutputView output;
             const bool bound = target.Begin();
-            const bool okay = bound && lighting.Composite(target, lit, effects,
-                ContextGeneration(), output, &diagnostic);
+            const bool okay = bound && presentation.CompositeHDR(
+                gbuffer, lit, effects, quality, output, &diagnostic) &&
+                presentation.Present(output, target, quality, &diagnostic);
             if (!okay && !diagnostic.empty())
                 std::fprintf(stderr, "ray composite: %s\n", diagnostic.c_str());
             if (okay) glReadPixels(0, 0, 64, 64, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
@@ -5261,8 +5347,9 @@ public:
                         const auto stable = render();
                         check(stable.geometryUploads == 1 && stable.geometryReuploads == 1 &&
                             stable.residentGeometryResources == 1 && stable.liveGBufferTextures == 9 &&
-                            stable.liveGBufferFramebuffers == 1 && stable.liveRasterOutputTextures == 1 &&
+                            stable.liveGBufferFramebuffers == 1 && stable.liveRasterOutputTextures == 2 &&
                             stable.liveRasterFramebuffers == 1 && stable.liveMaterialTextures == 1 &&
+                            stable.liveHybridHDRTextures == 1 && stable.liveHybridFramebuffers == 1 &&
                             stable.liveEnvironmentTextures == 1 &&
                             stable.liveRayOutputTextures == 3 && stable.liveRayBLAS == 1 &&
                             target.OwnedAttachmentCount() == 3,
@@ -5308,6 +5395,7 @@ public:
             check(closed.residentGeometryResources == 0 && closed.liveGBufferTextures == 0 &&
                 closed.liveGBufferFramebuffers == 0 && closed.liveRasterOutputTextures == 0 &&
                 closed.liveRasterFramebuffers == 0 && closed.liveMaterialTextures == 0 &&
+                closed.liveHybridHDRTextures == 0 && closed.liveHybridFramebuffers == 0 &&
                 closed.liveEnvironmentTextures == 0 && closed.liveRayOutputTextures == 0 &&
                 closed.liveRayBLAS == 0 && target.OwnedAttachmentCount() == 0,
                 "shutdown releases all owned resource classes");
@@ -5338,6 +5426,9 @@ public:
         const auto stats = RendererStats();
         OnShutdown();
         const bool ok = stats.hardwareDrawCalls > 0 && stats.compositePasses > 0 &&
+            stats.outputWidth > 0 && stats.outputHeight > 0 &&
+            stats.internalWidth == stats.outputWidth * 2 &&
+            stats.internalHeight == stats.outputHeight * 2 &&
             stats.cpuFramebufferGenerations == 0 && stats.cpuFramebufferUploads == 0 && stats.cpuReadbacks == 0 &&
             (rayTracing ? stats.rayBackendCalls > 0 : stats.rayFactoryCalls == 0);
         std::printf("[%s] production Editor Render -> DrawViewport -> UWorldRenderer RT=%d frames=%llu\n",
@@ -5367,6 +5458,8 @@ public:
         OnShutdown();
         delete world_; world_ = nullptr;
         const bool ok = stats.hardwareDrawCalls == 3 && stats.compositePasses == 3 &&
+            stats.outputWidth == Width() && stats.outputHeight == Height() &&
+            stats.internalWidth == Width() * 2 && stats.internalHeight == Height() * 2 &&
             stats.cpuFramebufferGenerations == 0 && stats.cpuFramebufferUploads == 0 && stats.cpuReadbacks == 0 &&
             (rayTracing ? stats.rayBackendCalls == 3 : stats.rayFactoryCalls == 0);
         std::printf("[%s] production Game Render -> UWorldRenderer RT=%d frames=%llu\n",
@@ -5390,7 +5483,14 @@ static int RunRenderPerformanceGates()
     const auto temporary = std::filesystem::temp_directory_path() /
         ("render-role-gates-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(temporary / "Content");
+    std::filesystem::create_directories(temporary / "Config");
     std::filesystem::current_path(temporary);
+    {
+        std::ofstream editorSettings("Config/EditorSettings.ini");
+        editorSettings << "[Editor]\nSSAA = 2\n[Game]\nSSAA = 2\n";
+        std::ofstream gameSettings("Config/GameSettings.ini");
+        gameSettings << "[Render]\nSSAA = 2\n";
+    }
     for (bool rayTracing : {false, true})
     {
         {
