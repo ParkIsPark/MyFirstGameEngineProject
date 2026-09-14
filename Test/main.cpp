@@ -32,11 +32,13 @@
 #include "Engine.h"
 #include "ACamera.h"
 #include "UMesh.h"
+#include "UMeshComponent.h"
 #include "FTransform.h"
 #include "UFrameBuffer.h"
 #include "UGBuffer.h"
 #include "URasterizer.h"
 #include "UMeshRayTracer.h"
+#include "FDeprecatedWorldRenderExecutor.h"
 #include "UHybridPass.h"
 #include "UObjImporter.h"
 #include "UFbxImporter.h"
@@ -3772,6 +3774,232 @@ static int RunRayEffectsGates(const std::string& outputPath)
     return app.RunGates(outputPath);
 }
 
+class FDeprecatedRayTracerLifecycleSelfTestApp final : public Engine
+{
+public:
+    int RunGates()
+    {
+        glfwHideWindow(window_);
+        int passed = 0, failed = 0;
+        auto check = [&](const char* label, bool result)
+        {
+            std::printf("[%s] %s\n", result ? "PASS" : "FAIL", label);
+            result ? ++passed : ++failed;
+        };
+        auto allNonZero = [](const auto& identities)
+        {
+            return std::all_of(identities.begin(), identities.end(),
+                [](unsigned identity) { return identity != 0; });
+        };
+        auto allZero = [](const auto& identities)
+        {
+            return std::all_of(identities.begin(), identities.end(),
+                [](unsigned identity) { return identity == 0; });
+        };
+
+        std::unique_ptr<UMesh> cube(UMesh::GenerateCube(glm::vec3(0.8f)));
+        cube->material.kd = glm::vec3(0.75f, 0.2f, 0.1f);
+        cube->material.texData = {255, 64, 32};
+        cube->material.texWidth = 1;
+        cube->material.texHeight = 1;
+        cube->material.texChannels = 3;
+        const glm::mat4 model = glm::translate(glm::mat4(1.0f),
+                                               glm::vec3(0.0f, 0.0f, -5.0f));
+
+        unsigned externalSky = 0;
+        const unsigned char skyPixel[] = {64, 96, 160};
+        glGenTextures(1, &externalSky);
+        glBindTexture(GL_TEXTURE_2D, externalSky);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, 1, 1, 0, GL_RGB,
+                     GL_UNSIGNED_BYTE, skyPixel);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        UMeshRayTracer rayTracer;
+        rayTracer.Init();
+        const auto firstInit = rayTracer.ResourceState();
+        check("deprecated ray tracer initializes one program and quad",
+              firstInit.program != 0 && firstInit.vertexArray != 0 &&
+              firstInit.vertexBuffer != 0);
+        rayTracer.Init();
+        const auto duplicateInit = rayTracer.ResourceState();
+        check("deprecated ray tracer Init is idempotent",
+              duplicateInit.program == firstInit.program &&
+              duplicateInit.vertexArray == firstInit.vertexArray &&
+              duplicateInit.vertexBuffer == firstInit.vertexBuffer);
+
+        rayTracer.SetSky(externalSky);
+        rayTracer.UploadMesh(*cube, model);
+        const auto uploaded = rayTracer.ResourceState();
+        check("deprecated ray tracer owns a complete uploaded scene",
+              uploaded.blasUploaded && uploaded.blasSignature != 0 &&
+              uploaded.triangleCount == cube->triangleCount() &&
+              uploaded.nodeCount > 0 && uploaded.instanceCount == 1 &&
+              uploaded.textureLayers == 1 &&
+              uploaded.cachedBLAS == 1 && uploaded.cachedMeshOffsets == 1 &&
+              uploaded.cachedInstanceLayers == 1 &&
+              allNonZero(uploaded.sceneBuffers) &&
+              allNonZero(uploaded.sceneTextures) &&
+              uploaded.skyTexture == externalSky);
+
+        rayTracer.Cleanup();
+        const auto cleaned = rayTracer.ResourceState();
+        check("deprecated ray tracer Cleanup clears all ownership and cache state",
+              cleaned.program == 0 && cleaned.vertexArray == 0 &&
+              cleaned.vertexBuffer == 0 && allZero(cleaned.sceneBuffers) &&
+              allZero(cleaned.sceneTextures) && cleaned.skyTexture == 0 &&
+              !cleaned.blasUploaded && cleaned.blasSignature == 0 &&
+              cleaned.triangleCount == 0 && cleaned.nodeCount == 0 &&
+              cleaned.instanceCount == 0 && cleaned.textureLayers == 0 &&
+              cleaned.cachedBLAS == 0 && cleaned.cachedMeshOffsets == 0 &&
+              cleaned.cachedInstanceLayers == 0);
+        check("deprecated ray tracer deletes owned GL objects but not external sky",
+              glIsProgram(uploaded.program) == GL_FALSE &&
+              glIsVertexArray(uploaded.vertexArray) == GL_FALSE &&
+              glIsBuffer(uploaded.vertexBuffer) == GL_FALSE &&
+              std::all_of(uploaded.sceneBuffers.begin(), uploaded.sceneBuffers.end(),
+                  [](unsigned identity) { return glIsBuffer(identity) == GL_FALSE; }) &&
+              std::all_of(uploaded.sceneTextures.begin(), uploaded.sceneTextures.end(),
+                  [](unsigned identity) { return glIsTexture(identity) == GL_FALSE; }) &&
+              glIsTexture(externalSky) == GL_TRUE);
+
+        rayTracer.Cleanup();
+        const auto cleanedAgain = rayTracer.ResourceState();
+        check("deprecated ray tracer repeated Cleanup remains empty",
+              cleanedAgain.program == 0 &&
+              allZero(cleanedAgain.sceneBuffers) &&
+              allZero(cleanedAgain.sceneTextures) &&
+              !cleanedAgain.blasUploaded && cleanedAgain.cachedBLAS == 0);
+
+        rayTracer.Init();
+        rayTracer.SetSky(externalSky);
+        rayTracer.UploadMesh(*cube, model);
+        const auto reuploaded = rayTracer.ResourceState();
+        const bool completeReupload =
+              reuploaded.program != 0 && reuploaded.blasUploaded &&
+              reuploaded.triangleCount == cube->triangleCount() &&
+              allNonZero(reuploaded.sceneBuffers) &&
+              allNonZero(reuploaded.sceneTextures);
+        check("same-scene reinit recreates every uploaded GL resource",
+              completeReupload);
+        if (completeReupload)
+        {
+            ACamera camera;
+            glViewport(0, 0, 16, 16);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            rayTracer.RenderFrame(camera, 16, 16);
+            check("same-scene RenderFrame succeeds after Shutdown-style reuse",
+                  glGetError() == GL_NO_ERROR);
+        }
+        else
+        {
+            check("same-scene RenderFrame succeeds after Shutdown-style reuse",
+                  false);
+        }
+
+        rayTracer.Cleanup();
+        glDeleteTextures(1, &externalSky);
+        check("deprecated ray tracer lifecycle leaves no GL error",
+              glGetError() == GL_NO_ERROR);
+
+        UWorld world;
+        auto* actor = new AActor();
+        auto* component = new UMeshComponent();
+        component->mesh = cube.get();
+        actor->SetMesh(component);
+        actor->SetActorLocation(glm::vec3(0.0f, 0.0f, -5.0f));
+        world.Spawn(actor);
+        FRenderTarget target = FRenderTarget::DefaultFramebuffer(
+            16, 16, ContextGeneration());
+        FRenderFeatures features;
+        FRenderQuality quality;
+        quality.giSamples = 0;
+        FBackendSelection backend;
+
+        {
+            std::unique_ptr<IDeprecatedWorldRenderExecutor> software =
+                CreateDeprecatedWorldRenderExecutor(
+                    ELegacyRendererOverride::SoftwareRasterizer);
+            IDeprecatedWorldRenderExecutor* observed = software.get();
+            UWorldRenderer routed(std::move(software));
+            routed.Init();
+            routed.Init();
+            const bool firstRender = routed.Render(
+                world, world.GetCamera(), target, features, quality, backend,
+                ContextGeneration());
+            check("software override maps exactly and renders once per route",
+                  observed->OverrideKind() ==
+                      ELegacyRendererOverride::SoftwareRasterizer &&
+                  firstRender &&
+                  observed->LifecycleStats().initializations == 1 &&
+                  observed->LifecycleStats().executions == 1);
+            routed.Shutdown();
+            routed.Shutdown();
+            check("software override Shutdown is idempotent",
+                  observed->LifecycleStats().shutdowns == 1);
+            routed.Init();
+            const bool reusedRender = routed.Render(
+                world, world.GetCamera(), target, features, quality, backend,
+                ContextGeneration());
+            check("software override is reusable without double execution",
+                  reusedRender &&
+                  observed->LifecycleStats().initializations == 2 &&
+                  observed->LifecycleStats().executions == 2 &&
+                  observed->LifecycleStats().shutdowns == 1);
+            routed.Shutdown();
+            check("software override closes its second lifecycle once",
+                  observed->LifecycleStats().shutdowns == 2);
+        }
+
+        {
+            std::unique_ptr<IDeprecatedWorldRenderExecutor> pureGPU =
+                CreateDeprecatedWorldRenderExecutor(
+                    ELegacyRendererOverride::PureGPURayTracer);
+            IDeprecatedWorldRenderExecutor* observed = pureGPU.get();
+            UWorldRenderer routed(std::move(pureGPU));
+            routed.Init();
+            routed.Init();
+            const bool firstRender = routed.Render(
+                world, world.GetCamera(), target, features, quality, backend,
+                ContextGeneration());
+            check("pure GPU override maps exactly and renders once per route",
+                  observed->OverrideKind() ==
+                      ELegacyRendererOverride::PureGPURayTracer &&
+                  firstRender &&
+                  observed->LifecycleStats().initializations == 1 &&
+                  observed->LifecycleStats().executions == 1);
+            routed.Shutdown();
+            routed.Shutdown();
+            check("pure GPU override Shutdown is idempotent",
+                  observed->LifecycleStats().shutdowns == 1);
+            routed.Init();
+            const bool reusedRender = routed.Render(
+                world, world.GetCamera(), target, features, quality, backend,
+                ContextGeneration());
+            check("pure GPU override reuploads the same scene exactly once",
+                  reusedRender &&
+                  observed->LifecycleStats().initializations == 2 &&
+                  observed->LifecycleStats().executions == 2 &&
+                  observed->LifecycleStats().shutdowns == 1);
+            routed.Shutdown();
+            check("pure GPU override closes its second lifecycle once",
+                  observed->LifecycleStats().shutdowns == 2);
+        }
+
+        check("deprecated override routing leaves no GL error",
+              glGetError() == GL_NO_ERROR);
+        std::printf("=== deprecated ray tracer lifecycle gates: %d passed, %d failed ===\n",
+                    passed, failed);
+        return failed == 0 ? 0 : 1;
+    }
+};
+
+static int RunDeprecatedRayTracerLifecycleGates()
+{
+    FDeprecatedRayTracerLifecycleSelfTestApp app;
+    if (!app.Init(16, 16, "Deprecated Ray Tracer Lifecycle Self-Test")) return 2;
+    return app.RunGates();
+}
+
 class FComputeInitSelfTestApp final : public Engine
 {
 public:
@@ -3805,6 +4033,8 @@ int main(int argc, char** argv)
 {
     const std::string arg = (argc > 1) ? argv[1] : "";
     if (arg == "--ray-compute-init-selftest") return RunComputeInitGate();
+    if (arg == "--deprecated-raytracer-lifecycle-selftest")
+        return RunDeprecatedRayTracerLifecycleGates();
 
     const std::string hardwareRasterPrefix = "--hw-raster-selftest=";
     if (arg.rfind(hardwareRasterPrefix, 0) == 0)

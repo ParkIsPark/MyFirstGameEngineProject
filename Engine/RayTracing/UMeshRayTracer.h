@@ -1,4 +1,6 @@
 #pragma once
+#include <array>
+#include <cstddef>
 #include <glm/glm.hpp>
 #include <vector>
 #include <unordered_map>
@@ -7,6 +9,25 @@
 
 class UMesh;
 class ACamera;
+
+struct FMeshRayTracerResourceState
+{
+    unsigned program = 0;
+    unsigned vertexArray = 0;
+    unsigned vertexBuffer = 0;
+    std::array<unsigned, 6> sceneBuffers = {};
+    std::array<unsigned, 7> sceneTextures = {};
+    unsigned skyTexture = 0;
+    std::size_t blasSignature = 0;
+    std::size_t cachedBLAS = 0;
+    std::size_t cachedMeshOffsets = 0;
+    std::size_t cachedInstanceLayers = 0;
+    int triangleCount = 0;
+    int nodeCount = 0;
+    int instanceCount = 0;
+    int textureLayers = 0;
+    bool blasUploaded = false;
+};
 
 // ---------------------------------------------------------------------------
 // UMeshRayTracer (Stage 4) — minimal GPU mesh ray tracer.
@@ -56,6 +77,7 @@ public:
     void SetShadow(int samples, float softness) { shadowSamples_ = samples; shadowSoftness_ = softness; }
     void Cleanup();
     bool ready() const { return prog_ != 0; }
+    FMeshRayTracerResourceState ResourceState() const noexcept;
 
 private:
     // Generic TBO (re)upload helpers (each owns a buffer + buffer-texture).

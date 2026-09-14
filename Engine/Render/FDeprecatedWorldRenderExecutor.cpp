@@ -68,14 +68,40 @@ private:
     GLint previousMatrixMode_ = GL_MODELVIEW;
 };
 
-class FDeprecatedSoftwareRasterExecutor final : public IWorldRenderExecutor
+class FDeprecatedSoftwareRasterExecutor final
+    : public IDeprecatedWorldRenderExecutor
 {
 public:
-    void Shutdown() noexcept override { sky_.Cleanup(); }
+    void Init() override
+    {
+        if (initialized_) return;
+        initialized_ = true;
+        ++stats_.initializations;
+    }
+
+    void Shutdown() noexcept override
+    {
+        if (!initialized_) return;
+        sky_.Cleanup();
+        initialized_ = false;
+        ++stats_.shutdowns;
+    }
+
     bool RequiresOpenGLTargetBinding() const override { return true; }
+    ELegacyRendererOverride OverrideKind() const noexcept override
+    {
+        return ELegacyRendererOverride::SoftwareRasterizer;
+    }
+    const FDeprecatedWorldRenderExecutorStats& LifecycleStats()
+        const noexcept override
+    {
+        return stats_;
+    }
 
     bool Execute(const FWorldRenderRequest& request) override
     {
+        if (!initialized_) return false;
+        ++stats_.executions;
         FRenderShowFlag flags;
         flags.shading = static_cast<EShadingModel>(request.scene.shadingModel);
         flags.depthView = request.quality.depthView;
@@ -97,9 +123,12 @@ public:
 private:
     URenderer renderer_;
     USkyHDRI sky_;
+    FDeprecatedWorldRenderExecutorStats stats_;
+    bool initialized_ = false;
 };
 
-class FDeprecatedPureGPURayTracerExecutor final : public IWorldRenderExecutor
+class FDeprecatedPureGPURayTracerExecutor final
+    : public IDeprecatedWorldRenderExecutor
 {
 public:
     void Init() override
@@ -108,21 +137,34 @@ public:
         {
             rayTracer_.Init();
             ready_ = rayTracer_.ready();
+            if (ready_) ++stats_.initializations;
         }
     }
 
     void Shutdown() noexcept override
     {
+        if (!ready_) return;
         rayTracer_.Cleanup();
         sky_.Cleanup();
         ready_ = false;
+        ++stats_.shutdowns;
     }
 
     bool RequiresOpenGLTargetBinding() const override { return true; }
+    ELegacyRendererOverride OverrideKind() const noexcept override
+    {
+        return ELegacyRendererOverride::PureGPURayTracer;
+    }
+    const FDeprecatedWorldRenderExecutorStats& LifecycleStats()
+        const noexcept override
+    {
+        return stats_;
+    }
 
     bool Execute(const FWorldRenderRequest& request) override
     {
         if (!ready_) return false;
+        ++stats_.executions;
 
         std::vector<const UMesh*> meshes;
         std::vector<glm::mat4> models;
@@ -191,11 +233,12 @@ public:
 private:
     UMeshRayTracer rayTracer_;
     USkyHDRI sky_;
+    FDeprecatedWorldRenderExecutorStats stats_;
     bool ready_ = false;
 };
 } // namespace
 
-std::unique_ptr<IWorldRenderExecutor> CreateDeprecatedWorldRenderExecutor(
+std::unique_ptr<IDeprecatedWorldRenderExecutor> CreateDeprecatedWorldRenderExecutor(
     ELegacyRendererOverride overrideKind)
 {
     switch (overrideKind)

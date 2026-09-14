@@ -22,6 +22,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -55,6 +56,13 @@ static_assert(!THasCameraMember<FWorldRenderRequest>::value,
 bool Near(float lhs, float rhs)
 {
     return std::fabs(lhs - rhs) < 0.0001f;
+}
+
+void Require(bool condition, const std::string& message)
+{
+    if (condition) return;
+    std::cerr << "WorldRendererRoutingTest failure: " << message << '\n';
+    std::exit(1);
 }
 
 std::string ReadSource(const char* path)
@@ -96,13 +104,17 @@ void CheckNormalRouteSourceIsolation()
     const char* duplicateRouteSymbols[] = {
         "RenderWorldGPU", "renderMode_", "vpTex_", "glDrawPixels",
         "RasterShadedLegacyOutput", "UHybridPass", "FLegacyWorldRenderExecutor",
-        "CPU framebuffer",
+        "CPU framebuffer", "ReadPixels", "glReadPixels", "glTexImage",
+        "glTexSubImage",
     };
     for (const char* symbol : duplicateRouteSymbols)
     {
-        assert(editor.find(symbol) == std::string::npos);
-        assert(game.find(symbol) == std::string::npos);
-        assert(renderer.find(symbol) == std::string::npos);
+        Require(editor.find(symbol) == std::string::npos,
+                std::string("Editor normal route contains ") + symbol);
+        Require(game.find(symbol) == std::string::npos,
+                std::string("Game normal route contains ") + symbol);
+        Require(renderer.find(symbol) == std::string::npos,
+                std::string("UWorldRenderer normal route contains ") + symbol);
     }
 
     const char* legacyDependencies[] = {
@@ -133,21 +145,33 @@ void CheckNormalRouteSourceIsolation()
 
 void CheckDeprecatedOverrideFactoryIsExplicitAndLazy()
 {
-    std::unique_ptr<IWorldRenderExecutor> none =
+    std::unique_ptr<IDeprecatedWorldRenderExecutor> none =
         CreateDeprecatedWorldRenderExecutor(ELegacyRendererOverride::None);
     assert(!none);
 
-    std::unique_ptr<IWorldRenderExecutor> software =
+    std::unique_ptr<IDeprecatedWorldRenderExecutor> software =
         CreateDeprecatedWorldRenderExecutor(
             ELegacyRendererOverride::SoftwareRasterizer);
-    std::unique_ptr<IWorldRenderExecutor> pureGPU =
+    std::unique_ptr<IDeprecatedWorldRenderExecutor> pureGPU =
         CreateDeprecatedWorldRenderExecutor(
             ELegacyRendererOverride::PureGPURayTracer);
     assert(software);
     assert(pureGPU);
     assert(software.get() != pureGPU.get());
+    Require(software->OverrideKind() ==
+                ELegacyRendererOverride::SoftwareRasterizer,
+            "SoftwareRasterizer factory branch returned the wrong implementation");
+    Require(pureGPU->OverrideKind() ==
+                ELegacyRendererOverride::PureGPURayTracer,
+            "PureGPURayTracer factory branch returned the wrong implementation");
     assert(software->RequiresOpenGLTargetBinding());
     assert(pureGPU->RequiresOpenGLTargetBinding());
+    assert(software->LifecycleStats().initializations == 0);
+    assert(software->LifecycleStats().executions == 0);
+    assert(software->LifecycleStats().shutdowns == 0);
+    assert(pureGPU->LifecycleStats().initializations == 0);
+    assert(pureGPU->LifecycleStats().executions == 0);
+    assert(pureGPU->LifecycleStats().shutdowns == 0);
 }
 
 class FSpyWorldRenderExecutor final : public IWorldRenderExecutor

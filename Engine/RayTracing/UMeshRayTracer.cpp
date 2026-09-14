@@ -382,6 +382,8 @@ static GLuint compile(GLenum type, const char* src)
 
 void UMeshRayTracer::Init()
 {
+    if (ready()) return;
+
     const std::string frag = std::string(FRAG_HEAD) + RT_SHADING_GLSL + FRAG_BODY;
     GLuint vs = compile(GL_VERTEX_SHADER,   VERT_SRC);
     GLuint fs = compile(GL_FRAGMENT_SHADER, frag.c_str());
@@ -690,8 +692,44 @@ void UMeshRayTracer::Cleanup()
     if (tlasNodeTbo_) { glDeleteBuffers(1, &tlasNodeTbo_);  tlasNodeTbo_ = 0; }
     if (tlasIdxTex_)  { glDeleteTextures(1, &tlasIdxTex_); tlasIdxTex_ = 0; }
     if (tlasIdxTbo_)  { glDeleteBuffers(1, &tlasIdxTbo_);  tlasIdxTbo_ = 0; }
-    if (texArr_)  { glDeleteTextures(1, &texArr_); texArr_ = 0; texLayers_ = 0; }
+    if (texArr_)  { glDeleteTextures(1, &texArr_); texArr_ = 0; }
     if (vbo_)     { glDeleteBuffers(1, &vbo_);  vbo_  = 0; }
     if (vao_)     { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
     if (prog_)    { glDeleteProgram(prog_); prog_ = 0; }
+
+    skyTex_ = 0;
+    numTris_ = 0;
+    numNodes_ = 0;
+    numInstances_ = 0;
+    texLayers_ = 0;
+    blasSig_ = 0;
+    blasUploaded_ = false;
+    instLayer_.clear();
+    meshOff_.clear();
+    blas_.clear();
+}
+
+FMeshRayTracerResourceState UMeshRayTracer::ResourceState() const noexcept
+{
+    FMeshRayTracerResourceState state;
+    state.program = prog_;
+    state.vertexArray = vao_;
+    state.vertexBuffer = vbo_;
+    state.sceneBuffers = {
+        tbo_, nodeTbo_, idxTbo_, instTbo_, tlasNodeTbo_, tlasIdxTbo_,
+    };
+    state.sceneTextures = {
+        tex_, nodeTex_, idxTex_, instTex_, tlasNodeTex_, tlasIdxTex_, texArr_,
+    };
+    state.skyTexture = skyTex_;
+    state.blasSignature = blasSig_;
+    state.cachedBLAS = blas_.size();
+    state.cachedMeshOffsets = meshOff_.size();
+    state.cachedInstanceLayers = instLayer_.size();
+    state.triangleCount = numTris_;
+    state.nodeCount = numNodes_;
+    state.instanceCount = numInstances_;
+    state.textureLayers = texLayers_;
+    state.blasUploaded = blasUploaded_;
+    return state;
 }

@@ -24,10 +24,11 @@ enum class ERenderMode { RasterOnly, GPURayTrace, Hybrid };
 enum class ERenderStage { Raster, GBuffer, Upload, GPUShadow, GPURayTrace };
 
 // ---------------------------------------------------------------------------
-// URenderer (page 4) — render orchestrator. Engine::Render() calls this one
-// class; it owns the rasterizer + ray tracer + G-buffer and assembles a frame
-// per mode. The GPU shadow/reflection pass uses a fragment shader (#version 330)
-// rather than a compute shader, so no GL 4.3 is assumed on the target machine.
+// URenderer (page 4) — deprecated-only educational/regression whole-frame
+// infrastructure retained for compatibility. Normal Editor/Game rendering uses
+// UWorldRenderer's hardware raster plus optional ray-effects path. The legacy
+// GPU shadow/reflection pass uses a fragment shader (#version 330), so no GL 4.3
+// is assumed on the target machine.
 // ---------------------------------------------------------------------------
 class URenderer
 {
