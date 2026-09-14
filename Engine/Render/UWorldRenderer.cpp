@@ -185,6 +185,14 @@ const FWorldRendererStats& UWorldRenderer::Stats() const
         stats_.liveRasterFramebuffers = rasterLightingPass_->Framebuffer() ? 1u : 0u;
         const auto& ray = rayEffectsScheduler_->Stats();
         stats_.rayResourceAllocations = ray.resourceAllocations;
+        stats_.rayReleasedResources = ray.releasedResources;
+        stats_.raySceneUploadAttempts = ray.sceneUploadAttempts;
+        stats_.rayBLASUploadAttempts = ray.blasUploadAttempts;
+        stats_.rayInstanceUploadAttempts = ray.instanceUploadAttempts;
+        stats_.rayMaterialUploadAttempts = ray.materialUploadAttempts;
+        stats_.rayOutputAllocationAttempts = ray.outputAllocationAttempts;
+        stats_.rayBufferUploadCalls = ray.bufferUploadCalls;
+        stats_.rayTextureUploadCalls = ray.textureUploadCalls;
         stats_.rayFactoryCalls = ray.factoryCalls;
         stats_.rayBackendInitializations = ray.backendInitializations;
         stats_.rayBackendCalls = ray.backendCalls;

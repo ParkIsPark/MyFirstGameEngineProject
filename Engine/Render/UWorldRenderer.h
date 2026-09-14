@@ -41,7 +41,16 @@ struct FWorldRendererStats
     std::uint64_t hardwareGBufferPasses = 0;
     std::uint64_t rasterLightingPasses = 0;
     std::uint64_t compositePasses = 0;
+    // Actual GL work, including rollback; ray*Uploads below are committed transactions.
     std::uint64_t rayResourceAllocations = 0;
+    std::uint64_t rayReleasedResources = 0;
+    std::uint64_t raySceneUploadAttempts = 0;
+    std::uint64_t rayBLASUploadAttempts = 0;
+    std::uint64_t rayInstanceUploadAttempts = 0;
+    std::uint64_t rayMaterialUploadAttempts = 0;
+    std::uint64_t rayOutputAllocationAttempts = 0;
+    std::uint64_t rayBufferUploadCalls = 0;
+    std::uint64_t rayTextureUploadCalls = 0;
     std::uint64_t rayBackendCalls = 0;
     std::uint64_t rayFactoryCalls = 0;
     std::uint64_t rayBackendInitializations = 0;

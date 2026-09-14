@@ -1829,6 +1829,40 @@ static int RunRasterLightingGates(const std::string& outputPath)
     return app.RunGates(outputPath);
 }
 
+// Fault injection stays in the test harness: real shader/program allocation,
+// but one real link-status query reports failure, like a driver/linker failure.
+static PFNGLGETPROGRAMIVPROC developerOriginalGetProgramiv = nullptr;
+static GLuint developerRejectedProgram = 0;
+static GLuint developerRejectedShaders[2] = {};
+#ifdef _WIN32
+static void __stdcall
+#else
+static void
+#endif
+RejectFirstDeveloperLink(GLuint program, GLenum pname, GLint* value)
+{
+    developerOriginalGetProgramiv(program,pname,value);
+    if (pname == GL_LINK_STATUS && developerRejectedProgram == 0)
+    {
+        developerRejectedProgram=program;
+        GLsizei attached=0;
+        glGetAttachedShaders(program,2,&attached,developerRejectedShaders);
+        *value=GL_FALSE;
+    }
+}
+class FScopedRejectedDeveloperLink
+{
+public:
+    FScopedRejectedDeveloperLink()
+    {
+        developerRejectedProgram=0;
+        developerRejectedShaders[0]=developerRejectedShaders[1]=0;
+        developerOriginalGetProgramiv=__glewGetProgramiv;
+        __glewGetProgramiv=RejectFirstDeveloperLink;
+    }
+    ~FScopedRejectedDeveloperLink() { __glewGetProgramiv=developerOriginalGetProgramiv; }
+};
+
 class FRayEffectsSelfTestApp final : public Engine
 {
 public:
@@ -3290,6 +3324,15 @@ public:
         FRayEffectOutputs schedulerFailure, schedulerRetry;
         const bool schedulerNeutral = retryScheduler.Execute(
             retryInputs, retrySelection, schedulerFailure);
+        check("GL33 failed upload counts allocated rollback objects",
+              retryScheduler.Stats().resourceAllocations == 25u &&
+              retryScheduler.Stats().sceneUploads == 0u);
+        const auto gl33FailedWork = retryScheduler.Stats();
+        check("GL33 failed scene retains attempts but commits no GPU scene",
+              gl33FailedWork.sceneUploadAttempts == 1 && gl33FailedWork.blasUploadAttempts == 1 &&
+              gl33FailedWork.instanceUploadAttempts == 1 && gl33FailedWork.materialUploadAttempts == 1 &&
+              gl33FailedWork.bufferUploadCalls == 8 && gl33FailedWork.textureUploadCalls == 4 &&
+              gl33FailedWork.releasedResources == 19 && retryScheduler.ActiveBackend()->Stats().residentBLAS == 0);
         const bool schedulerRecovered = retryScheduler.Execute(
             retryInputs, retrySelection, schedulerRetry);
         check("scheduler retries a transactional real-GL upload failure next frame",
@@ -3297,7 +3340,14 @@ public:
               schedulerRecovered && schedulerRetry.shadowVisibilityTarget &&
               schedulerWarnings.count == 1 &&
               retryScheduler.Stats().backendCalls == 2u);
+        check("GL33 retry performs a second real upload and commits only once",
+              retryScheduler.Stats().sceneUploadAttempts == 2 && retryScheduler.Stats().sceneUploads == 1 &&
+              retryScheduler.Stats().bufferUploadCalls == 16 && retryScheduler.Stats().textureUploadCalls == 5 &&
+              retryScheduler.Stats().resourceAllocations == gl33FailedWork.resourceAllocations + 17 &&
+              retryScheduler.ActiveBackend()->Stats().residentBLAS > 0);
         retryScheduler.Shutdown();
+        check("GL33 scheduler shutdown includes rollback and live-object deletion",
+              retryScheduler.Stats().resourceAllocations == retryScheduler.Stats().releasedResources);
 
         if (computeQualityAvailable)
         {
@@ -3363,6 +3413,8 @@ public:
             FRayEffectOutputs forcedFailureFirst, forcedFailureSecond;
             const bool forcedFirstOK = forcedFailureScheduler.Execute(
                 retryInputs, forcedComputeSelection, forcedFailureFirst);
+            check("failed GL43 initialization counts real program allocation",
+                  forcedFailureScheduler.Stats().resourceAllocations > 0u);
             const bool forcedSecondOK = forcedFailureScheduler.Execute(
                 retryInputs, forcedComputeSelection, forcedFailureSecond);
             check("forced GL43 init failure remains neutral and never calls GL33",
@@ -3372,6 +3424,9 @@ public:
                   forcedComputeCreates == 1 && forcedCompatibleCreates == 0 &&
                   forcedWarnings.count == 1 &&
                   forcedFailureScheduler.ActiveBackend() == nullptr);
+            check("failed GL43 initialization releases shader/program without live ownership",
+                  forcedFailureScheduler.Stats().resourceAllocations == 2 &&
+                  forcedFailureScheduler.Stats().releasedResources == 2);
             forcedFailureScheduler.Shutdown();
 
             int retryComputeCreates = 0;
@@ -3390,6 +3445,15 @@ public:
             FRayEffectOutputs computeRetryFirst, computeRetrySecond;
             const bool computeRetryFirstOK = computeRetryScheduler.Execute(
                 retryInputs, forcedComputeSelection, computeRetryFirst);
+            check("GL43 failed upload counts allocated rollback objects",
+                  computeRetryScheduler.Stats().resourceAllocations == 14u &&
+                  computeRetryScheduler.Stats().sceneUploads == 0u);
+            const auto gl43FailedWork = computeRetryScheduler.Stats();
+            check("GL43 failed scene retains attempts but commits no GPU scene",
+                  gl43FailedWork.sceneUploadAttempts == 1 && gl43FailedWork.blasUploadAttempts == 1 &&
+                  gl43FailedWork.instanceUploadAttempts == 1 && gl43FailedWork.materialUploadAttempts == 1 &&
+                  gl43FailedWork.bufferUploadCalls == 8 && gl43FailedWork.textureUploadCalls == 4 &&
+                  gl43FailedWork.releasedResources == 10 && computeRetryScheduler.ActiveBackend()->Stats().residentBLAS == 0);
             const bool computeRetrySecondOK = computeRetryScheduler.Execute(
                 retryInputs, forcedComputeSelection, computeRetrySecond);
             check("scheduler retries transactional GL43 upload failure next frame",
@@ -3399,7 +3463,99 @@ public:
                   retryComputeCreates == 1 &&
                   computeRetryWarnings.count == 1 &&
                   computeRetryScheduler.Stats().backendCalls == 2u);
+            check("GL43 retry performs a second real upload and commits only once",
+                  computeRetryScheduler.Stats().sceneUploadAttempts == 2 && computeRetryScheduler.Stats().sceneUploads == 1 &&
+                  computeRetryScheduler.Stats().bufferUploadCalls == 16 && computeRetryScheduler.Stats().textureUploadCalls == 5 &&
+                  computeRetryScheduler.Stats().resourceAllocations == gl43FailedWork.resourceAllocations + 9 &&
+                  computeRetryScheduler.ActiveBackend()->Stats().residentBLAS > 0);
             computeRetryScheduler.Shutdown();
+            check("GL43 scheduler shutdown includes rollback and live-object deletion",
+                  computeRetryScheduler.Stats().resourceAllocations == computeRetryScheduler.Stats().releasedResources);
+        }
+
+
+        // Real backend operations run before rejection. Counters must retain the
+        // rejected work, while committed revisions and prior output identities survive.
+        for (bool compute : {false, true})
+        {
+            if (compute && !computeQualityAvailable) continue;
+            UGL33RayTracingBackend fault33;
+            UGL43RayTracingBackend fault43;
+            IRayTracingBackend& backend = compute ? static_cast<IRayTracingBackend&>(fault43) :
+                static_cast<IRayTracingBackend&>(fault33);
+            bool rejectedInit = false;
+            if (compute) {
+                fault43.InjectNextInitializationFailureForTesting();
+                rejectedInit = !backend.Init(ContextGeneration(), &diagnostic);
+            } else {
+                FScopedRejectedDeveloperLink rejection;
+                rejectedInit = !backend.Init(ContextGeneration(), &diagnostic);
+                check("GL33 rejected link deletes its real program", developerRejectedProgram &&
+                      !glIsProgram(developerRejectedProgram));
+            }
+            const auto initFailed = backend.Stats();
+            check("rejected ray Init counts and releases every created shader/program",
+                  rejectedInit && initFailed.resourceAllocations == (compute ? 2u : 3u) &&
+                  initFailed.releasedResources == initFailed.resourceAllocations &&
+                  initFailed.ownedOutputTextures == 0 && initFailed.residentBLAS == 0);
+            check("ray Init retry records a second real attempt",
+                  backend.Init(ContextGeneration(), &diagnostic) &&
+                  backend.Stats().resourceAllocations == initFailed.resourceAllocations + (compute ? 2u : 4u));
+            FRayEffectInputs faultInputs = retryInputs;
+            FRayEffectOutputs prior, rejected, recovered;
+            check("fault telemetry fixture commits initial scene", backend.RenderEffects(faultInputs, prior, &diagnostic));
+            const auto beforeOutput = backend.Stats();
+            const auto oldTexture = static_cast<GLuint>(prior.shadowVisibilityTarget->identity);
+            faultInputs.width = 96;
+            glEnable(0xffffffffu); // Real GL error rejected after real candidate output allocation.
+            const bool outputFailed = !backend.RenderEffects(faultInputs, rejected, &diagnostic);
+            const auto outputFailure = backend.Stats();
+            check("failed output transaction counts allocations and rollback without changing live output",
+                  outputFailed && !rejected.shadowVisibilityTarget && glIsTexture(oldTexture) &&
+                  outputFailure.outputAllocationAttempts == beforeOutput.outputAllocationAttempts + 1 &&
+                  outputFailure.outputAllocations == beforeOutput.outputAllocations &&
+                  outputFailure.textureUploadCalls == beforeOutput.textureUploadCalls + 3 &&
+                  outputFailure.resourceAllocations == beforeOutput.resourceAllocations + (compute ? 3u : 4u) &&
+                  outputFailure.releasedResources == beforeOutput.releasedResources + (compute ? 3u : 4u) &&
+                  outputFailure.ownedOutputTextures == beforeOutput.ownedOutputTextures &&
+                  (compute ? fault43.Width() : fault33.Width()) == 64);
+            check("output retry performs a second allocation then commits once",
+                  backend.RenderEffects(faultInputs, recovered, &diagnostic) &&
+                  backend.Stats().outputAllocationAttempts == beforeOutput.outputAllocationAttempts + 2 &&
+                  backend.Stats().outputAllocations == beforeOutput.outputAllocations + 1 &&
+                  backend.Stats().textureUploadCalls == beforeOutput.textureUploadCalls + 6 &&
+                  !glIsTexture(oldTexture));
+            scene.meshes.front().modelTransform[3].x += 0.015625f;
+            if (compute) fault43.InjectNextUploadFailureForTesting();
+            else fault33.InjectNextUploadFailureForTesting();
+            const auto beforeUpdate = backend.Stats();
+            const bool updateFailed = !backend.RenderEffects(faultInputs, rejected, &diagnostic);
+            const auto failedUpdate = backend.Stats();
+            check("failed replacement preserves committed scene and live BLAS but records real instance work",
+                  updateFailed && failedUpdate.sceneUploads == beforeUpdate.sceneUploads &&
+                  failedUpdate.instanceUploads == beforeUpdate.instanceUploads &&
+                  failedUpdate.residentBLAS == beforeUpdate.residentBLAS &&
+                  failedUpdate.ownedOutputTextures == beforeUpdate.ownedOutputTextures &&
+                  failedUpdate.instanceUploadAttempts == beforeUpdate.instanceUploadAttempts + 1 &&
+                  failedUpdate.bufferUploadCalls == beforeUpdate.bufferUploadCalls + 4 &&
+                  failedUpdate.resourceAllocations == beforeUpdate.resourceAllocations + (compute ? 4u : 8u) &&
+                  failedUpdate.releasedResources == beforeUpdate.releasedResources + (compute ? 4u : 8u));
+            check("replacement retry reuploads uncommitted revision then commits exactly once",
+                  backend.RenderEffects(faultInputs, recovered, &diagnostic) &&
+                  backend.Stats().instanceUploadAttempts == beforeUpdate.instanceUploadAttempts + 2 &&
+                  backend.Stats().instanceUploads == beforeUpdate.instanceUploads + 1 &&
+                  backend.Stats().blasUploads == beforeUpdate.blasUploads &&
+                  backend.Stats().materialUploads == beforeUpdate.materialUploads);
+            const auto committed = backend.Stats();
+            check("unchanged committed scene adds no work after retry",
+                  backend.RenderEffects(faultInputs, recovered, &diagnostic) &&
+                  backend.Stats().sceneUploadAttempts == committed.sceneUploadAttempts &&
+                  backend.Stats().bufferUploadCalls == committed.bufferUploadCalls);
+            backend.Shutdown();
+            check("real backend shutdown balances all created/deleted names",
+                  backend.Stats().resourceAllocations == backend.Stats().releasedResources &&
+                  backend.Stats().residentBLAS == 0 && backend.Stats().ownedOutputTextures == 0 &&
+                  glGetError() == GL_NO_ERROR);
         }
 
         FRenderScene sharedScene;
@@ -3778,40 +3934,6 @@ static int RunRayEffectsGates(const std::string& outputPath)
     if (!app.Init(64, 64, "Ray Effects Self-Test")) return 2;
     return app.RunGates(outputPath);
 }
-
-// Fault injection stays in the test harness: real shader/program allocation,
-// but one real link-status query reports failure, like a driver/linker failure.
-static PFNGLGETPROGRAMIVPROC developerOriginalGetProgramiv = nullptr;
-static GLuint developerRejectedProgram = 0;
-static GLuint developerRejectedShaders[2] = {};
-#ifdef _WIN32
-static void __stdcall
-#else
-static void
-#endif
-RejectFirstDeveloperLink(GLuint program, GLenum pname, GLint* value)
-{
-    developerOriginalGetProgramiv(program,pname,value);
-    if (pname == GL_LINK_STATUS && developerRejectedProgram == 0)
-    {
-        developerRejectedProgram=program;
-        GLsizei attached=0;
-        glGetAttachedShaders(program,2,&attached,developerRejectedShaders);
-        *value=GL_FALSE;
-    }
-}
-class FScopedRejectedDeveloperLink
-{
-public:
-    FScopedRejectedDeveloperLink()
-    {
-        developerRejectedProgram=0;
-        developerRejectedShaders[0]=developerRejectedShaders[1]=0;
-        developerOriginalGetProgramiv=__glewGetProgramiv;
-        __glewGetProgramiv=RejectFirstDeveloperLink;
-    }
-    ~FScopedRejectedDeveloperLink() { __glewGetProgramiv=developerOriginalGetProgramiv; }
-};
 
 class FDeprecatedRayTracerLifecycleSelfTestApp final : public Engine
 {
@@ -4229,7 +4351,11 @@ public:
                 check(stats.rayFactoryCalls == 0 && stats.rayBackendInitializations == 0 &&
                     stats.rayBackendCalls == 0 && stats.rayResourceAllocations == 0 &&
                     stats.raySceneUploads == 0 && stats.rayDraws == 0 && stats.rayDispatches == 0 &&
-                    stats.rayMemoryBarriers == 0 && stats.liveRayOutputTextures == 0 && stats.liveRayBLAS == 0,
+                    stats.rayMemoryBarriers == 0 && stats.rayReleasedResources == 0 &&
+                    stats.raySceneUploadAttempts == 0 && stats.rayBLASUploadAttempts == 0 &&
+                    stats.rayInstanceUploadAttempts == 0 && stats.rayMaterialUploadAttempts == 0 &&
+                    stats.rayOutputAllocationAttempts == 0 && stats.rayBufferUploadCalls == 0 &&
+                    stats.rayTextureUploadCalls == 0 && stats.liveRayOutputTextures == 0 && stats.liveRayBLAS == 0,
                     "RT-off real route performs zero factory/init/allocation/upload/draw/dispatch/barrier work");
             }
             for (auto requested : {ERayTracingBackend::CompatibleGL33, ERayTracingBackend::Auto})
@@ -4288,12 +4414,22 @@ public:
             const auto off = render();
             check(off.rayFactoryCalls == beforeOff.rayFactoryCalls &&
                 off.rayResourceAllocations == beforeOff.rayResourceAllocations &&
+                off.rayReleasedResources == beforeOff.rayReleasedResources &&
+                off.raySceneUploadAttempts == beforeOff.raySceneUploadAttempts &&
+                off.rayBLASUploadAttempts == beforeOff.rayBLASUploadAttempts &&
+                off.rayInstanceUploadAttempts == beforeOff.rayInstanceUploadAttempts &&
+                off.rayMaterialUploadAttempts == beforeOff.rayMaterialUploadAttempts &&
+                off.rayOutputAllocationAttempts == beforeOff.rayOutputAllocationAttempts &&
+                off.rayBufferUploadCalls == beforeOff.rayBufferUploadCalls &&
+                off.rayTextureUploadCalls == beforeOff.rayTextureUploadCalls &&
                 off.raySceneUploads == beforeOff.raySceneUploads && off.rayDraws == beforeOff.rayDraws &&
                 off.rayDispatches == beforeOff.rayDispatches && off.rayMemoryBarriers == beforeOff.rayMemoryBarriers,
                 "RT-on to RT-off adds zero ray work even with cached backend");
             const auto lifetime = renderer.Stats();
             renderer.Shutdown(); target.Release();
             const auto closed = renderer.Stats();
+            check(closed.rayResourceAllocations == closed.rayReleasedResources,
+                "renderer aggregates every ray allocation and rollback/shutdown release");
             check(closed.residentGeometryResources == 0 && closed.liveGBufferTextures == 0 &&
                 closed.liveGBufferFramebuffers == 0 && closed.liveRasterOutputTextures == 0 &&
                 closed.liveRasterFramebuffers == 0 && closed.liveMaterialTextures == 0 &&

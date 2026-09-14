@@ -46,7 +46,7 @@ void FRayEffectsScheduler::WarnOnce(const std::string& key,
 void FRayEffectsScheduler::ResetForContext(
     std::uint64_t contextGeneration) noexcept
 {
-    if (backend_) backend_->Shutdown();
+    if (backend_) { backend_->Shutdown(); CollectBackendStats(); }
     backend_.reset();
     activeKind_ = ERayTracingBackend::Auto;
     contextGeneration_ = contextGeneration;
@@ -67,6 +67,14 @@ void FRayEffectsScheduler::CollectBackendStats() noexcept
     // replacement so totals cannot decrease when a new backend starts at zero.
 #define ACCUMULATE(field) stats_.field += current.field - observedBackendStats_.field
     ACCUMULATE(resourceAllocations);
+    ACCUMULATE(releasedResources);
+    ACCUMULATE(sceneUploadAttempts);
+    ACCUMULATE(blasUploadAttempts);
+    ACCUMULATE(instanceUploadAttempts);
+    ACCUMULATE(materialUploadAttempts);
+    ACCUMULATE(outputAllocationAttempts);
+    ACCUMULATE(bufferUploadCalls);
+    ACCUMULATE(textureUploadCalls);
     ACCUMULATE(sceneUploads);
     ACCUMULATE(rayDraws);
     ACCUMULATE(rayDispatches);
@@ -84,7 +92,7 @@ bool FRayEffectsScheduler::EnsureBackend(ERayTracingBackend kind,
                                          std::string& diagnostic)
 {
     if (backend_ && activeKind_ == kind) return true;
-    if (backend_) backend_->Shutdown();
+    if (backend_) { backend_->Shutdown(); CollectBackendStats(); }
     backend_.reset();
     activeKind_ = kind;
     observedBackendStats_ = {};
@@ -97,6 +105,7 @@ bool FRayEffectsScheduler::EnsureBackend(ERayTracingBackend kind,
     if (!initialized)
     {
         backend_->Shutdown();
+        CollectBackendStats();
         backend_.reset();
         return false;
     }
@@ -203,7 +212,7 @@ bool FRayEffectsScheduler::Execute(const FRayEffectInputs& inputs,
 
 void FRayEffectsScheduler::Shutdown() noexcept
 {
-    if (backend_) backend_->Shutdown();
+    if (backend_) { backend_->Shutdown(); CollectBackendStats(); }
     backend_.reset();
     activeKind_ = ERayTracingBackend::Auto;
     contextGeneration_ = 0;

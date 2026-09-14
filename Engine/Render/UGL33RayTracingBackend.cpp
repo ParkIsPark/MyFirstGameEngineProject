@@ -29,9 +29,10 @@ constexpr std::size_t ExactFloatIntegerLimit = 16777216u;
 constexpr GLenum TextureBufferBindingQuery = 0x8C2A;
 
 bool CompileShader(GLenum stage, const char* source, GLuint& result,
-                   std::string& diagnostic)
+                   std::string& diagnostic, FRayTracingBackendStats& stats)
 {
     result = glCreateShader(stage);
+    stats.resourceAllocations += result ? 1u : 0u;
     glShaderSource(result, 1, &source, nullptr);
     glCompileShader(result);
     GLint compiled = GL_FALSE;
@@ -47,24 +48,25 @@ bool CompileShader(GLenum stage, const char* source, GLuint& result,
     return false;
 }
 
-bool BuildProgram(GLuint& program, std::string& diagnostic)
+bool BuildProgram(GLuint& program, std::string& diagnostic, FRayTracingBackendStats& stats)
 {
     GLuint vertex = 0, fragment = 0;
     if (!CompileShader(GL_VERTEX_SHADER, RayEffectsFragmentShaders::FullscreenVertex,
-                       vertex, diagnostic) ||
+                       vertex, diagnostic, stats) ||
         !CompileShader(GL_FRAGMENT_SHADER, RayEffectsFragmentShaders::EffectsFragment,
-                       fragment, diagnostic))
+                       fragment, diagnostic, stats))
     {
-        if (vertex) glDeleteShader(vertex);
-        if (fragment) glDeleteShader(fragment);
+        if (vertex) { glDeleteShader(vertex); ++stats.releasedResources; }
+        if (fragment) { glDeleteShader(fragment); ++stats.releasedResources; }
         return false;
     }
     program = glCreateProgram();
+    stats.resourceAllocations += program ? 1u : 0u;
     glAttachShader(program, vertex);
     glAttachShader(program, fragment);
     glLinkProgram(program);
-    glDeleteShader(vertex);
-    glDeleteShader(fragment);
+    glDeleteShader(vertex); stats.releasedResources += vertex ? 1u : 0u;
+    glDeleteShader(fragment); stats.releasedResources += fragment ? 1u : 0u;
     GLint linked = GL_FALSE;
     glGetProgramiv(program, GL_LINK_STATUS, &linked);
     if (linked == GL_TRUE) return true;
@@ -75,7 +77,7 @@ bool BuildProgram(GLuint& program, std::string& diagnostic)
     glGetProgramInfoLog(program, static_cast<GLsizei>(log.size()), &written, log.data());
     log.resize(static_cast<std::size_t>(written));
     diagnostic = "GL33 ray-effects program link failed: " + log;
-    glDeleteProgram(program);
+    glDeleteProgram(program); stats.releasedResources += program ? 1u : 0u;
     program = 0;
     return false;
 }
@@ -233,24 +235,27 @@ bool CollectError(const char* operation, std::string* diagnostic)
 
 template <typename T>
 bool UploadTBO(GLenum internalFormat, const std::vector<T>& values,
-               GLuint& buffer, GLuint& texture)
+               GLuint& buffer, GLuint& texture, FRayTracingBackendStats& stats)
 {
     const T zero{};
     glGenBuffers(1, &buffer);
+    stats.resourceAllocations += buffer ? 1u : 0u;
     glBindBuffer(GL_TEXTURE_BUFFER, buffer);
     glBufferData(GL_TEXTURE_BUFFER,
         static_cast<GLsizeiptr>(values.empty() ? sizeof(T) : values.size() * sizeof(T)),
         values.empty() ? &zero : values.data(), GL_STATIC_DRAW);
+    ++stats.bufferUploadCalls;
     glGenTextures(1, &texture);
+    stats.resourceAllocations += texture ? 1u : 0u;
     glBindTexture(GL_TEXTURE_BUFFER, texture);
     glTexBuffer(GL_TEXTURE_BUFFER, internalFormat, buffer);
     return buffer != 0 && texture != 0;
 }
 
-void DeletePair(GLuint& buffer, GLuint& texture)
+void DeletePair(GLuint& buffer, GLuint& texture, FRayTracingBackendStats& stats)
 {
-    if (texture) glDeleteTextures(1, &texture);
-    if (buffer) glDeleteBuffers(1, &buffer);
+    if (texture) { glDeleteTextures(1, &texture); ++stats.releasedResources; }
+    if (buffer) { glDeleteBuffers(1, &buffer); ++stats.releasedResources; }
     buffer = texture = 0;
 }
 } // namespace
@@ -263,6 +268,7 @@ UGL33RayTracingBackend::~UGL33RayTracingBackend() noexcept
 bool UGL33RayTracingBackend::Init(std::uint64_t contextGeneration,
                                   std::string* diagnostic)
 {
+    auto& stats = stats_;
     if (contextGeneration == 0 ||
         contextGeneration != ActiveRenderTargetContextGeneration())
     {
@@ -288,16 +294,17 @@ bool UGL33RayTracingBackend::Init(std::uint64_t contextGeneration,
     maxLights_ = MaxShaderLights;
     std::string error;
     GLuint candidateProgram = 0, candidateVAO = 0;
-    if (!BuildProgram(candidateProgram, error))
+    if (!BuildProgram(candidateProgram, error, stats))
     {
         if (diagnostic) *diagnostic = error;
         return false;
     }
     glGenVertexArrays(1, &candidateVAO);
+    stats.resourceAllocations += candidateVAO ? 1u : 0u;
     if (!candidateVAO || !CollectError("GL33 ray-effects initialization", &error))
     {
-        if (candidateVAO) glDeleteVertexArrays(1, &candidateVAO);
-        glDeleteProgram(candidateProgram);
+        if (candidateVAO) { glDeleteVertexArrays(1, &candidateVAO); ++stats.releasedResources; }
+        glDeleteProgram(candidateProgram); stats.releasedResources += candidateProgram ? 1u : 0u;
         if (diagnostic) *diagnostic = error.empty()
             ? "GL33 ray effects failed to create fullscreen VAO" : error;
         return false;
@@ -305,7 +312,7 @@ bool UGL33RayTracingBackend::Init(std::uint64_t contextGeneration,
     program_ = candidateProgram;
     fullscreenVAO_ = candidateVAO;
     contextGeneration_ = contextGeneration;
-    stats_.resourceAllocations += 2;
+
     glUseProgram(program_);
     const char* names[] = {"uPositionCoverage", "uGeometricNormal",
         "uShadingNormalModel", "uAlbedoShininess", "uSpecularMirror",
@@ -328,6 +335,7 @@ bool UGL33RayTracingBackend::ResizeOutputs(int width, int height, unsigned mask,
                                            std::uint64_t contextGeneration,
                                            std::string* diagnostic)
 {
+    auto& stats = stats_;
     if (framebuffer_ && width_ == width && height_ == height &&
         outputMask_ == mask && contextGeneration_ == contextGeneration) return true;
     GLint maxTextureSize = 0, maxAttachments = 0, maxDrawBuffers = 0;
@@ -340,16 +348,20 @@ bool UGL33RayTracingBackend::ResizeOutputs(int width, int height, unsigned mask,
         if (diagnostic) *diagnostic = "GL33 ray-effects output exceeds framebuffer/texture limits";
         return false;
     }
+    ++stats.outputAllocationAttempts;
     GLuint candidateFBO = 0, candidateShadow = 0, candidateGI = 0, candidateReflection = 0;
     glGenFramebuffers(1, &candidateFBO);
+    stats.resourceAllocations += candidateFBO ? 1u : 0u;
     glBindFramebuffer(GL_FRAMEBUFFER, candidateFBO);
     auto makeTexture = [&](GLuint& texture, GLenum internalFormat, GLenum format,
                            GLenum attachment)
     {
         glGenTextures(1, &texture);
+        stats.resourceAllocations += texture ? 1u : 0u;
         glBindTexture(GL_TEXTURE_2D, texture);
         glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0,
                      format, GL_FLOAT, nullptr);
+        ++stats.textureUploadCalls;
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -369,17 +381,17 @@ bool UGL33RayTracingBackend::ResizeOutputs(int width, int height, unsigned mask,
         CollectError("GL33 ray-effects output creation", diagnostic);
     if (!complete)
     {
-        if (candidateShadow) glDeleteTextures(1, &candidateShadow);
-        if (candidateGI) glDeleteTextures(1, &candidateGI);
-        if (candidateReflection) glDeleteTextures(1, &candidateReflection);
-        if (candidateFBO) glDeleteFramebuffers(1, &candidateFBO);
+        if (candidateShadow) { glDeleteTextures(1, &candidateShadow); ++stats.releasedResources; }
+        if (candidateGI) { glDeleteTextures(1, &candidateGI); ++stats.releasedResources; }
+        if (candidateReflection) { glDeleteTextures(1, &candidateReflection); ++stats.releasedResources; }
+        if (candidateFBO) { glDeleteFramebuffers(1, &candidateFBO); ++stats.releasedResources; }
         if (diagnostic && diagnostic->empty()) *diagnostic = "GL33 ray-effects framebuffer is incomplete";
         return false;
     }
-    if (shadowTexture_) glDeleteTextures(1, &shadowTexture_);
-    if (giTexture_) glDeleteTextures(1, &giTexture_);
-    if (reflectionTexture_) glDeleteTextures(1, &reflectionTexture_);
-    if (framebuffer_) glDeleteFramebuffers(1, &framebuffer_);
+    if (shadowTexture_) { glDeleteTextures(1, &shadowTexture_); ++stats.releasedResources; }
+    if (giTexture_) { glDeleteTextures(1, &giTexture_); ++stats.releasedResources; }
+    if (reflectionTexture_) { glDeleteTextures(1, &reflectionTexture_); ++stats.releasedResources; }
+    if (framebuffer_) { glDeleteFramebuffers(1, &framebuffer_); ++stats.releasedResources; }
     framebuffer_ = candidateFBO;
     shadowTexture_ = candidateShadow;
     giTexture_ = candidateGI;
@@ -388,7 +400,7 @@ bool UGL33RayTracingBackend::ResizeOutputs(int width, int height, unsigned mask,
     height_ = height;
     outputMask_ = mask;
     ++stats_.outputAllocations;
-    stats_.resourceAllocations += 1 + OwnedOutputTextureCount();
+
     stats_.ownedOutputTextures = OwnedOutputTextureCount();
     return true;
 }
@@ -396,6 +408,7 @@ bool UGL33RayTracingBackend::ResizeOutputs(int width, int height, unsigned mask,
 bool UGL33RayTracingBackend::UploadScene(const FPackedRayScene& packed,
                                          std::string* diagnostic)
 {
+    auto& stats = stats_;
     if (packed.maximumBLASDepth > 60 || packed.tlasDepth > 28)
     {
         if (diagnostic)
@@ -441,23 +454,31 @@ bool UGL33RayTracingBackend::UploadScene(const FPackedRayScene& packed,
         return false;
     }
     if (!uploadBLAS && !uploadInstances && !uploadMaterials) return true;
+    ++stats.sceneUploadAttempts;
     GLuint tb = 0, tt = 0, nb = 0, nt = 0, ib = 0, it = 0;
     GLuint xb = 0, xt = 0, tnb = 0, tnt = 0, tib = 0, tit = 0;
     GLuint xib = 0, xit = 0;
     GLuint mb = 0, mt = 0, atlas = 0;
     bool okay = true;
     if (uploadBLAS)
-        okay = UploadTBO(GL_RGBA32F, packed.triangleTexels, tb, tt) &&
-            UploadTBO(GL_RGBA32F, packed.blasNodeTexels, nb, nt) &&
-            UploadTBO(GL_R32F, packed.blasTriangleIndices, ib, it);
+    {
+        ++stats.blasUploadAttempts;
+        okay = UploadTBO(GL_RGBA32F, packed.triangleTexels, tb, tt, stats) &&
+            UploadTBO(GL_RGBA32F, packed.blasNodeTexels, nb, nt, stats) &&
+            UploadTBO(GL_R32F, packed.blasTriangleIndices, ib, it, stats);
+    }
     if (okay && uploadInstances)
-        okay = UploadTBO(GL_RGBA32F, packed.instanceTexels, xb, xt) &&
-            UploadTBO(GL_RGBA32UI, packed.instanceIdentityTexels, xib, xit) &&
-            UploadTBO(GL_RGBA32F, packed.tlasNodeTexels, tnb, tnt) &&
-            UploadTBO(GL_R32F, packed.tlasInstanceIndices, tib, tit);
+    {
+        ++stats.instanceUploadAttempts;
+        okay = UploadTBO(GL_RGBA32F, packed.instanceTexels, xb, xt, stats) &&
+            UploadTBO(GL_RGBA32UI, packed.instanceIdentityTexels, xib, xit, stats) &&
+            UploadTBO(GL_RGBA32F, packed.tlasNodeTexels, tnb, tnt, stats) &&
+            UploadTBO(GL_R32F, packed.tlasInstanceIndices, tib, tit, stats);
+    }
     if (okay && uploadMaterials)
     {
-        okay = UploadTBO(GL_RGBA32F, packed.materialTexels, mb, mt);
+        ++stats.materialUploadAttempts;
+        okay = UploadTBO(GL_RGBA32F, packed.materialTexels, mb, mt, stats);
         if (okay)
         {
             const unsigned char white[4] = {255, 255, 255, 255};
@@ -465,11 +486,13 @@ bool UGL33RayTracingBackend::UploadScene(const FPackedRayScene& packed,
             const int height = std::max(1, packed.textureHeight);
             const int layers = std::max(1, packed.textureLayerCount);
             glGenTextures(1, &atlas);
+            stats.resourceAllocations += atlas ? 1u : 0u;
             glBindTexture(GL_TEXTURE_2D_ARRAY, atlas);
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
             glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, width, height, layers,
                 0, GL_RGBA, GL_UNSIGNED_BYTE,
                 packed.textureArrayRGBA.empty() ? white : packed.textureArrayRGBA.data());
+            ++stats.textureUploadCalls;
             glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -487,50 +510,51 @@ bool UGL33RayTracingBackend::UploadScene(const FPackedRayScene& packed,
     if (!CollectError("GL33 ray-scene upload", diagnostic)) okay = false;
     if (!okay)
     {
-        DeletePair(tb, tt); DeletePair(nb, nt); DeletePair(ib, it);
-        DeletePair(xb, xt); DeletePair(tnb, tnt); DeletePair(tib, tit);
-        DeletePair(xib, xit);
-        DeletePair(mb, mt);
-        if (atlas) glDeleteTextures(1, &atlas);
+        DeletePair(tb, tt, stats); DeletePair(nb, nt, stats); DeletePair(ib, it, stats);
+        DeletePair(xb, xt, stats); DeletePair(tnb, tnt, stats); DeletePair(tib, tit, stats);
+        DeletePair(xib, xit, stats);
+        DeletePair(mb, mt, stats);
+        if (atlas) { glDeleteTextures(1, &atlas); ++stats.releasedResources; }
         return false;
     }
     if (uploadBLAS)
     {
-        DeletePair(triangleBuffer_, triangleTexture_);
-        DeletePair(blasNodeBuffer_, blasNodeTexture_);
-        DeletePair(blasIndexBuffer_, blasIndexTexture_);
+        DeletePair(triangleBuffer_, triangleTexture_, stats);
+        DeletePair(blasNodeBuffer_, blasNodeTexture_, stats);
+        DeletePair(blasIndexBuffer_, blasIndexTexture_, stats);
         triangleBuffer_ = tb; triangleTexture_ = tt;
         blasNodeBuffer_ = nb; blasNodeTexture_ = nt;
         blasIndexBuffer_ = ib; blasIndexTexture_ = it;
         ++stats_.blasUploads;
-        stats_.resourceAllocations += 6;
+
         uploadedBLASRevision_ = packed.blasRevision;
     }
     if (uploadInstances)
     {
-        DeletePair(instanceBuffer_, instanceTexture_);
-        DeletePair(instanceIdentityBuffer_, instanceIdentityTexture_);
-        DeletePair(tlasNodeBuffer_, tlasNodeTexture_);
-        DeletePair(tlasIndexBuffer_, tlasIndexTexture_);
+        DeletePair(instanceBuffer_, instanceTexture_, stats);
+        DeletePair(instanceIdentityBuffer_, instanceIdentityTexture_, stats);
+        DeletePair(tlasNodeBuffer_, tlasNodeTexture_, stats);
+        DeletePair(tlasIndexBuffer_, tlasIndexTexture_, stats);
         instanceBuffer_ = xb; instanceTexture_ = xt;
         instanceIdentityBuffer_ = xib; instanceIdentityTexture_ = xit;
         tlasNodeBuffer_ = tnb; tlasNodeTexture_ = tnt;
         tlasIndexBuffer_ = tib; tlasIndexTexture_ = tit;
         ++stats_.instanceUploads;
-        stats_.resourceAllocations += 8;
+
         uploadedInstanceRevision_ = packed.instanceRevision;
     }
     if (uploadMaterials)
     {
-        DeletePair(materialBuffer_, materialTexture_);
-        if (materialAtlasTexture_) glDeleteTextures(1, &materialAtlasTexture_);
+        DeletePair(materialBuffer_, materialTexture_, stats);
+        if (materialAtlasTexture_) { glDeleteTextures(1, &materialAtlasTexture_); ++stats.releasedResources; }
         materialBuffer_ = mb; materialTexture_ = mt;
         materialAtlasTexture_ = atlas;
         ++stats_.materialUploads;
-        stats_.resourceAllocations += 3;
+
         uploadedMaterialRevision_ = packed.materialRevision;
     }
     ++stats_.sceneUploads;
+    stats_.residentBLAS = sceneCache_.Stats().residentBLAS;
     return true;
 }
 
@@ -558,7 +582,6 @@ bool UGL33RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
     // active; touching that uncaptured unit would leak bindings on return.
     glActiveTexture(GL_TEXTURE0);
     const FPackedRayScene& packed = sceneCache_.Prepare(*inputs.scene);
-    stats_.residentBLAS = sceneCache_.Stats().residentBLAS;
     if (!packed.valid)
     {
         if (diagnostic) *diagnostic = packed.diagnostic;
@@ -656,9 +679,9 @@ bool UGL33RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
             glm::value_ptr(inputs.scene->pointLights[static_cast<std::size_t>(i)].radiance));
     }
     glDrawArrays(GL_TRIANGLES, 0, 3);
+    ++stats_.rayDraws;
     if (!CollectError("GL33 ray-effects draw", diagnostic)) return false;
     ++stats_.renderCalls;
-    ++stats_.rayDraws;
     if (shadowTexture_) outputs.shadowVisibilityTarget = FRenderOutputView{
         shadowTexture_, width_, height_, true};
     if (giTexture_) outputs.globalIlluminationTarget = FRenderOutputView{
@@ -679,30 +702,22 @@ void UGL33RayTracingBackend::Shutdown() noexcept
 
 void UGL33RayTracingBackend::DeleteCurrentResources() noexcept
 {
-    const std::size_t before = (program_ ? 1u : 0u) +
-        (fullscreenVAO_ ? 1u : 0u) + (framebuffer_ ? 1u : 0u) +
-        OwnedOutputTextureCount() +
-        (triangleBuffer_ ? 2u : 0u) + (blasNodeBuffer_ ? 2u : 0u) +
-        (blasIndexBuffer_ ? 2u : 0u) + (instanceBuffer_ ? 2u : 0u) +
-        (instanceIdentityBuffer_ ? 2u : 0u) +
-        (tlasNodeBuffer_ ? 2u : 0u) + (tlasIndexBuffer_ ? 2u : 0u) +
-        (materialBuffer_ ? 2u : 0u) + (materialAtlasTexture_ ? 1u : 0u);
-    if (shadowTexture_) glDeleteTextures(1, &shadowTexture_);
-    if (giTexture_) glDeleteTextures(1, &giTexture_);
-    if (reflectionTexture_) glDeleteTextures(1, &reflectionTexture_);
-    if (framebuffer_) glDeleteFramebuffers(1, &framebuffer_);
-    DeletePair(triangleBuffer_, triangleTexture_);
-    DeletePair(blasNodeBuffer_, blasNodeTexture_);
-    DeletePair(blasIndexBuffer_, blasIndexTexture_);
-    DeletePair(instanceBuffer_, instanceTexture_);
-    DeletePair(instanceIdentityBuffer_, instanceIdentityTexture_);
-    DeletePair(tlasNodeBuffer_, tlasNodeTexture_);
-    DeletePair(tlasIndexBuffer_, tlasIndexTexture_);
-    DeletePair(materialBuffer_, materialTexture_);
-    if (materialAtlasTexture_) glDeleteTextures(1, &materialAtlasTexture_);
-    if (fullscreenVAO_) glDeleteVertexArrays(1, &fullscreenVAO_);
-    if (program_) glDeleteProgram(program_);
-    stats_.releasedResources += before;
+    auto& stats = stats_;
+    if (shadowTexture_) { glDeleteTextures(1, &shadowTexture_); ++stats.releasedResources; }
+    if (giTexture_) { glDeleteTextures(1, &giTexture_); ++stats.releasedResources; }
+    if (reflectionTexture_) { glDeleteTextures(1, &reflectionTexture_); ++stats.releasedResources; }
+    if (framebuffer_) { glDeleteFramebuffers(1, &framebuffer_); ++stats.releasedResources; }
+    DeletePair(triangleBuffer_, triangleTexture_, stats);
+    DeletePair(blasNodeBuffer_, blasNodeTexture_, stats);
+    DeletePair(blasIndexBuffer_, blasIndexTexture_, stats);
+    DeletePair(instanceBuffer_, instanceTexture_, stats);
+    DeletePair(instanceIdentityBuffer_, instanceIdentityTexture_, stats);
+    DeletePair(tlasNodeBuffer_, tlasNodeTexture_, stats);
+    DeletePair(tlasIndexBuffer_, tlasIndexTexture_, stats);
+    DeletePair(materialBuffer_, materialTexture_, stats);
+    if (materialAtlasTexture_) { glDeleteTextures(1, &materialAtlasTexture_); ++stats.releasedResources; }
+    if (fullscreenVAO_) { glDeleteVertexArrays(1, &fullscreenVAO_); ++stats.releasedResources; }
+    if (program_) { glDeleteProgram(program_); ++stats.releasedResources; }
     ForgetCurrentResources();
 }
 
@@ -735,6 +750,7 @@ void UGL33RayTracingBackend::ForgetCurrentResources() noexcept
     uploadedInstanceRevision_ = 0;
     uploadedMaterialRevision_ = 0;
     stats_.ownedOutputTextures = 0;
+    stats_.residentBLAS = 0;
     sceneCache_.Clear();
 }
 

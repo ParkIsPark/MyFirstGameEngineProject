@@ -26,6 +26,17 @@ struct FRayEffectInputs
 };
 struct FRayTracingBackendStats
 {
+    // Actual submitted upload operations/transactions, including failed attempts.
+    std::uint64_t sceneUploadAttempts = 0;
+    std::uint64_t blasUploadAttempts = 0;
+    std::uint64_t instanceUploadAttempts = 0;
+    std::uint64_t materialUploadAttempts = 0;
+    std::uint64_t outputAllocationAttempts = 0;
+    std::uint64_t bufferUploadCalls = 0;
+    std::uint64_t textureUploadCalls = 0;
+    // scene/blas/instance/material uploads and outputAllocations below are
+    // SUCCESSFULLY COMMITTED transactions, not attempted GL work.
+    // Actual GL object names created/deleted, including shaders and rollback.
     std::uint64_t resourceAllocations = 0;
     std::uint64_t renderCalls = 0;
     std::uint64_t rayDraws = 0; // Fragment draw submissions only; compute uses rayDispatches.
@@ -72,6 +83,14 @@ public:
 
 struct FRayEffectsSchedulerStats
 {
+    std::uint64_t releasedResources = 0;
+    std::uint64_t sceneUploadAttempts = 0;
+    std::uint64_t blasUploadAttempts = 0;
+    std::uint64_t instanceUploadAttempts = 0;
+    std::uint64_t materialUploadAttempts = 0;
+    std::uint64_t outputAllocationAttempts = 0;
+    std::uint64_t bufferUploadCalls = 0;
+    std::uint64_t textureUploadCalls = 0;
     // Lifetime totals, including retired/failed backends and context changes.
     std::uint64_t factoryCalls = 0;
     std::uint64_t backendInitializations = 0;

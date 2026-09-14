@@ -36,7 +36,7 @@ Render Settings keeps separate Editor and Game quality profiles in `Config/Edito
 
 Developer Settings is an Editor-only diagnostic panel. Its local, gitignored `Config/DeveloperSettings.ini` stores `[Rendering]` keys `LegacyOverride=None`, `ShowDeprecatedFeatures=true`, and `ShowExperimentalWarnings=true`. Deprecated/Experimental badges and warnings describe feature status. The two explicit legacy overrides are `SoftwareRasterizer` and `PureGPURayTracer`. Old CPU software raster, whole-frame GPU ray tracing, and the CPU-G-buffer `UHybridPass` are educational/regression implementations, not normal render choices. Developer Settings is excluded from project settings, worlds and packaged Game behavior.
 
-See [the renderer guide](docs/rendering/hardware-raster-ray-effects.md) for resource counters, fallback troubleshooting, complete Editor/Game call stacks and the file-by-file assignment code map.
+See [the renderer guide](docs/rendering/hardware-raster-ray-effects.md) for resource counters, fallback troubleshooting, complete Editor/Game call stacks and the file-by-file assignment code map. Telemetry distinguishes actual GL allocation/upload work (including failed attempts and rollback) from successfully committed scene/output transactions and current live ownership.
 
 ## Projects, assets and Lua
 
