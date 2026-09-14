@@ -103,6 +103,8 @@ struct FRenderScene
     FRenderCamera camera;
     ERenderShadingModel shadingModel = ERenderShadingModel::Phong;
     std::vector<FRenderMeshInstance> meshes;
+    // Dense scalar-only material table. Identity N is stored at index N-1.
+    std::vector<FResolvedRenderMaterial> materialsByIdentity;
     std::vector<FRenderPointLight> pointLights;
     bool usesDefaultPointLight = false;
     FRenderEnvironment environment;

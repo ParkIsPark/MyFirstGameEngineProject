@@ -199,6 +199,7 @@ FRayEffectInputs Inputs(bool master, bool shadows)
     inputs.features.rayTracedShadows = shadows;
     inputs.features.rayTracedGI = false;
     inputs.features.rayTracedReflections = false;
+    inputs.features.rayTracedTranslucency = false;
     return inputs;
 }
 

@@ -136,17 +136,20 @@ layout(location = 0) out vec4 oColor;
 uniform sampler2D uEnvironmentAmbient;
 uniform sampler2D uSelectedDirect;
 uniform sampler2D uGIRadiance;
-uniform sampler2D uReflectionRadiance;
+uniform sampler2D uOpticalContribution;
+uniform sampler2D uEmissive;
 uniform bool uHasGIRadiance;
-uniform bool uHasReflectionRadiance;
+uniform bool uHasOpticalContribution;
 void main()
 {
     vec3 environmentAmbient = max(texture(uEnvironmentAmbient, vUV).rgb, vec3(0.0));
     vec3 direct = max(texture(uSelectedDirect, vUV).rgb, vec3(0.0));
     vec3 gi = uHasGIRadiance ? texture(uGIRadiance, vUV).rgb : vec3(0.0);
-    vec3 reflection = uHasReflectionRadiance
-        ? texture(uReflectionRadiance, vUV).rgb : vec3(0.0);
-    vec3 linearColor = max(environmentAmbient + direct + gi + reflection,
+    vec3 emissive = max(texture(uEmissive, vUV).rgb, vec3(0.0));
+    vec4 optical = uHasOpticalContribution
+        ? texture(uOpticalContribution, vUV) : vec4(0.0, 0.0, 0.0, 1.0);
+    vec3 localLighting = environmentAmbient - emissive + direct + gi;
+    vec3 linearColor = max(emissive + optical.a * localLighting + optical.rgb,
                            vec3(0.0));
     vec3 displayColor = pow(clamp(linearColor, 0.0, 1.0), vec3(1.0 / 2.2));
     oColor = vec4(displayColor, 1.0);

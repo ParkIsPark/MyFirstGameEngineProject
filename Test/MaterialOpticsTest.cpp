@@ -2,6 +2,7 @@
 #include "AActor.h"
 #include "FArchive.h"
 #include "FRenderOutputs.h"
+#include "FRenderMath.h"
 #include "FRenderScene.h"
 #include "Material.h"
 #include "UMaterial.h"
@@ -26,6 +27,51 @@ bool Near(const glm::vec3& lhs, const glm::vec3& rhs)
 
 int main()
 {
+    // Mutations caught: additive mirrors, glass double-counting local energy,
+    // or ray-backend failure leaving a surface black/invisible.
+    const auto ordinary = ResolveMaterialOpticalWeights(false, 1.0f, 0.0f, 1.0f, true);
+    assert(Near(ordinary.local, 1.0f) && Near(ordinary.mirror, 0.0f) &&
+           Near(ordinary.transmission, 0.0f));
+    const auto halfMirror = ResolveMaterialOpticalWeights(false, 1.0f, 0.5f, 1.0f, true);
+    assert(Near(halfMirror.local, 0.5f) && Near(halfMirror.mirror, 0.5f) &&
+           Near(halfMirror.transmission, 0.0f));
+    const auto fullMirror = ResolveMaterialOpticalWeights(false, 1.0f, 1.0f, 1.0f, true);
+    assert(Near(fullMirror.local, 0.0f) && Near(fullMirror.mirror, 1.0f) &&
+           Near(fullMirror.transmission, 0.0f));
+    const auto fullGlass = ResolveMaterialOpticalWeights(true, 0.0f, 1.0f, 1.0f, true);
+    assert(Near(fullGlass.local, 0.0f) && Near(fullGlass.mirror, 0.0f) &&
+           Near(fullGlass.transmission, 1.0f));
+    const auto mixed = ResolveMaterialOpticalWeights(true, 0.25f, 0.5f, 1.0f, true);
+    assert(Near(mixed.local, 0.125f) && Near(mixed.mirror, 0.125f) &&
+           Near(mixed.transmission, 0.75f));
+    const auto fallback = ResolveMaterialOpticalWeights(true, 0.0f, 1.0f, 1.0f, false);
+    assert(Near(fallback.local, 1.0f) && Near(fallback.mirror, 0.0f) &&
+           Near(fallback.transmission, 0.0f));
+
+    // Mutations caught: treating UV/normal seam duplicates as boundary edges,
+    // or accepting a genuinely open indexed surface as a dielectric volume.
+    std::unique_ptr<UMesh> closedCube(UMesh::GenerateCube(glm::vec3(1.0f)));
+    assert(IsClosedTriangleMesh(*closedCube));
+    std::unique_ptr<UMesh> epsilonSeamCube(UMesh::GenerateCube(glm::vec3(1.0f)));
+    bool perturbedSeamDuplicate = false;
+    for (std::size_t i = 0; i < epsilonSeamCube->vertices.size() && !perturbedSeamDuplicate; ++i)
+        for (std::size_t j = i + 1; j < epsilonSeamCube->vertices.size(); ++j)
+            if (epsilonSeamCube->vertices[i].position == epsilonSeamCube->vertices[j].position)
+            {
+                epsilonSeamCube->vertices[j].position.x += 0.75e-5f;
+                perturbedSeamDuplicate = true;
+                break;
+            }
+    if (!perturbedSeamDuplicate || !IsClosedTriangleMesh(*epsilonSeamCube))
+    {
+        std::fprintf(stderr, "epsilon seam canonicalization failed (duplicate=%d)\n",
+                     perturbedSeamDuplicate ? 1 : 0);
+        return 1;
+    }
+    closedCube->indices.resize(closedCube->indices.size() - 3u);
+    closedCube->MarkGeometryDirty();
+    assert(!IsClosedTriangleMesh(*closedCube));
+
     // Mutations caught: accepting unknown blend tokens or widening/narrowing
     // any author-facing optical clamp.
     Material invalid;

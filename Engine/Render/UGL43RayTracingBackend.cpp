@@ -576,7 +576,10 @@ bool UGL43RayTracingBackend::UploadScene(const FPackedRayScene& packed,
     if (okay && uploadMaterials)
     {
         ++stats.materialUploadAttempts;
-        okay = UploadSSBO(packed.materialTexels, maxShaderStorageBlockSize_,
+        std::vector<glm::vec4> opticalMaterials = packed.materialTexels;
+        opticalMaterials.insert(opticalMaterials.end(), packed.primaryOpticsTexels.begin(),
+                                packed.primaryOpticsTexels.end());
+        okay = UploadSSBO(opticalMaterials, maxShaderStorageBlockSize_,
                            material, diagnostic, stats);
         if (okay)
         {
@@ -658,7 +661,8 @@ bool UGL43RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
     outputs = {};
     const unsigned mask = (inputs.features.rayTracedShadows ? ShadowBit : 0u) |
         (inputs.features.rayTracedGI && inputs.quality.giSamples > 0 ? GIBit : 0u) |
-        (inputs.features.rayTracedReflections && inputs.quality.reflStrength > 0.0f
+        ((inputs.features.rayTracedReflections && inputs.quality.reflStrength > 0.0f) ||
+         inputs.features.rayTracedTranslucency
             ? ReflectionBit : 0u);
     if (!inputs.features.rayTracing || !mask) return true;
     if (!inputs.gbuffer || !inputs.scene || !inputs.rasterLighting ||
@@ -673,6 +677,7 @@ bool UGL43RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
     glActiveTexture(GL_TEXTURE0);
     NormalizePixelUnpackState();
     const FPackedRayScene& packed = sceneCache_.Prepare(*inputs.scene);
+    sceneWarnings_ = packed.warnings;
     if (!packed.valid)
     {
         if (diagnostic) *diagnostic = packed.diagnostic;
@@ -733,6 +738,12 @@ bool UGL43RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
     glUniform1i(glGetUniformLocation(program_, "uDoGI"), mask & GIBit ? 1 : 0);
     glUniform1i(glGetUniformLocation(program_, "uDoReflections"),
                 mask & ReflectionBit ? 1 : 0);
+    glUniform1i(glGetUniformLocation(program_, "uDoTranslucency"),
+                inputs.features.rayTracedTranslucency ? 1 : 0);
+    glUniform1i(glGetUniformLocation(program_, "uPrimaryOpticsBase"),
+                static_cast<int>(packed.materialTexels.size()));
+    glUniform1i(glGetUniformLocation(program_, "uPrimaryMaterialCount"),
+                static_cast<int>(packed.primaryOpticsTexels.size() / 2u));
     glUniform1i(glGetUniformLocation(program_, "uHasSky"),
                 inputs.environmentTexture ? 1 : 0);
     glUniform1i(glGetUniformLocation(program_, "uInstanceCount"),
@@ -789,7 +800,7 @@ bool UGL43RayTracingBackend::RenderEffects(const FRayEffectInputs& inputs,
         shadowedDirectTexture_, width_, height_, true};
     if (giTexture_) outputs.globalIlluminationTarget = FRenderOutputView{
         giTexture_, width_, height_, true};
-    if (reflectionTexture_) outputs.reflectionTarget = FRenderOutputView{
+    if (reflectionTexture_) outputs.opticalContributionTarget = FRenderOutputView{
         reflectionTexture_, width_, height_, true};
     if (diagnostic) diagnostic->clear();
     return true;

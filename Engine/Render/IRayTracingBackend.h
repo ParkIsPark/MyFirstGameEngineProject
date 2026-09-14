@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 struct FRenderScene;
 class UHardwareGBuffer;
@@ -66,6 +67,11 @@ public:
                                std::string* diagnostic = nullptr) = 0;
     virtual void Shutdown() noexcept = 0;
     virtual const FRayTracingBackendStats& Stats() const = 0;
+    virtual const std::vector<std::string>& SceneWarnings() const
+    {
+        static const std::vector<std::string> none;
+        return none;
+    }
 };
 
 class IRayTracingBackendFactory

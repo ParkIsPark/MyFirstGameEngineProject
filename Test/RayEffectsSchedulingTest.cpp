@@ -21,6 +21,7 @@ public:
     int* initCalls = nullptr;
     int* renderCalls = nullptr;
     FRenderFeatures* observed = nullptr;
+    const std::vector<std::string>* sceneWarnings = nullptr;
 
     bool Init(std::uint64_t, std::string* diagnostic) override
     {
@@ -44,12 +45,14 @@ public:
             outputs.shadowedDirectTarget = FRenderOutputView{1, 64, 64, true};
         if (inputs.features.rayTracedGI)
             outputs.globalIlluminationTarget = FRenderOutputView{2, 64, 64, true};
-        if (inputs.features.rayTracedReflections)
-            outputs.reflectionTarget = FRenderOutputView{3, 64, 64, true};
+        if (inputs.features.rayTracedReflections || inputs.features.rayTracedTranslucency)
+            outputs.opticalContributionTarget = FRenderOutputView{3, 64, 64, true};
         return true;
     }
     void Shutdown() noexcept override {}
     const FRayTracingBackendStats& Stats() const override { return stats; }
+    const std::vector<std::string>& SceneWarnings() const override
+    { return *sceneWarnings; }
 
 private:
     FRayTracingBackendStats stats;
@@ -68,6 +71,7 @@ public:
     bool renderResult = true;
     int renderFailuresRemaining = 0;
     FRenderFeatures observed;
+    std::vector<std::string> sceneWarnings;
 
     std::unique_ptr<IRayTracingBackend> Create(ERayTracingBackend backend,
                                                std::string* diagnostic) override
@@ -90,6 +94,7 @@ public:
         result->initCalls = &initCalls;
         result->renderCalls = &renderCalls;
         result->observed = &observed;
+        result->sceneWarnings = &sceneWarnings;
         return result;
     }
 };
@@ -144,6 +149,7 @@ void CheckNoWorkCombinations()
     features.rayTracing = false;
     features.rayTracedShadows = features.rayTracedGI =
         features.rayTracedReflections = true;
+    features.rayTracedTranslucency = true;
     assert(scheduler.Execute(Inputs(features),
         Selection(ERayTracingBackend::CompatibleGL33,
                   ERayTracingBackend::CompatibleGL33), outputs));
@@ -151,6 +157,7 @@ void CheckNoWorkCombinations()
     features.rayTracing = true;
     features.rayTracedShadows = features.rayTracedGI =
         features.rayTracedReflections = false;
+    features.rayTracedTranslucency = false;
     assert(scheduler.Execute(Inputs(features),
         Selection(ERayTracingBackend::CompatibleGL33,
                   ERayTracingBackend::CompatibleGL33), outputs));
@@ -162,14 +169,15 @@ void CheckNoWorkCombinations()
     assert(scheduler.Stats().sceneUploads == 0);
     assert(!outputs.shadowedDirectTarget);
     assert(!outputs.globalIlluminationTarget);
-    assert(!outputs.reflectionTarget);
+    assert(!outputs.opticalContributionTarget);
 }
 
 void CheckExactChildMasksUseOneCall()
 {
-    const bool masks[][3] = {
-        {true, false, false}, {false, true, false}, {false, false, true},
-        {true, true, true},
+    const bool masks[][4] = {
+        {true, false, false, false}, {false, true, false, false},
+        {false, false, true, false}, {false, false, false, true},
+        {true, true, true, true},
     };
     for (const auto& mask : masks)
     {
@@ -181,6 +189,7 @@ void CheckExactChildMasksUseOneCall()
         features.rayTracedShadows = mask[0];
         features.rayTracedGI = mask[1];
         features.rayTracedReflections = mask[2];
+        features.rayTracedTranslucency = mask[3];
         FRayEffectOutputs outputs;
         assert(scheduler.Execute(Inputs(features),
             Selection(ERayTracingBackend::CompatibleGL33,
@@ -191,9 +200,10 @@ void CheckExactChildMasksUseOneCall()
         assert(factory.observed.rayTracedShadows == mask[0]);
         assert(factory.observed.rayTracedGI == mask[1]);
         assert(factory.observed.rayTracedReflections == mask[2]);
+        assert(factory.observed.rayTracedTranslucency == mask[3]);
         assert(outputs.shadowedDirectTarget.has_value() == mask[0]);
         assert(outputs.globalIlluminationTarget.has_value() == mask[1]);
-        assert(outputs.reflectionTarget.has_value() == mask[2]);
+        assert(outputs.opticalContributionTarget.has_value() == (mask[2] || mask[3]));
     }
 }
 
@@ -336,6 +346,27 @@ void CheckTransientRenderFailureRetriesNextFrame()
     assert(outputs.shadowedDirectTarget);
     assert(warnings.messages.size() == 1);
 }
+
+void CheckSceneWarningsAreForwardedOnce()
+{
+    FFakeFactory factory;
+    factory.sceneWarnings = {"open translucent mesh uses reflection fallback"};
+    FWarnings warnings;
+    FRayEffectsScheduler scheduler(factory, warnings);
+    FRenderFeatures features;
+    features.rayTracing = true;
+    features.rayTracedShadows = false;
+    features.rayTracedGI = false;
+    features.rayTracedReflections = false;
+    features.rayTracedTranslucency = true;
+    FRayEffectOutputs outputs;
+    const FBackendSelection selection = Selection(
+        ERayTracingBackend::CompatibleGL33, ERayTracingBackend::CompatibleGL33);
+    assert(scheduler.Execute(Inputs(features), selection, outputs));
+    assert(scheduler.Execute(Inputs(features), selection, outputs));
+    assert(warnings.messages.size() == 1u);
+    assert(warnings.messages.front() == factory.sceneWarnings.front());
+}
 } // namespace
 
 int main()
@@ -346,6 +377,7 @@ int main()
     CheckPermanentInitFailureIsNeutralWarnedAndLatched();
     CheckAvailabilityChangeInvalidatesPermanentFailureLatch();
     CheckTransientRenderFailureRetriesNextFrame();
+    CheckSceneWarningsAreForwardedOnce();
     std::cout << "RayEffectsSchedulingTest passed\n";
     return 0;
 }

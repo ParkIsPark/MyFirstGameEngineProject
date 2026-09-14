@@ -24,6 +24,7 @@ public:
                        std::string* diagnostic = nullptr) override;
     void Shutdown() noexcept override;
     const FRayTracingBackendStats& Stats() const override { return stats_; }
+    const std::vector<std::string>& SceneWarnings() const override { return sceneWarnings_; }
 
     std::uint64_t ContextGeneration() const { return contextGeneration_; }
     int Width() const { return width_; }
@@ -69,6 +70,7 @@ private:
     std::uint64_t uploadedInstanceRevision_ = 0;
     std::uint64_t uploadedMaterialRevision_ = 0;
     FRayTracingBackendStats stats_;
+    std::vector<std::string> sceneWarnings_;
     bool failNextUploadForTesting_ = false;
     bool failNextInitializationForTesting_ = false;
 };

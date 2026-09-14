@@ -92,7 +92,11 @@ FRenderScene ExtractRenderScene(const UWorld& world, const ACamera& camera)
             auto identityFor = [&](const Material& material)
             {
                 auto inserted = materialIdentities.emplace(&material, nextMaterialIdentity);
-                if (inserted.second) ++nextMaterialIdentity;
+                if (inserted.second)
+                {
+                    result.materialsByIdentity.push_back(ResolveMaterial(material));
+                    ++nextMaterialIdentity;
+                }
                 return inserted.first->second;
             };
 

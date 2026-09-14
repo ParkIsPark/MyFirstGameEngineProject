@@ -55,6 +55,10 @@ static_assert(!THasWorldMember<FWorldRenderRequest>::value,
 static_assert(!THasCameraMember<FWorldRenderRequest>::value,
               "common render requests must not expose the live camera");
 
+static_assert(std::is_same_v<decltype(FRasterLightingOutput{}.emissiveTarget),
+                             FRenderOutputView>,
+              "composite input must preserve emissive independently of local optical weight");
+
 bool Near(float lhs, float rhs)
 {
     return std::fabs(lhs - rhs) < 0.0001f;
@@ -214,6 +218,13 @@ void CheckSceneExtractionAndRouting()
     meshComponent->materialOverride.ks = {0.1f, 0.3f, 0.5f};
     meshComponent->materialOverride.shininess = 23.0f;
     meshComponent->materialOverride.km = {0.25f, 0.5f, 0.75f};
+    meshComponent->materialOverride.blendMode = EMaterialBlendMode::Translucent;
+    meshComponent->materialOverride.opacity = 0.2f;
+    meshComponent->materialOverride.refraction = 1.33f;
+    meshComponent->materialOverride.transmittanceColor = {0.8f, 0.6f, 0.4f};
+    meshComponent->materialOverride.transmittanceDistance = 2.5f;
+    meshComponent->materialOverride.castRayTracedShadows = false;
+    meshComponent->materialOverride.texData.assign(4096u, 123u);
     meshComponent->uvTiling = {3.0f, 5.0f};
     first->SetMesh(meshComponent);
     world.Spawn(first);
@@ -308,6 +319,18 @@ void CheckSceneExtractionAndRouting()
     assert(instance.materialOverride->specularColor == glm::vec3(0.1f, 0.3f, 0.5f));
     assert(Near(instance.materialOverride->shininess, 23.0f));
     assert(Near(instance.materialOverride->mirrorFactor, 0.75f));
+    assert(instance.materialOverride->blendMode == EMaterialBlendMode::Translucent);
+    assert(Near(instance.materialOverride->opacity, 0.2f));
+    assert(Near(instance.materialOverride->refraction, 1.33f));
+    assert(instance.materialOverride->transmittanceColor == glm::vec3(0.8f, 0.6f, 0.4f));
+    assert(Near(instance.materialOverride->transmittanceDistance, 2.5f));
+    assert(!instance.materialOverride->castRayTracedShadows);
+    assert(instance.materialOverride->source->texData.size() == 4096u);
+    assert(observed->scene.materialsByIdentity.size() == 2u);
+    assert(observed->scene.materialsByIdentity[0].source ==
+           &meshComponent->materialOverride);
+    assert(observed->scene.materialsByIdentity[1].source ==
+           &meshComponent->mesh->material);
     assert(instance.materialSlots.size() == 1);
     assert(instance.materialSlots[0].source == &meshComponent->mesh->material);
     assert(instance.materialSlotIdentities.size() == 1);
@@ -375,7 +398,7 @@ void CheckNeutralRayOutputs()
     const FRayEffectOutputs outputs;
     assert(!outputs.shadowedDirectTarget.has_value());
     assert(!outputs.globalIlluminationTarget.has_value());
-    assert(!outputs.reflectionTarget.has_value());
+    assert(!outputs.opticalContributionTarget.has_value());
 
     FLogicalGBufferSample sample;
     sample.valid = true;

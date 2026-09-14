@@ -3,6 +3,14 @@
 #include <glm/glm.hpp>
 
 struct FRenderQuality;
+class UMesh;
+
+struct FMaterialOpticalWeights
+{
+    float local = 1.0f;
+    float mirror = 0.0f;
+    float transmission = 0.0f;
+};
 
 FRenderQuality SanitizeRenderQuality(FRenderQuality value);
 float PointLightAttenuation(float distanceSquared);
@@ -12,3 +20,7 @@ glm::vec3 BeerLambertFromTransmittance(
     float referenceDistance,
     float travelledDistance);
 glm::vec3 ACESFitted(const glm::vec3& linearHDR);
+FMaterialOpticalWeights ResolveMaterialOpticalWeights(
+    bool translucent, float opacity, float mirrorFactor,
+    float reflectionStrength, bool rayEffectsAvailable);
+bool IsClosedTriangleMesh(const UMesh& mesh);

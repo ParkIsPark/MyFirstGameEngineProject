@@ -60,6 +60,7 @@
 #include "UWorldRenderer.h"
 #include "FRenderTarget.h"
 #include "FRenderQuality.h"
+#include "FRenderMath.h"
 #include "UGL33RayTracingBackend.h"
 #include "UGL43RayTracingBackend.h"
 #include "FRaySceneCache.h"
@@ -2105,9 +2106,17 @@ public:
             result.ambient = material.ka;
             result.albedo = material.kd;
             result.specularColor = material.ks;
+            result.emissive = material.emissive;
             result.shininess = material.shininess;
             result.mirrorFactor = std::max(material.km.x,
                 std::max(material.km.y, material.km.z));
+            result.blendMode = material.blendMode;
+            result.opacity = material.opacity;
+            result.refraction = material.refraction;
+            result.transmittanceColor = material.transmittanceColor;
+            result.transmittanceDistance = material.transmittanceDistance;
+            result.castRayTracedShadows = material.castRayTracedShadows;
+            result.runtimeRevision = material.RuntimeRevision();
             return result;
         };
         FRenderScene scene;
@@ -2202,12 +2211,13 @@ public:
             resolved(materialMesh->materials[0]),
             resolved(materialMesh->materials[1]),
         };
-        materialInstance.materialSlotIdentities = {401u, 402u};
+        materialInstance.materialSlotIdentities = {1u, 2u};
         materialInstance.triangleMaterialSlots = &materialMesh->triMaterial;
         materialInstance.triangleMaterialSlotCount = materialMesh->triMaterial.size();
         materialInstance.objectIdentity = 400u;
         FRenderScene materialScene;
         materialScene.meshes.push_back(materialInstance);
+        materialScene.materialsByIdentity = materialInstance.materialSlots;
         FRaySceneCache materialCache;
         const FPackedRayScene firstMaterialPack = materialCache.Prepare(materialScene);
         check("ray packing preserves every slot and textured secondary metadata",
@@ -2217,9 +2227,10 @@ public:
         check("ray atlas preserves logical texture size for GL_LINEAR sampling",
               firstMaterialPack.textureWidth == 4 &&
               firstMaterialPack.textureHeight == 4 &&
-              firstMaterialPack.materialTexels.size() == 2u * 6u &&
-              firstMaterialPack.materialTexels[11].x == 2.0f &&
-              firstMaterialPack.materialTexels[11].y == 2.0f);
+              firstMaterialPack.materialTexels.size() == 2u * 8u &&
+              firstMaterialPack.materialTexels[13].x == 2.0f &&
+              firstMaterialPack.materialTexels[13].y == 2.0f &&
+              firstMaterialPack.primaryOpticsTexels.size() == 4u);
         const std::uint64_t materialBLASRevision = firstMaterialPack.blasRevision;
         const std::uint64_t materialInstanceRevision =
             firstMaterialPack.instanceRevision;
@@ -2242,6 +2253,43 @@ public:
               overrideMaterialPack.instanceIdentityTexels.size() == 1u &&
               overrideMaterialPack.instanceIdentityTexels[0].z == 1u &&
               overrideMaterialPack.instanceIdentityTexels[0].w == 1u);
+        const glm::vec3 incident = glm::normalize(glm::vec3(0.6f, 0.0f, -0.8f));
+        const glm::vec3 bent = glm::refract(incident, glm::vec3(0.0f, 0.0f, 1.0f),
+                                            1.0f / 1.52f);
+        check("glass IOR 1.52 bends the continuation through entry/exit",
+              std::fabs(bent.x) < std::fabs(incident.x) && bent.z < 0.0f);
+        check("grazing dielectric Fresnel exceeds normal incidence",
+              SchlickFresnel(0.1f, 1.0f, 1.52f) >
+                  SchlickFresnel(1.0f, 1.0f, 1.52f));
+        check("glass-to-air critical angle produces total internal reflection",
+              glm::length(glm::refract(glm::normalize(glm::vec3(0.9f, 0.0f, 0.43589f)),
+                  glm::vec3(0.0f, 0.0f, 1.0f), 1.52f)) < 0.0001f);
+        check("reference-distance glass absorption equals authored transmittance",
+              glm::all(glm::lessThan(glm::abs(BeerLambertFromTransmittance(
+                  glm::vec3(0.5f, 0.25f, 0.75f), 2.0f, 2.0f) -
+                  glm::vec3(0.5f, 0.25f, 0.75f)), glm::vec3(0.0001f))));
+        std::unique_ptr<UMesh> openGlass(UMesh::GeneratePlane(glm::vec2(2.0f)));
+        Material openGlassMaterial;
+        openGlassMaterial.blendMode = EMaterialBlendMode::Translucent;
+        openGlassMaterial.opacity = 0.0f;
+        FRenderMeshInstance openGlassInstance;
+        openGlassInstance.mesh = openGlass.get();
+        openGlassInstance.materialOverride = resolved(openGlassMaterial);
+        openGlassInstance.materialOverrideIdentity = 1u;
+        openGlassInstance.objectIdentity = 1u;
+        FRenderScene openGlassScene;
+        openGlassScene.meshes.push_back(openGlassInstance);
+        openGlassScene.materialsByIdentity.push_back(*openGlassInstance.materialOverride);
+        FRaySceneCache openGlassCache;
+        const FPackedRayScene& openGlassPack = openGlassCache.Prepare(openGlassScene);
+        check("open-mesh glass fixture is classified open",
+              !IsClosedTriangleMesh(*openGlass));
+        check("open-mesh glass retains translucent packing",
+              openGlassPack.valid && openGlassPack.materialTexels.size() == 8u &&
+              openGlassPack.materialTexels[7].z == 1.0f);
+        check("open-mesh glass selects deterministic reflection fallback diagnostic",
+              openGlassPack.warnings.size() == 1u &&
+              openGlassPack.warnings.front().find("reflection fallback") != std::string::npos);
         check("ray effects shader is initially lazy", !rays.Stats().resourceAllocations &&
               !rays.Stats().renderCalls && !rays.Stats().sceneUploads);
         check("ray-effects G-buffer allocated",
@@ -2312,6 +2360,7 @@ public:
             inputs.features.rayTracedShadows = shadows;
             inputs.features.rayTracedGI = gi;
             inputs.features.rayTracedReflections = reflections;
+            inputs.features.rayTracedTranslucency = false;
             inputs.quality = quality;
             inputs.environmentTexture = lighting.EnvironmentTexture();
             inputs.width = 64;
@@ -2379,7 +2428,7 @@ public:
             shadowPixels.begin(), shadowPixels.end());
         check("shadows-only allocates and draws only shadow output", shadowOK &&
               shadow.shadowedDirectTarget && !shadow.globalIlluminationTarget &&
-              !shadow.reflectionTarget && rays.OwnedOutputTextureCount() == 1u &&
+              !shadow.opticalContributionTarget && rays.OwnedOutputTextureCount() == 1u &&
               shadowInternalFormat == GL_RGBA16F &&
               rays.Stats().rayDraws == beforeShadowDraws + 1u &&
               *shadowMinMax.first < 0.75f && *shadowMinMax.second > 0.95f);
@@ -2409,16 +2458,16 @@ public:
             }
         check("GI-only allocates finite non-neutral GI", giOK &&
               !gi.shadowedDirectTarget && gi.globalIlluminationTarget &&
-              !gi.reflectionTarget && rays.OwnedOutputTextureCount() == 1u &&
+              !gi.opticalContributionTarget && rays.OwnedOutputTextureCount() == 1u &&
               giFinite && giEnergy > 0.01);
 
         FRayEffectOutputs reflection;
         const bool reflectionOK = execute(false, false, true, reflection);
         std::vector<float> reflectionPixels(64u * 64u * 4u, 0.0f);
-        if (reflectionOK && reflection.reflectionTarget)
+        if (reflectionOK && reflection.opticalContributionTarget)
         {
             glBindTexture(GL_TEXTURE_2D,
-                static_cast<unsigned>(reflection.reflectionTarget->identity));
+                static_cast<unsigned>(reflection.opticalContributionTarget->identity));
             glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, reflectionPixels.data());
             glBindTexture(GL_TEXTURE_2D, 0);
         }
@@ -2433,7 +2482,7 @@ public:
             }
         check("reflections-only allocates finite non-neutral reflection", reflectionOK &&
               !reflection.shadowedDirectTarget && !reflection.globalIlluminationTarget &&
-              reflection.reflectionTarget && rays.OwnedOutputTextureCount() == 1u &&
+              reflection.opticalContributionTarget && rays.OwnedOutputTextureCount() == 1u &&
               reflectionFinite && reflectionEnergy > 0.01);
 
         GLuint controlledHDRI = 0;
@@ -2461,10 +2510,10 @@ public:
         std::vector<float> hdriReflectionPixels(reflectionPixels.size(), 0.0f);
         const bool hdriReflectionOK = rays.RenderEffects(
             hdriInputs, hdriReflection, &diagnostic);
-        if (hdriReflectionOK && hdriReflection.reflectionTarget)
+        if (hdriReflectionOK && hdriReflection.opticalContributionTarget)
         {
             glBindTexture(GL_TEXTURE_2D, static_cast<unsigned>(
-                hdriReflection.reflectionTarget->identity));
+                hdriReflection.opticalContributionTarget->identity));
             glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT,
                 hdriReflectionPixels.data());
         }
@@ -2475,7 +2524,7 @@ public:
                 hdriDifference += std::fabs(reflectionPixels[pixel * 4u + channel] -
                     hdriReflectionPixels[pixel * 4u + channel]);
         check("reflection misses and secondary shading consume HDRI radiance",
-              hdriReflectionOK && hdriReflection.reflectionTarget &&
+              hdriReflectionOK && hdriReflection.opticalContributionTarget &&
               hdriDifference > 0.01);
         glDeleteTextures(1, &controlledHDRI);
 
@@ -2490,10 +2539,10 @@ public:
         const bool matteReflectionOK = matteLit &&
             execute(false, false, true, matteReflection);
         std::fill(reflectionPixels.begin(), reflectionPixels.end(), 0.0f);
-        if (matteReflectionOK && matteReflection.reflectionTarget)
+        if (matteReflectionOK && matteReflection.opticalContributionTarget)
         {
             glBindTexture(GL_TEXTURE_2D,
-                static_cast<unsigned>(matteReflection.reflectionTarget->identity));
+                static_cast<unsigned>(matteReflection.opticalContributionTarget->identity));
             glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, reflectionPixels.data());
             glBindTexture(GL_TEXTURE_2D, 0);
         }
@@ -2503,7 +2552,7 @@ public:
                 reflectionEnergy += std::fabs(reflectionPixels[
                     pixel * 4u + static_cast<std::size_t>(channel)]);
         check("zero-mirror surfaces produce neutral reflection radiance",
-              matteReflectionOK && matteReflection.reflectionTarget &&
+              matteReflectionOK && matteReflection.opticalContributionTarget &&
               reflectionEnergy < 0.0001);
         scene.meshes.front().materialOverride->mirrorFactor = 0.8f;
         meshCache.BeginFrame();
@@ -2519,7 +2568,7 @@ public:
         const auto combined = composite(all);
         check("all effects share one backend draw", allOK && rayRestoreError == GL_NO_ERROR &&
               all.shadowedDirectTarget && all.globalIlluminationTarget &&
-              all.reflectionTarget && rays.OwnedOutputTextureCount() == 3u);
+              all.opticalContributionTarget && rays.OwnedOutputTextureCount() == 3u);
         check("all effect targets composite", combined.first);
 
         // The optional Compute path consumes the exact same immutable
@@ -2567,6 +2616,7 @@ public:
                 inputs.features.rayTracedShadows = shadowsEnabled;
                 inputs.features.rayTracedGI = giEnabled;
                 inputs.features.rayTracedReflections = reflectionsEnabled;
+                inputs.features.rayTracedTranslucency = false;
                 inputs.quality = quality;
                 inputs.environmentTexture = lighting.EnvironmentTexture();
                 inputs.width = inputs.height = 64;
@@ -2586,7 +2636,7 @@ public:
             const bool parityGL33ReflectionOK = execute(
                 false, false, true, parityGL33Reflection);
             const std::vector<float> gl33Reflection = readTarget(
-                parityGL33Reflection.reflectionTarget, GL_RGBA, 4);
+                parityGL33Reflection.opticalContributionTarget, GL_RGBA, 4);
             const bool parityGL33AllOK = execute(
                 true, true, true, parityGL33All);
             const std::vector<float> gl33AllShadow = readTarget(
@@ -2594,7 +2644,7 @@ public:
             const std::vector<float> gl33AllGI = readTarget(
                 parityGL33All.globalIlluminationTarget, GL_RGBA, 4);
             const std::vector<float> gl33AllReflection = readTarget(
-                parityGL33All.reflectionTarget, GL_RGBA, 4);
+                parityGL33All.opticalContributionTarget, GL_RGBA, 4);
 
             FRayEffectOutputs computeShadow, computeGI, computeReflection,
                 computeAll;
@@ -2609,7 +2659,7 @@ public:
             const bool computeReflectionOK = executeCompute(
                 false, false, true, computeReflection);
             const std::vector<float> gl43Reflection = readComputeTarget(
-                computeReflection.reflectionTarget, GL_RGBA, 4);
+                computeReflection.opticalContributionTarget, GL_RGBA, 4);
             const bool computeAllOK = executeCompute(
                 true, true, true, computeAll);
             // Exercise the production texture-fetch barrier before any
@@ -2620,29 +2670,29 @@ public:
             const std::vector<float> gl43AllGI = readComputeTarget(
                 computeAll.globalIlluminationTarget, GL_RGBA, 4);
             const std::vector<float> gl43AllReflection = readComputeTarget(
-                computeAll.reflectionTarget, GL_RGBA, 4);
+                computeAll.opticalContributionTarget, GL_RGBA, 4);
 
             check("GL43 shadows-only mask and values match GL33 tolerance",
                   parityGL33ShadowOK && computeShadowOK &&
                   computeShadow.shadowedDirectTarget &&
                   !computeShadow.globalIlluminationTarget &&
-                  !computeShadow.reflectionTarget &&
+                  !computeShadow.opticalContributionTarget &&
                   nearImages(gl33Shadow, gl43Shadow));
             check("GL43 GI-only mask and values match GL33 tolerance",
                   parityGL33GIOK && computeGIOK && !computeGI.shadowedDirectTarget &&
                   computeGI.globalIlluminationTarget &&
-                  !computeGI.reflectionTarget && nearImages(gl33GI, gl43GI));
+                  !computeGI.opticalContributionTarget && nearImages(gl33GI, gl43GI));
             check("GL43 reflections-only mask and values match GL33 tolerance",
                   parityGL33ReflectionOK && computeReflectionOK &&
                   !computeReflection.shadowedDirectTarget &&
                   !computeReflection.globalIlluminationTarget &&
-                  computeReflection.reflectionTarget &&
+                  computeReflection.opticalContributionTarget &&
                   nearImages(gl33Reflection, gl43Reflection));
             check("GL43 all-effects outputs match GL33 tolerance",
                   parityGL33AllOK && computeAllOK &&
                   computeAll.shadowedDirectTarget &&
                   computeAll.globalIlluminationTarget &&
-                  computeAll.reflectionTarget &&
+                  computeAll.opticalContributionTarget &&
                   nearImages(gl33AllShadow, gl43AllShadow) &&
                   nearImages(gl33AllGI, gl43AllGI) &&
                   nearImages(gl33AllReflection, gl43AllReflection));
@@ -3022,6 +3072,7 @@ public:
         controlledInputs.rasterLighting = &controlledLighting;
         controlledInputs.features.rayTracing = true;
         controlledInputs.features.rayTracedReflections = true;
+        controlledInputs.features.rayTracedTranslucency = false;
         controlledInputs.quality = controlledQuality;
         controlledInputs.width = controlledInputs.height = 1;
         controlledInputs.contextGeneration = ContextGeneration();
@@ -3111,10 +3162,10 @@ public:
         const bool controlledReflectionOK = controlledGBufferOK &&
             controlledRays.RenderEffects(controlledInputs, controlledReflection,
                 &diagnostic);
-        if (controlledReflectionOK && controlledReflection.reflectionTarget)
+        if (controlledReflectionOK && controlledReflection.opticalContributionTarget)
         {
             glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(
-                controlledReflection.reflectionTarget->identity));
+                controlledReflection.opticalContributionTarget->identity));
             glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT,
                 &controlledPixel[0]);
             glBindTexture(GL_TEXTURE_2D, 0);
@@ -3126,9 +3177,11 @@ public:
         const glm::vec3 controlledError = glm::abs(
             glm::vec3(controlledPixel) - expectedSecondary);
         check("secondary textured albedo matches raster GL_LINEAR decode and base color",
-              controlledReflectionOK && controlledReflection.reflectionTarget &&
+              controlledReflectionOK && controlledReflection.opticalContributionTarget &&
               controlledError.x < 0.003f && controlledError.y < 0.003f &&
               controlledError.z < 0.003f);
+        check("full mirror optical alpha removes local diffuse contribution",
+              controlledReflectionOK && std::fabs(controlledPixel.a) < 0.001f);
 
         UGL43RayTracingBackend computeControlledRays;
         glm::vec4 computeControlledPixel(0.0f);
@@ -3137,11 +3190,11 @@ public:
             controlledGBufferOK && computeControlledRays.RenderEffects(
                 controlledInputs, computeControlledReflection, &diagnostic);
         if (computeControlledReflectionOK &&
-            computeControlledReflection.reflectionTarget)
+            computeControlledReflection.opticalContributionTarget)
         {
             glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
             glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(
-                computeControlledReflection.reflectionTarget->identity));
+                computeControlledReflection.opticalContributionTarget->identity));
             glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT,
                 &computeControlledPixel[0]);
             glBindTexture(GL_TEXTURE_2D, 0);
@@ -3174,9 +3227,9 @@ public:
         if (computeQualityAvailable)
             check("GL43 HDRI reflection and secondary shading match GL33",
                   controlledHDRIGL33OK && controlledHDRIGL43OK &&
-                  nearImages(readTarget(controlledHDRIGL33.reflectionTarget,
+                  nearImages(readTarget(controlledHDRIGL33.opticalContributionTarget,
                                         GL_RGBA, 4, 1, 1),
-                              readComputeTarget(controlledHDRIGL43.reflectionTarget,
+                              readComputeTarget(controlledHDRIGL43.opticalContributionTarget,
                                         GL_RGBA, 4, 1, 1)));
         controlledInputs.environmentTexture = 0;
         glDeleteTextures(1, &controlledHDRITexture);
@@ -3799,6 +3852,7 @@ public:
         retryInputs.rasterLighting = &lit;
         retryInputs.features.rayTracing = true;
         retryInputs.features.rayTracedShadows = true;
+        retryInputs.features.rayTracedTranslucency = false;
         retryInputs.quality = quality;
         retryInputs.width = retryInputs.height = 64;
         retryInputs.contextGeneration = ContextGeneration();
@@ -4195,7 +4249,7 @@ public:
                 check(("GL33 baseline read-buffer rule effect mask " + std::to_string(mask)).c_str(),
                       maskOkay && bool(maskOutputs.shadowedDirectTarget) == bool(mask & 1) &&
                       bool(maskOutputs.globalIlluminationTarget) == bool(mask & 2) &&
-                      bool(maskOutputs.reflectionTarget) == bool(mask & 4));
+                      bool(maskOutputs.opticalContributionTarget) == bool(mask & 4));
             }
             __glewCheckFramebufferStatus = strictOriginalFramebufferStatus;
         }
@@ -4372,6 +4426,7 @@ public:
         resizeInputs.features.rayTracing = true;
         resizeInputs.features.rayTracedShadows = true;
         resizeInputs.features.rayTracedGI = resizeInputs.features.rayTracedReflections = false;
+        resizeInputs.features.rayTracedTranslucency = false;
         resizeInputs.quality = quality;
         resizeInputs.contextGeneration = ContextGeneration();
         resizeInputs.width = resizeInputs.height = 64;

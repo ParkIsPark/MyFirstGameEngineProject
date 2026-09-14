@@ -7,7 +7,8 @@ namespace
 bool HasRequestedEffects(const FRenderFeatures& features)
 {
     return features.rayTracing && (features.rayTracedShadows ||
-        features.rayTracedGI || features.rayTracedReflections);
+        features.rayTracedGI || features.rayTracedReflections ||
+        features.rayTracedTranslucency);
 }
 
 const char* BackendName(ERayTracingBackend backend)
@@ -203,6 +204,8 @@ bool FRayEffectsScheduler::Execute(const FRayEffectInputs& inputs,
             " failed; retaining raster output: " + diagnostic);
         return true;
     }
+    for (const std::string& warning : backend_->SceneWarnings())
+        WarnOnce("scene:" + warning, warning);
     effectsActive_ = true;
     if (automaticComputeFallback_)
         backendReason_ = automaticFallbackReason_;

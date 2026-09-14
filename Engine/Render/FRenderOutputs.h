@@ -59,13 +59,15 @@ struct FRasterLightingOutput
     bool valid = false;
     FRenderOutputView environmentAmbientTarget;
     FRenderOutputView unshadowedDirectTarget;
+    // Borrowed from the G-buffer so optical local weighting never attenuates emission.
+    FRenderOutputView emissiveTarget;
 };
 
 struct FRayEffectOutputs
 {
     std::optional<FRenderOutputView> shadowedDirectTarget;
     std::optional<FRenderOutputView> globalIlluminationTarget;
-    std::optional<FRenderOutputView> reflectionTarget;
+    std::optional<FRenderOutputView> opticalContributionTarget;
 };
 
 struct FCompositeInput

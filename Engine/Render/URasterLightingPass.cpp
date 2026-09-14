@@ -392,7 +392,8 @@ bool URasterLightingPass::Init(std::uint64_t contextGeneration,
     glUniform1i(glGetUniformLocation(compositeProgram_, "uEnvironmentAmbient"), 0);
     glUniform1i(glGetUniformLocation(compositeProgram_, "uSelectedDirect"), 1);
     glUniform1i(glGetUniformLocation(compositeProgram_, "uGIRadiance"), 2);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uReflectionRadiance"), 3);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uOpticalContribution"), 3);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uEmissive"), 4);
     if (diagnostic) diagnostic->clear();
     return CollectError("Raster lighting initialization", diagnostic);
 }
@@ -659,6 +660,8 @@ bool URasterLightingPass::Render(const FRenderScene& scene,
         static_cast<std::uint64_t>(environmentAmbientTexture_), width_, height_, true};
     output.unshadowedDirectTarget = {
         static_cast<std::uint64_t>(unshadowedDirectTexture_), width_, height_, true};
+    output.emissiveTarget = {static_cast<std::uint64_t>(
+        gbuffer.Texture(EHardwareGBufferSemantic::Emissive)), width_, height_, true};
     // A missing/invalid HDRI is a recoverable warning: the frame completed with
     // the procedural sky, so callers must not mistake the warning for failure.
     if (diagnostic) diagnostic->clear();
@@ -677,12 +680,16 @@ bool URasterLightingPass::Composite(const FRenderTarget& target,
         !target.IsValidForContext(contextGeneration) || !rasterLighting.valid ||
         !rasterLighting.environmentAmbientTarget.valid ||
         !rasterLighting.unshadowedDirectTarget.valid ||
+        !rasterLighting.emissiveTarget.valid ||
         rasterLighting.environmentAmbientTarget.identity != environmentAmbientTexture_ ||
         rasterLighting.unshadowedDirectTarget.identity != unshadowedDirectTexture_ ||
+        rasterLighting.emissiveTarget.identity == 0 ||
         rasterLighting.environmentAmbientTarget.width != width_ ||
         rasterLighting.environmentAmbientTarget.height != height_ ||
         rasterLighting.unshadowedDirectTarget.width != width_ ||
-        rasterLighting.unshadowedDirectTarget.height != height_)
+        rasterLighting.unshadowedDirectTarget.height != height_ ||
+        rasterLighting.emissiveTarget.width != width_ ||
+        rasterLighting.emissiveTarget.height != height_)
     {
         if (diagnostic) *diagnostic = "Raster composite rejected invalid inputs/context";
         return false;
@@ -707,23 +714,24 @@ bool URasterLightingPass::Composite(const FRenderTarget& target,
     };
     const bool hasShadowedDirect = validEffectTarget(rayEffects.shadowedDirectTarget);
     const bool hasGI = validEffectTarget(rayEffects.globalIlluminationTarget);
-    const bool hasReflection = validEffectTarget(rayEffects.reflectionTarget);
+    const bool hasOptical = validEffectTarget(rayEffects.opticalContributionTarget);
     const unsigned textures[] = {
         environmentAmbientTexture_,
         hasShadowedDirect
             ? static_cast<unsigned>(rayEffects.shadowedDirectTarget->identity)
             : unshadowedDirectTexture_,
         hasGI ? static_cast<unsigned>(rayEffects.globalIlluminationTarget->identity) : 0u,
-        hasReflection ? static_cast<unsigned>(rayEffects.reflectionTarget->identity) : 0u,
+        hasOptical ? static_cast<unsigned>(rayEffects.opticalContributionTarget->identity) : 0u,
+        static_cast<unsigned>(rasterLighting.emissiveTarget.identity),
     };
-    for (int unit = 1; unit < 4; ++unit)
+    for (int unit = 1; unit < 5; ++unit)
     {
         glActiveTexture(GL_TEXTURE0 + unit);
         glBindTexture(GL_TEXTURE_2D, textures[unit]);
         glBindSampler(unit, 0);
     }
     glUniform1i(glGetUniformLocation(compositeProgram_, "uHasGIRadiance"), hasGI ? 1 : 0);
-    glUniform1i(glGetUniformLocation(compositeProgram_, "uHasReflectionRadiance"), hasReflection ? 1 : 0);
+    glUniform1i(glGetUniformLocation(compositeProgram_, "uHasOpticalContribution"), hasOptical ? 1 : 0);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     if (!CollectError("Raster composite pass", diagnostic)) return false;
     ++stats_.compositePasses;

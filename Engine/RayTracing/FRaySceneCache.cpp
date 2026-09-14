@@ -2,6 +2,7 @@
 
 #include "BVH.h"
 #include "FRenderScene.h"
+#include "FRenderMath.h"
 #include "UMesh.h"
 
 #include <algorithm>
@@ -136,6 +137,13 @@ void HashMaterial(std::uint64_t& hash, const FResolvedRenderMaterial& material,
     HashBytes(hash, &material.emissive, sizeof(material.emissive));
     HashBytes(hash, &material.shininess, sizeof(material.shininess));
     HashBytes(hash, &material.mirrorFactor, sizeof(material.mirrorFactor));
+    HashBytes(hash, &material.blendMode, sizeof(material.blendMode));
+    HashBytes(hash, &material.opacity, sizeof(material.opacity));
+    HashBytes(hash, &material.refraction, sizeof(material.refraction));
+    HashBytes(hash, &material.transmittanceColor, sizeof(material.transmittanceColor));
+    HashBytes(hash, &material.transmittanceDistance, sizeof(material.transmittanceDistance));
+    HashBytes(hash, &material.castRayTracedShadows,
+              sizeof(material.castRayTracedShadows));
     HashBytes(hash, &instanceTiling, sizeof(instanceTiling));
     const std::size_t pathLength = material.diffuseTexturePath.size();
     HashBytes(hash, &pathLength, sizeof(pathLength));
@@ -225,6 +233,7 @@ const FPackedRayScene& FRaySceneCache::Prepare(const FRenderScene& scene)
 
         FBLAS built;
         built.revision = instance.mesh->GeometryRevision();
+        built.closed = IsClosedTriangleMesh(*instance.mesh);
         BVH bvh;
         bvh.Build(*instance.mesh);
         if (bvh.nodes.size() > ExactFloatIntegerLimit ||
@@ -380,6 +389,9 @@ const FPackedRayScene& FRaySceneCache::Prepare(const FRenderScene& scene)
 
     std::uint64_t newInstanceHash = 1469598103934665603ull;
     std::uint64_t newMaterialHash = 1469598103934665603ull;
+    for (std::size_t identity = 0; identity < scene.materialsByIdentity.size(); ++identity)
+        HashMaterial(newMaterialHash, scene.materialsByIdentity[identity],
+            static_cast<std::uint32_t>(identity + 1u), glm::vec2(1.0f));
     for (const FRenderMeshInstance* instance : validInstances)
     {
         const std::uint64_t asset = instance->mesh->AssetId();
@@ -495,11 +507,22 @@ const FPackedRayScene& FRaySceneCache::Prepare(const FRenderScene& scene)
     if (packed_.materialsChanged)
     {
         packed_.materialTexels.clear();
+        packed_.primaryOpticsTexels.clear();
         packed_.textureArrayRGBA.clear();
         packed_.textureWidth = packed_.textureHeight = packed_.textureLayerCount = 0;
         packed_.materialCount = 0;
 
         std::vector<const Material*> textureSources;
+        packed_.primaryOpticsTexels.reserve(scene.materialsByIdentity.size() * 2u);
+        for (const FResolvedRenderMaterial& material : scene.materialsByIdentity)
+        {
+            packed_.primaryOpticsTexels.emplace_back(
+                material.transmittanceColor, material.opacity);
+            packed_.primaryOpticsTexels.emplace_back(material.refraction,
+                material.transmittanceDistance,
+                material.blendMode == EMaterialBlendMode::Translucent ? 1.0f : 0.0f,
+                material.castRayTracedShadows ? 1.0f : 0.0f);
+        }
         for (const FRenderMeshInstance* instance : validInstances)
             for (std::size_t slot = 0; slot < MaterialCount(*instance); ++slot)
             {
@@ -604,10 +627,34 @@ const FPackedRayScene& FRaySceneCache::Prepare(const FRenderScene& scene)
                     material.source && layer >= 0
                         ? static_cast<float>(material.source->texHeight) : 0.0f,
                     0.0f, 0.0f);
+                packed_.materialTexels.emplace_back(
+                    material.transmittanceColor, material.opacity);
+                packed_.materialTexels.emplace_back(material.refraction,
+                    material.transmittanceDistance,
+                    material.blendMode == EMaterialBlendMode::Translucent ? 1.0f : 0.0f,
+                    material.castRayTracedShadows ? 1.0f : 0.0f);
                 ++packed_.materialCount;
             }
         packed_.materialRevision = nextMaterialRevision_++;
         materialHash_ = newMaterialHash;
+    }
+    packed_.warnings.clear();
+    std::unordered_set<std::string> warningKeys;
+    for (const FRenderMeshInstance* instance : validInstances)
+    {
+        if (blas_.at(instance->mesh->AssetId()).closed) continue;
+        for (std::size_t slot = 0; slot < MaterialCount(*instance); ++slot)
+        {
+            const FResolvedRenderMaterial& material = MaterialAt(*instance, slot);
+            if (material.blendMode != EMaterialBlendMode::Translucent) continue;
+            const std::string key = std::to_string(instance->mesh->AssetId()) + ":" +
+                std::to_string(MaterialIdentityAt(*instance, slot));
+            if (warningKeys.insert(key).second)
+                packed_.warnings.push_back("Translucent material " +
+                    std::to_string(MaterialIdentityAt(*instance, slot)) + " on mesh " +
+                    std::to_string(instance->mesh->AssetId()) +
+                    " is not a closed triangle volume; using reflection fallback");
+        }
     }
     return packed_;
 }
