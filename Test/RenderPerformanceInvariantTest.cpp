@@ -33,7 +33,9 @@ static std::string ReadSource(const char* path)
     Require(bool(input), path);
     std::ostringstream text;
     text << input.rdbuf();
-    return text.str();
+    std::string source = text.str();
+    source.erase(std::remove(source.begin(), source.end(), '\r'), source.end());
+    return source;
 }
 
 static std::size_t CountText(const std::string& text, const std::string& needle)
