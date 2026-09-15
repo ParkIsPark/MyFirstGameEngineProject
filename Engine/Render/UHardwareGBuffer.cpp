@@ -117,6 +117,7 @@ bool UHardwareGBuffer::Resize(int width, int height,
                     [](unsigned texture) { return texture != 0; }) &&
         depthTexture_ != 0 &&
         glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    resourceAllocations_ += (framebuffer_ ? 1u : 0u) + OwnedTextureCount();
 
     glActiveTexture(static_cast<GLenum>(previousActiveTexture));
     glBindTexture(GL_TEXTURE_2D, static_cast<unsigned>(previousTexture));
@@ -227,8 +228,19 @@ unsigned UHardwareGBuffer::ColorAttachment(EHardwareGBufferSemantic semantic) co
     return index < ColorTextureCount ? ColorAttachments[index] : GL_NONE;
 }
 
+std::uint64_t UHardwareGBuffer::ResourceIdentity() const
+{
+    std::uint64_t value = 1469598103934665603ull;
+    const auto mix = [&](unsigned name) { value = (value ^ name) * 1099511628211ull; };
+    mix(framebuffer_);
+    for (unsigned texture : colorTextures_) mix(texture);
+    mix(depthTexture_);
+    return value;
+}
+
 void UHardwareGBuffer::DeleteCurrentResources() noexcept
 {
+    releasedResources_ += (framebuffer_ ? 1u : 0u) + OwnedTextureCount();
     if (depthTexture_) glDeleteTextures(1, &depthTexture_);
     glDeleteTextures(static_cast<GLsizei>(ColorTextureCount), colorTextures_);
     if (framebuffer_) glDeleteFramebuffers(1, &framebuffer_);

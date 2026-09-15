@@ -256,12 +256,16 @@ void CheckAutoFallsBackOnceAndForcedComputeDoesNot()
         features.rayTracingBackend = ERayTracingBackend::ComputeGL43;
         const FBackendSelection forced = Selection(
             ERayTracingBackend::ComputeGL43, ERayTracingBackend::ComputeGL43);
+        SeedNonNeutralOutputs(outputs);
         assert(scheduler.Execute(Inputs(features), forced, outputs));
+        AssertNeutralOutputs(outputs);
         assert(factory.computeCreates == 1);
         assert(factory.compatibleCreates == 0);
         assert(factory.renderCalls == 0);
         assert(warnings.messages.size() == 1);
+        SeedNonNeutralOutputs(outputs);
         assert(scheduler.Execute(Inputs(features), forced, outputs));
+        AssertNeutralOutputs(outputs);
         assert(factory.computeCreates == 1);
         assert(warnings.messages.size() == 1);
         CheckStatus(scheduler, features, "Disabled", "failed to initialize");
@@ -279,16 +283,18 @@ void CheckPermanentInitFailureIsNeutralWarnedAndLatched()
     features.rayTracedShadows = true;
     features.rayTracedGI = features.rayTracedReflections = false;
     FRayEffectOutputs outputs;
-    SeedNonNeutralOutputs(outputs);
     const FBackendSelection selection = Selection(
         ERayTracingBackend::CompatibleGL33, ERayTracingBackend::CompatibleGL33);
 
+    SeedNonNeutralOutputs(outputs);
     assert(scheduler.Execute(Inputs(features), selection, outputs));
     AssertNeutralOutputs(outputs);
     assert(factory.initCalls == 1 && factory.renderCalls == 0);
     assert(warnings.messages.size() == 1);
     CheckStatus(scheduler, features, "Disabled", "injected initialization failure");
+    SeedNonNeutralOutputs(outputs);
     assert(scheduler.Execute(Inputs(features), selection, outputs));
+    AssertNeutralOutputs(outputs);
     assert(factory.initCalls == 1 && factory.renderCalls == 0);
     assert(warnings.messages.size() == 1);
     CheckStatus(scheduler, features, "Disabled", "injected initialization failure");
@@ -314,10 +320,14 @@ void CheckAvailabilityChangeInvalidatesPermanentFailureLatch()
         ERayTracingBackend::CompatibleGL33, ERayTracingBackend::CompatibleGL33,
         false);
     unavailable.fallbackReason = "injected capability unavailable";
+    SeedNonNeutralOutputs(outputs);
     assert(scheduler.Execute(Inputs(features), unavailable, outputs));
+    AssertNeutralOutputs(outputs);
     assert(factory.calls == 0 && factory.renderCalls == 0);
     CheckStatus(scheduler, features, "Disabled", "injected capability unavailable");
+    SeedNonNeutralOutputs(outputs);
     assert(scheduler.Execute(Inputs(features), unavailable, outputs));
+    AssertNeutralOutputs(outputs);
     CheckStatus(scheduler, features, "Disabled", "injected capability unavailable");
 
     const FBackendSelection available = Selection(

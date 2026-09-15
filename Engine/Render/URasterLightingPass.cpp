@@ -362,6 +362,7 @@ bool URasterLightingPass::Init(std::uint64_t contextGeneration,
         Shutdown();
         return false;
     }
+    stats_.resourceAllocations += 2u;
     GLint fragmentUniformComponents = 0;
     GLint geometryUniformComponents = 0;
     GLint fragmentTextureUnits = 0;
@@ -418,6 +419,8 @@ bool URasterLightingPass::Resize(int width, int height,
     unsigned candidateTextures[2] = {};
     glGenFramebuffers(1, &candidateFramebuffer);
     glGenTextures(2, candidateTextures);
+    stats_.resourceAllocations += (candidateFramebuffer ? 1u : 0u) +
+        (candidateTextures[0] ? 1u : 0u) + (candidateTextures[1] ? 1u : 0u);
     for (unsigned texture : candidateTextures)
     {
         glBindTexture(GL_TEXTURE_2D, texture);
@@ -442,19 +445,24 @@ bool URasterLightingPass::Resize(int width, int height,
     if (!complete)
     {
         glDeleteTextures(2, candidateTextures);
-        if (candidateFramebuffer) glDeleteFramebuffers(1, &candidateFramebuffer);
+        stats_.releasedResources += (candidateTextures[0] ? 1u : 0u) +
+            (candidateTextures[1] ? 1u : 0u);
+        if (candidateFramebuffer) { glDeleteFramebuffers(1, &candidateFramebuffer); ++stats_.releasedResources; }
         if (diagnostic) *diagnostic = "Raster lighting HDR framebuffer is incomplete";
         return false;
     }
     if (!CollectError("Raster lighting resize", diagnostic))
     {
         glDeleteTextures(2, candidateTextures);
+        stats_.releasedResources += (candidateTextures[0] ? 1u : 0u) +
+            (candidateTextures[1] ? 1u : 0u);
         glDeleteFramebuffers(1, &candidateFramebuffer);
+        stats_.releasedResources += candidateFramebuffer ? 1u : 0u;
         return false;
     }
-    if (environmentAmbientTexture_) glDeleteTextures(1, &environmentAmbientTexture_);
-    if (unshadowedDirectTexture_) glDeleteTextures(1, &unshadowedDirectTexture_);
-    if (framebuffer_) glDeleteFramebuffers(1, &framebuffer_);
+    if (environmentAmbientTexture_) { glDeleteTextures(1, &environmentAmbientTexture_); ++stats_.releasedResources; }
+    if (unshadowedDirectTexture_) { glDeleteTextures(1, &unshadowedDirectTexture_); ++stats_.releasedResources; }
+    if (framebuffer_) { glDeleteFramebuffers(1, &framebuffer_); ++stats_.releasedResources; }
     framebuffer_ = candidateFramebuffer;
     environmentAmbientTexture_ = candidateTextures[0];
     unshadowedDirectTexture_ = candidateTextures[1];
@@ -476,7 +484,7 @@ bool URasterLightingPass::LoadEnvironmentTexture(
     if (path.empty())
     {
         const bool changed = environmentTexture_ != 0;
-        if (environmentTexture_) glDeleteTextures(1, &environmentTexture_);
+        if (environmentTexture_) { glDeleteTextures(1, &environmentTexture_); ++stats_.releasedResources; }
         environmentTexture_ = 0;
         environmentPath_.clear();
         environmentStamp_ = 0;
@@ -495,7 +503,7 @@ bool URasterLightingPass::LoadEnvironmentTexture(
             path + "': " + stbi_failure_reason();
         std::fprintf(stderr, "[Renderer] warning: %s; using the procedural sky\n",
                      warning.c_str());
-        if (environmentTexture_) glDeleteTextures(1, &environmentTexture_);
+        if (environmentTexture_) { glDeleteTextures(1, &environmentTexture_); ++stats_.releasedResources; }
         environmentTexture_ = 0;
         environmentPath_ = path;
         environmentStamp_ = stamp;
@@ -514,6 +522,7 @@ bool URasterLightingPass::LoadEnvironmentTexture(
     glActiveTexture(GL_TEXTURE0);
     unsigned candidate = 0;
     glGenTextures(1, &candidate);
+    stats_.resourceAllocations += candidate ? 1u : 0u;
     glBindTexture(GL_TEXTURE_2D, candidate);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, width, height, 0,
                  GL_RGB, GL_FLOAT, pixels);
@@ -528,7 +537,7 @@ bool URasterLightingPass::LoadEnvironmentTexture(
     if (injectedFailure || !candidate ||
         !CollectUploadErrors("HDRI texture upload", diagnostic))
     {
-        if (candidate) glDeleteTextures(1, &candidate);
+        if (candidate) { glDeleteTextures(1, &candidate); ++stats_.releasedResources; }
         if (injectedFailure && diagnostic)
             *diagnostic = "Injected HDRI texture upload failure";
         ++stats_.environmentTextureUploadFailures;
@@ -540,7 +549,7 @@ bool URasterLightingPass::LoadEnvironmentTexture(
     environmentPath_ = path;
     environmentStamp_ = stamp;
     ++environmentRevision_;
-    if (previous) glDeleteTextures(1, &previous);
+    if (previous) { glDeleteTextures(1, &previous); ++stats_.releasedResources; }
     ++stats_.environmentTextureUploads;
     (void)contextGeneration;
     if (diagnostic) diagnostic->clear();
@@ -675,13 +684,23 @@ void URasterLightingPass::Shutdown() noexcept
 
 void URasterLightingPass::DeleteCurrentResources() noexcept
 {
-    if (environmentTexture_) glDeleteTextures(1, &environmentTexture_);
-    if (environmentAmbientTexture_) glDeleteTextures(1, &environmentAmbientTexture_);
-    if (unshadowedDirectTexture_) glDeleteTextures(1, &unshadowedDirectTexture_);
-    if (framebuffer_) glDeleteFramebuffers(1, &framebuffer_);
-    if (fullscreenVAO_) glDeleteVertexArrays(1, &fullscreenVAO_);
-    if (lightingProgram_) glDeleteProgram(lightingProgram_);
+    if (environmentTexture_) { glDeleteTextures(1, &environmentTexture_); ++stats_.releasedResources; }
+    if (environmentAmbientTexture_) { glDeleteTextures(1, &environmentAmbientTexture_); ++stats_.releasedResources; }
+    if (unshadowedDirectTexture_) { glDeleteTextures(1, &unshadowedDirectTexture_); ++stats_.releasedResources; }
+    if (framebuffer_) { glDeleteFramebuffers(1, &framebuffer_); ++stats_.releasedResources; }
+    if (fullscreenVAO_) { glDeleteVertexArrays(1, &fullscreenVAO_); ++stats_.releasedResources; }
+    if (lightingProgram_) { glDeleteProgram(lightingProgram_); ++stats_.releasedResources; }
     ForgetCurrentResources();
+}
+
+std::uint64_t URasterLightingPass::ResourceIdentity() const
+{
+    std::uint64_t value = 1469598103934665603ull;
+    for (unsigned name : {lightingProgram_, fullscreenVAO_, framebuffer_,
+                          environmentAmbientTexture_, unshadowedDirectTexture_,
+                          environmentTexture_})
+        value = (value ^ name) * 1099511628211ull;
+    return value;
 }
 
 void URasterLightingPass::ForgetCurrentResources() noexcept

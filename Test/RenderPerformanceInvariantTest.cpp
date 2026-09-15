@@ -14,6 +14,7 @@
 #include "FRenderScene.h"
 #include "FRenderPipelinePlan.h"
 #include "IRayTracingBackend.h"
+#include "Shaders/SharedLightingShaderSource.h"
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
@@ -57,7 +58,32 @@ static void CheckFinalRendererSourceInvariants()
         "Engine/Render/Shaders/RayEffectsFragmentShaders.h");
     const std::string compute = ReadSource(
         "Engine/Render/Shaders/RayEffectsComputeShaders.h");
-    Require(CountText(shared, "void evaluatePointLight(") == 1 &&
+    const std::string evaluator = SharedLightingShaderSource::PointLightFunctions();
+    const std::string generatedHardware =
+        SharedLightingShaderSource::BuildHardwareGeometryShader();
+    const std::string generatedRaster =
+        SharedLightingShaderSource::BuildRasterLightingFragmentShader();
+    const std::string generatedFragment =
+        SharedLightingShaderSource::BuildRayEffectsFragmentShader();
+    const std::string generatedCompute =
+        SharedLightingShaderSource::BuildRayEffectsComputeShader();
+    Require(generatedHardware == std::string(HardwareRasterShaders::GeometryBeforePointLight) +
+            evaluator + HardwareRasterShaders::GeometryAfterPointLight &&
+        generatedRaster == std::string(RasterLightingShaders::LightingBeforePointLight) +
+            evaluator + RasterLightingShaders::LightingAfterPointLight &&
+        generatedFragment == std::string(RayEffectsFragmentShaders::EffectsBeforePointLight) +
+            evaluator + RayEffectsFragmentShaders::EffectsAfterPointLight &&
+        generatedCompute == std::string(RayEffectsComputeShaders::EffectsBeforePointLight) +
+            evaluator + RayEffectsComputeShaders::EffectsAfterPointLight &&
+        CountText(generatedHardware, "void evaluatePointLight(") == 1 &&
+        CountText(generatedRaster, "void evaluatePointLight(") == 1 &&
+        CountText(generatedFragment, "void evaluatePointLight(") == 1 &&
+        CountText(generatedCompute, "void evaluatePointLight(") == 1 &&
+        CountText(generatedHardware, "lightSource / distanceSquared") == 1 &&
+        CountText(generatedRaster, "lightSource / distanceSquared") == 1 &&
+        CountText(generatedFragment, "lightSource / distanceSquared") == 1 &&
+        CountText(generatedCompute, "lightSource / distanceSquared") == 1 &&
+        CountText(shared, "void evaluatePointLight(") == 1 &&
         CountText(shared, "PointLightFunctions()") == 5 &&
         hardware.find("void evaluatePointLight(") == std::string::npos &&
         raster.find("void evaluatePointLight(") == std::string::npos &&
@@ -74,6 +100,32 @@ static void CheckFinalRendererSourceInvariants()
         fragment.find("linearToSRGB") == std::string::npos &&
         compute.find("linearToSRGB") == std::string::npos,
         "presentation owns the single linear-to-sRGB conversion");
+
+    const std::string rasterizerCpp = ReadSource("Engine/Render/UHardwareRasterizer.cpp");
+    const std::string lightingCpp = ReadSource("Engine/Render/URasterLightingPass.cpp");
+    const std::string presentationCpp = ReadSource("Engine/Render/UHybridPresentationPass.cpp");
+    const std::string gl33Cpp = ReadSource("Engine/Render/UGL33RayTracingBackend.cpp");
+    const std::string gl43Cpp = ReadSource("Engine/Render/UGL43RayTracingBackend.cpp");
+    const std::string reconstructionCpp = ReadSource("Engine/Render/URayEffectsReconstruction.cpp");
+    const std::string renderSources = rasterizerCpp + lightingCpp + presentationCpp +
+        gl33Cpp + gl43Cpp + reconstructionCpp;
+    Require(rasterizerCpp.find("glDisable(GL_FRAMEBUFFER_SRGB)") != std::string::npos &&
+        lightingCpp.find("glDisable(GL_FRAMEBUFFER_SRGB)") != std::string::npos &&
+        presentationCpp.find("glDisable(GL_FRAMEBUFFER_SRGB)") != std::string::npos &&
+        gl33Cpp.find("glDisable(GL_FRAMEBUFFER_SRGB)") != std::string::npos &&
+        gl43Cpp.find("glEnable(GL_FRAMEBUFFER_SRGB)") == std::string::npos &&
+        reconstructionCpp.find("glDisable(GL_FRAMEBUFFER_SRGB)") != std::string::npos &&
+        CountText(rasterizerCpp, "glEnable(GL_FRAMEBUFFER_SRGB)") == 1 &&
+        CountText(lightingCpp, "glEnable(GL_FRAMEBUFFER_SRGB)") == 1 &&
+        CountText(presentationCpp, "glEnable(GL_FRAMEBUFFER_SRGB)") == 1 &&
+        CountText(gl33Cpp, "glEnable(GL_FRAMEBUFFER_SRGB)") == 1 &&
+        CountText(reconstructionCpp, "glEnable(GL_FRAMEBUFFER_SRGB)") == 1 &&
+        renderSources.find("glMatrixMode") == std::string::npos &&
+        renderSources.find("glOrtho") == std::string::npos &&
+        renderSources.find("glBegin(") == std::string::npos &&
+        renderSources.find("glDrawPixels") == std::string::npos &&
+        renderSources.find("glEnable(GL_LIGHTING)") == std::string::npos,
+        "all passes disable framebuffer sRGB internally and no fixed-function path returns");
 
     const std::string outputs = ReadSource("Engine/Render/FRenderOutputs.h");
     const std::string hybrid = ReadSource(

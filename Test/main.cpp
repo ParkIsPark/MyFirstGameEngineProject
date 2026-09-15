@@ -2615,6 +2615,72 @@ public:
               invalidShadowFallback.first &&
               invalidShadowFallback.second == rasterOnlyA.second);
 
+        auto constantHDRTexture = [](const glm::vec4& value)
+        {
+            std::vector<glm::vec4> pixels(64u * 64u, value);
+            GLuint texture = 0;
+            glGenTextures(1, &texture);
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, 64, 64, 0,
+                GL_RGBA, GL_FLOAT, pixels.data());
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            return texture;
+        };
+        const GLuint controlledTextures[] = {
+            constantHDRTexture(glm::vec4(0.20f, 0.30f, 0.40f, 1.0f)),
+            constantHDRTexture(glm::vec4(0.60f, 0.40f, 0.20f, 1.0f)),
+            constantHDRTexture(glm::vec4(0.10f, 0.15f, 0.05f, 1.0f)),
+            constantHDRTexture(glm::vec4(0.08f, 0.04f, 0.12f, 1.0f)),
+            constantHDRTexture(glm::vec4(0.03f, 0.06f, 0.09f, 0.5f)),
+            constantHDRTexture(glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)),
+        };
+        FRasterLightingOutput controlledRaster;
+        controlledRaster.valid = true;
+        controlledRaster.environmentAmbientTarget = {controlledTextures[0], 64, 64, true};
+        controlledRaster.unshadowedDirectTarget = {controlledTextures[1], 64, 64, true};
+        controlledRaster.emissiveTarget = {controlledTextures[2], 64, 64, true};
+        FRayEffectOutputs controlledEffects;
+        controlledEffects.globalIlluminationTarget = FRenderOutputView{
+            controlledTextures[3], 64, 64, true};
+        controlledEffects.opticalContributionTarget = FRenderOutputView{
+            controlledTextures[4], 64, 64, true};
+        auto compositeLinearCenter = [&](const FRayEffectOutputs& effects)
+        {
+            FRenderOutputView output;
+            std::vector<float> pixels(64u * 64u * 4u, 0.0f);
+            const bool okay = presentation.CompositeHDR(gbuffer, controlledRaster,
+                effects, quality, output, &diagnostic);
+            if (okay)
+            {
+                glBindTexture(GL_TEXTURE_2D, presentation.HDRTexture());
+                glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, pixels.data());
+                glBindTexture(GL_TEXTURE_2D, 0);
+            }
+            const std::size_t center = (32u * 64u + 32u) * 4u;
+            return std::make_pair(okay, glm::vec3(
+                pixels[center], pixels[center + 1u], pixels[center + 2u]));
+        };
+        const auto directVisible = compositeLinearCenter(controlledEffects);
+        controlledEffects.shadowedDirectTarget = FRenderOutputView{
+            controlledTextures[5], 64, 64, true};
+        const auto directFullyShadowed = compositeLinearCenter(controlledEffects);
+        const glm::vec3 ambient(0.20f, 0.30f, 0.40f);
+        const glm::vec3 direct(0.60f, 0.40f, 0.20f);
+        const glm::vec3 emissive(0.10f, 0.15f, 0.05f);
+        const glm::vec3 invariantGI(0.08f, 0.04f, 0.12f);
+        const glm::vec3 opticalRGB(0.03f, 0.06f, 0.09f);
+        const glm::vec3 expectedInvariant = emissive + 0.5f * (ambient + invariantGI) + opticalRGB;
+        check("fully shadowed direct changes only direct RGB; ambient/emissive/GI/optics stay invariant",
+              directVisible.first && directFullyShadowed.first &&
+              glm::all(glm::lessThan(glm::abs(directFullyShadowed.second -
+                  expectedInvariant), glm::vec3(0.002f))) &&
+              glm::all(glm::lessThan(glm::abs((directVisible.second -
+                  directFullyShadowed.second) - 0.5f * direct), glm::vec3(0.002f))));
+        glDeleteTextures(6, controlledTextures);
+
         auto execute = [&](bool shadows, bool gi, bool reflections,
                            FRayEffectOutputs& outputs)
         {
@@ -5704,6 +5770,10 @@ public:
                 if (count == 1 && requested == ERayTracingBackend::CompatibleGL33)
                 {
                     const auto warm = renderer.Stats();
+                    const std::uint64_t targetIdentity = target.ResourceIdentity();
+                    const std::uint64_t targetRevision = target.ResourceRevision();
+                    const std::uint64_t targetAllocations = target.ResourceAllocations();
+                    const std::uint64_t targetReleases = target.ReleasedResources();
                     bool unchangedFrames = true;
                     for (int stableFrame = 0; stableFrame != 100; ++stableFrame)
                         unchangedFrames = unchangedFrames && renderer.Render(
@@ -5713,15 +5783,36 @@ public:
                     check(unchangedFrames &&
                         converged.rayResourceAllocations ==
                             warm.rayResourceAllocations &&
+                        converged.primaryResourceAllocations == warm.primaryResourceAllocations &&
+                        converged.primaryReleasedResources == warm.primaryReleasedResources &&
+                        converged.primaryResourceIdentity == warm.primaryResourceIdentity &&
+                        converged.materialTextureUploads == warm.materialTextureUploads &&
+                        converged.geometryUploads == warm.geometryUploads &&
+                        converged.geometryReuploads == warm.geometryReuploads &&
+                        converged.gbufferResourceRevision == warm.gbufferResourceRevision &&
+                        converged.rasterOutputAllocations == warm.rasterOutputAllocations &&
+                        converged.environmentTextureUploads == warm.environmentTextureUploads &&
+                        converged.rasterResourceRevision == warm.rasterResourceRevision &&
+                        converged.rasterResourceIdentity == warm.rasterResourceIdentity &&
+                        converged.presentationResourceAllocations == warm.presentationResourceAllocations &&
+                        converged.presentationReleasedResources == warm.presentationReleasedResources &&
+                        converged.presentationResourceRevision == warm.presentationResourceRevision &&
+                        converged.presentationResourceIdentity == warm.presentationResourceIdentity &&
                         converged.rayBufferUploadCalls ==
                             warm.rayBufferUploadCalls &&
                         converged.rayTextureUploadCalls ==
                             warm.rayTextureUploadCalls &&
                         converged.reconstructionResourceAllocations ==
                             warm.reconstructionResourceAllocations &&
+                        converged.reconstructionReleasedResources ==
+                            warm.reconstructionReleasedResources &&
+                        target.ResourceIdentity() == targetIdentity &&
+                        target.ResourceRevision() == targetRevision &&
+                        target.ResourceAllocations() == targetAllocations &&
+                        target.ReleasedResources() == targetReleases &&
                         converged.liveReconstructionTextures == 8 &&
                         converged.liveReconstructionFramebuffers == 1,
-                        "100 unchanged frames allocate/upload zero ray or reconstruction resources");
+                        "100 unchanged frames have zero allocation/upload/delete/recreate churn across every renderer and target resource");
                     check(converged.temporalFrameIndex >= 100,
                         "unchanged stochastic frames advance the exposed temporal sequence");
                 }

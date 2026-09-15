@@ -253,7 +253,11 @@ void FRenderTarget::Release() noexcept
     if (adapter_ && adapter_->ActiveContextGeneration() == contextGeneration_
         && (attachments_.framebuffer || attachments_.colorTexture
             || attachments_.depthAttachment))
+    {
         adapter_->DeleteTextureViewport(attachments_);
+        releasedResources_ += OwnedAttachmentCount();
+        ++resourceRevision_;
+    }
     attachments_ = {};
     width_ = 0;
     height_ = 0;
@@ -266,7 +270,22 @@ bool FRenderTarget::AllocateTextureAttachments()
         || width_ <= 0 || height_ <= 0 || contextGeneration_ == 0
         || adapter_->ActiveContextGeneration() != contextGeneration_)
         return false;
-    return adapter_->AllocateTextureViewport(width_, height_, attachments_);
+    const bool allocated = adapter_->AllocateTextureViewport(width_, height_, attachments_);
+    if (allocated)
+    {
+        resourceAllocations_ += OwnedAttachmentCount();
+        ++resourceRevision_;
+    }
+    return allocated;
+}
+
+std::uint64_t FRenderTarget::ResourceIdentity() const
+{
+    std::uint64_t value = 1469598103934665603ull;
+    for (unsigned name : {attachments_.framebuffer, attachments_.colorTexture,
+                          attachments_.depthAttachment})
+        value = (value ^ name) * 1099511628211ull;
+    return value;
 }
 
 void FRenderTarget::MoveFrom(FRenderTarget&& other) noexcept
@@ -279,10 +298,16 @@ void FRenderTarget::MoveFrom(FRenderTarget&& other) noexcept
     priorBinding_ = other.priorBinding_;
     adapter_ = other.adapter_;
     bound_ = other.bound_;
+    resourceRevision_ = other.resourceRevision_;
+    resourceAllocations_ = other.resourceAllocations_;
+    releasedResources_ = other.releasedResources_;
     other.width_ = 0;
     other.height_ = 0;
     other.contextGeneration_ = 0;
     other.attachments_ = {};
     other.adapter_ = nullptr;
     other.bound_ = false;
+    other.resourceRevision_ = 0;
+    other.resourceAllocations_ = 0;
+    other.releasedResources_ = 0;
 }

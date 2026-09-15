@@ -492,6 +492,7 @@ bool UHardwareRasterizer::Init(std::uint64_t contextGeneration,
         return false;
     }
     program_ = createdProgram;
+    ++resourceAllocations_;
     contextGeneration_ = contextGeneration;
     GLint geometryUniformComponents = 0;
     GLint geometryTextureUnits = 0;
@@ -500,6 +501,7 @@ bool UHardwareRasterizer::Init(std::uint64_t contextGeneration,
     if (geometryTextureUnits < 2 || geometryUniformComponents < 160)
     {
         glDeleteProgram(program_);
+        ++releasedResources_;
         program_ = 0;
         contextGeneration_ = 0;
         if (diagnostic)
@@ -521,7 +523,10 @@ void UHardwareRasterizer::Shutdown() noexcept
     ClearMaterialTextures();
     if (program_ && contextGeneration_ != 0 &&
         contextGeneration_ == ActiveRenderTargetContextGeneration())
+    {
         glDeleteProgram(program_);
+        ++releasedResources_;
+    }
     program_ = 0;
     contextGeneration_ = 0;
     pointLightLimit_ = 0;
@@ -597,6 +602,7 @@ bool UHardwareRasterizer::ResolveMaterialTexture(
     glActiveTexture(GL_TEXTURE0);
     unsigned candidate = 0;
     glGenTextures(1, &candidate);
+    resourceAllocations_ += candidate ? 1u : 0u;
     glBindTexture(GL_TEXTURE_2D, candidate);
     const GLenum format = channels == 4 ? GL_RGBA : channels == 2 ? GL_RG :
                           channels == 1 ? GL_RED : GL_RGB;
@@ -618,7 +624,7 @@ bool UHardwareRasterizer::ResolveMaterialTexture(
     if (injectedFailure || !candidate ||
         !CollectOpenGLErrors("Material texture upload", diagnostic))
     {
-        if (candidate) glDeleteTextures(1, &candidate);
+        if (candidate) { glDeleteTextures(1, &candidate); ++releasedResources_; }
         if (injectedFailure) diagnostic = "Injected material texture upload failure";
         ++materialTextureUploadFailures_;
         return false;
@@ -632,7 +638,7 @@ bool UHardwareRasterizer::ResolveMaterialTexture(
     committed.lastUsedFrame = materialTextureFrame_;
     committed.effectiveAnisotropy = effectiveAnisotropy;
     materialTextures_[material] = committed;
-    if (previous) glDeleteTextures(1, &previous);
+    if (previous) { glDeleteTextures(1, &previous); ++releasedResources_; }
     texture = candidate;
     ++materialTextureUploads_;
     (void)contextGeneration;
@@ -649,7 +655,7 @@ void UHardwareRasterizer::ReleaseUnusedMaterialTextures() noexcept
             ++it;
             continue;
         }
-        if (it->second.texture) glDeleteTextures(1, &it->second.texture);
+        if (it->second.texture) { glDeleteTextures(1, &it->second.texture); ++releasedResources_; }
         it = materialTextures_.erase(it);
     }
 }
@@ -659,9 +665,20 @@ void UHardwareRasterizer::ClearMaterialTextures() noexcept
     if (contextGeneration_ != 0 &&
         contextGeneration_ == ActiveRenderTargetContextGeneration())
         for (auto& pair : materialTextures_)
-            if (pair.second.texture) glDeleteTextures(1, &pair.second.texture);
+            if (pair.second.texture) { glDeleteTextures(1, &pair.second.texture); ++releasedResources_; }
     materialTextures_.clear();
     materialSignaturesThisFrame_.clear();
+}
+
+std::uint64_t UHardwareRasterizer::ResourceIdentity() const
+{
+    std::uint64_t value = (1469598103934665603ull ^ program_) * 1099511628211ull;
+    for (const auto& entry : materialTextures_)
+    {
+        value = (value ^ entry.second.texture) * 1099511628211ull;
+        value = (value ^ entry.second.signature) * 1099511628211ull;
+    }
+    return value;
 }
 
 bool UHardwareRasterizer::RenderGeometry(const FRenderScene& scene,

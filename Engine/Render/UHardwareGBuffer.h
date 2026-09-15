@@ -39,6 +39,9 @@ public:
     int Height() const { return height_; }
     std::uint64_t ContextGeneration() const { return contextGeneration_; }
     std::uint64_t ResourceRevision() const { return resourceRevision_; }
+    std::uint64_t ResourceAllocations() const { return resourceAllocations_; }
+    std::uint64_t ReleasedResources() const { return releasedResources_; }
+    std::uint64_t ResourceIdentity() const;
     std::size_t OwnedTextureCount() const;
     unsigned Framebuffer() const { return framebuffer_; }
     unsigned Texture(EHardwareGBufferSemantic semantic) const;
@@ -59,6 +62,8 @@ private:
     int height_ = 0;
     std::uint64_t contextGeneration_ = 0;
     std::uint64_t resourceRevision_ = 0;
+    std::uint64_t resourceAllocations_ = 0;
+    std::uint64_t releasedResources_ = 0;
     int priorDrawFramebuffer_ = 0;
     int priorReadFramebuffer_ = 0;
     int priorViewport_[4] = {};

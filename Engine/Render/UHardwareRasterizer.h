@@ -54,6 +54,9 @@ public:
     std::uint64_t MaterialTextureUploadFailures() const { return materialTextureUploadFailures_; }
     std::uint64_t MaterialTextureHashComputations() const { return materialTextureHashComputations_; }
     std::uint64_t IndexedDrawCalls() const { return indexedDrawCalls_; }
+    std::uint64_t ResourceAllocations() const { return resourceAllocations_; }
+    std::uint64_t ReleasedResources() const { return releasedResources_; }
+    std::uint64_t ResourceIdentity() const;
     std::size_t OwnedMaterialTextureCount() const { return materialTextures_.size(); }
     unsigned MaterialTextureForTesting(const Material* material) const
     {
@@ -88,6 +91,8 @@ private:
     std::uint64_t indexedDrawCalls_ = 0;
     std::uint64_t materialTextureUploadFailures_ = 0;
     std::uint64_t materialTextureHashComputations_ = 0;
+    std::uint64_t resourceAllocations_ = 0;
+    std::uint64_t releasedResources_ = 0;
     bool failNextMaterialTextureUploadForTesting_ = false;
     int pointLightLimit_ = 0;
 };

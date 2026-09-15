@@ -256,6 +256,22 @@ const FWorldRendererStats& UWorldRenderer::Stats() const
         stats_.geometryReuploads = hardwareMeshCache_->Stats().reuploads;
         stats_.residentGeometryResources = hardwareMeshCache_->Stats().residentResources;
         stats_.hardwareDrawCalls = hardwareRasterizer_->IndexedDrawCalls();
+        stats_.primaryResourceAllocations = hardwareRasterizer_->ResourceAllocations() +
+            hardwareGBuffer_->ResourceAllocations() + rasterLightingPass_->Stats().resourceAllocations;
+        stats_.primaryReleasedResources = hardwareRasterizer_->ReleasedResources() +
+            hardwareGBuffer_->ReleasedResources() + rasterLightingPass_->Stats().releasedResources;
+        stats_.primaryResourceIdentity = hardwareRasterizer_->ResourceIdentity() ^
+            hardwareGBuffer_->ResourceIdentity();
+        stats_.materialTextureUploads = hardwareRasterizer_->MaterialTextureUploads();
+        stats_.gbufferResourceRevision = hardwareGBuffer_->ResourceRevision();
+        stats_.rasterOutputAllocations = rasterLightingPass_->Stats().outputAllocations;
+        stats_.environmentTextureUploads = rasterLightingPass_->Stats().environmentTextureUploads;
+        stats_.rasterResourceRevision = rasterLightingPass_->ResourceRevision();
+        stats_.rasterResourceIdentity = rasterLightingPass_->ResourceIdentity();
+        stats_.presentationResourceAllocations = hybridPresentationPass_->ResourceAllocations();
+        stats_.presentationReleasedResources = hybridPresentationPass_->ReleasedResources();
+        stats_.presentationResourceRevision = hybridPresentationPass_->ResourceRevision();
+        stats_.presentationResourceIdentity = hybridPresentationPass_->ResourceIdentity();
         stats_.liveMaterialTextures = hardwareRasterizer_->OwnedMaterialTextureCount();
         stats_.liveGBufferTextures = hardwareGBuffer_->OwnedTextureCount();
         stats_.liveGBufferFramebuffers = hardwareGBuffer_->Framebuffer() ? 1u : 0u;

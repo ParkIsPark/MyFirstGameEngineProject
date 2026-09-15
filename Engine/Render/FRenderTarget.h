@@ -80,6 +80,10 @@ public:
     int Width() const { return width_; }
     int Height() const { return height_; }
     std::uint64_t ContextGeneration() const { return contextGeneration_; }
+    std::uint64_t ResourceRevision() const { return resourceRevision_; }
+    std::uint64_t ResourceAllocations() const { return resourceAllocations_; }
+    std::uint64_t ReleasedResources() const { return releasedResources_; }
+    std::uint64_t ResourceIdentity() const;
 
     // UWorldRenderer pairs Begin/End around every executor call. End restores
     // the caller's independent read/draw framebuffers and viewport, including failures.
@@ -104,4 +108,7 @@ private:
     FRenderTargetBindingState priorBinding_;
     IRenderTargetGLAdapter* adapter_ = nullptr;
     bool bound_ = false;
+    std::uint64_t resourceRevision_ = 0;
+    std::uint64_t resourceAllocations_ = 0;
+    std::uint64_t releasedResources_ = 0;
 };

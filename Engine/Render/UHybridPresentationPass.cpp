@@ -310,6 +310,7 @@ bool UHybridPresentationPass::Init(std::uint64_t contextGeneration,
     compositeProgram_ = candidateComposite;
     presentationProgram_ = candidatePresentation;
     fullscreenVAO_ = candidateVAO;
+    resourceAllocations_ += 3u;
     contextGeneration_ = contextGeneration;
     glUseProgram(compositeProgram_);
     const char* compositeSamplers[] = {"uPositionCoverage", "uEnvironmentAmbient",
@@ -350,6 +351,8 @@ bool UHybridPresentationPass::Resize(int internalWidth, int internalHeight,
     GLuint candidateTexture = 0;
     glGenFramebuffers(1, &candidateFramebuffer);
     glGenTextures(1, &candidateTexture);
+    resourceAllocations_ += (candidateFramebuffer ? 1u : 0u) +
+        (candidateTexture ? 1u : 0u);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, candidateTexture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, internalWidth, internalHeight,
@@ -366,13 +369,13 @@ bool UHybridPresentationPass::Resize(int internalWidth, int internalHeight,
         glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
     if (!complete || !CollectError("Hybrid HDR resize", diagnostic))
     {
-        if (candidateTexture) glDeleteTextures(1, &candidateTexture);
-        if (candidateFramebuffer) glDeleteFramebuffers(1, &candidateFramebuffer);
+        if (candidateTexture) { glDeleteTextures(1, &candidateTexture); ++releasedResources_; }
+        if (candidateFramebuffer) { glDeleteFramebuffers(1, &candidateFramebuffer); ++releasedResources_; }
         if (!complete && diagnostic) *diagnostic = "Hybrid HDR framebuffer is incomplete";
         return false;
     }
-    if (hdrTexture_) glDeleteTextures(1, &hdrTexture_);
-    if (framebuffer_) glDeleteFramebuffers(1, &framebuffer_);
+    if (hdrTexture_) { glDeleteTextures(1, &hdrTexture_); ++releasedResources_; }
+    if (framebuffer_) { glDeleteFramebuffers(1, &framebuffer_); ++releasedResources_; }
     hdrTexture_ = candidateTexture;
     framebuffer_ = candidateFramebuffer;
     width_ = internalWidth;
@@ -481,12 +484,21 @@ void UHybridPresentationPass::Shutdown() noexcept
 
 void UHybridPresentationPass::DeleteCurrentResources() noexcept
 {
-    if (hdrTexture_) glDeleteTextures(1, &hdrTexture_);
-    if (framebuffer_) glDeleteFramebuffers(1, &framebuffer_);
-    if (fullscreenVAO_) glDeleteVertexArrays(1, &fullscreenVAO_);
-    if (compositeProgram_) glDeleteProgram(compositeProgram_);
-    if (presentationProgram_) glDeleteProgram(presentationProgram_);
+    if (hdrTexture_) { glDeleteTextures(1, &hdrTexture_); ++releasedResources_; }
+    if (framebuffer_) { glDeleteFramebuffers(1, &framebuffer_); ++releasedResources_; }
+    if (fullscreenVAO_) { glDeleteVertexArrays(1, &fullscreenVAO_); ++releasedResources_; }
+    if (compositeProgram_) { glDeleteProgram(compositeProgram_); ++releasedResources_; }
+    if (presentationProgram_) { glDeleteProgram(presentationProgram_); ++releasedResources_; }
     ForgetCurrentResources();
+}
+
+std::uint64_t UHybridPresentationPass::ResourceIdentity() const
+{
+    std::uint64_t value = 1469598103934665603ull;
+    for (unsigned name : {compositeProgram_, presentationProgram_, fullscreenVAO_,
+                          framebuffer_, hdrTexture_})
+        value = (value ^ name) * 1099511628211ull;
+    return value;
 }
 
 void UHybridPresentationPass::ForgetCurrentResources() noexcept

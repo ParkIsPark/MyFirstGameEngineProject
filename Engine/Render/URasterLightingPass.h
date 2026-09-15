@@ -15,6 +15,8 @@ class UHardwareGBuffer;
 struct FRasterLightingPassStats
 {
     std::uint64_t outputAllocations = 0;
+    std::uint64_t resourceAllocations = 0;
+    std::uint64_t releasedResources = 0;
     std::uint64_t lightingPasses = 0;
     std::uint64_t environmentTextureUploads = 0;
     std::uint64_t environmentTextureUploadFailures = 0;
@@ -55,6 +57,7 @@ public:
     std::uint64_t ContextGeneration() const { return contextGeneration_; }
     std::uint64_t ResourceRevision() const { return resourceRevision_; }
     std::uint64_t EnvironmentRevision() const { return environmentRevision_; }
+    std::uint64_t ResourceIdentity() const;
     std::size_t OwnedTextureCount() const {
         return (environmentAmbientTexture_ ? 1u : 0u) +
                (unshadowedDirectTexture_ ? 1u : 0u);
