@@ -79,6 +79,7 @@ namespace {
         m.texWidth = w; m.texHeight = h; m.texChannels = n;
         m.diffuseTexPath = path;
         stbi_image_free(d);
+        m.MarkRuntimeDirty();
         std::printf("[Editor] texture %s (%dx%d, %dch)\n", path.c_str(), w, h, n);
         return true;
     }

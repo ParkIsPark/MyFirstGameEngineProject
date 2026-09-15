@@ -57,13 +57,15 @@ std::vector<unsigned char> ResampleRGBA8ToLayer(
                 static_cast<std::size_t>(channels);
             const std::size_t targetOffset =
                 (static_cast<std::size_t>(y) * targetWidth + x) * 4u;
-            result[targetOffset] = source.texData[sourceOffset];
-            result[targetOffset + 1u] = channels >= 2
-                ? source.texData[sourceOffset + 1u] : 0u;
-            result[targetOffset + 2u] = channels >= 3
-                ? source.texData[sourceOffset + 2u] : 0u;
-            result[targetOffset + 3u] = channels == 4
-                ? source.texData[sourceOffset + 3u] : 255u;
+            const unsigned char grayOrRed = source.texData[sourceOffset];
+            result[targetOffset] = grayOrRed;
+            result[targetOffset + 1u] = channels <= 2
+                ? grayOrRed : source.texData[sourceOffset + 1u];
+            result[targetOffset + 2u] = channels <= 2
+                ? grayOrRed : source.texData[sourceOffset + 2u];
+            result[targetOffset + 3u] = channels == 2
+                ? source.texData[sourceOffset + 1u]
+                : channels == 4 ? source.texData[sourceOffset + 3u] : 255u;
         }
     }
     return result;

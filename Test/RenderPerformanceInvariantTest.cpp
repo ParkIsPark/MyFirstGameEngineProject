@@ -202,8 +202,29 @@ static void CheckFinalRendererSourceInvariants()
         geometry.find("uSkyZenith") == std::string::npos &&
         geometry.find("uSkyExponent") == std::string::npos &&
         geometry.find("uAmbientStrength") == std::string::npos &&
-        geometry.find("uHasEnvironmentTexture") == std::string::npos,
+        geometry.find("uHasEnvironmentTexture") == std::string::npos &&
+        geometry.find("uEnvironmentTexture") == std::string::npos,
         "geometry pass does not upload obsolete environment/ambient uniforms");
+
+    const std::string rayCache = ReadSource("Engine/RayTracing/FRaySceneCache.cpp");
+    Require(rasterizerCpp.find("material.texData.data()") == std::string::npos &&
+        rayCache.find("HashBytes(hash, source.texData.data()") == std::string::npos,
+        "steady material signatures never scan texture payload bytes");
+    Require(CountText(rasterizerCpp, "ResampleRGBA8ToLayer(") == 1 &&
+        CountText(rayCache, "ResampleRGBA8ToLayer(") == 1,
+        "raster uploads and ray layers share one 1/2/3/4-channel canonicalizer");
+    Require(hardware.find("texture(uDiffuseTexture") ==
+            hardware.find("inline constexpr const char* Fragment") +
+                hardware.substr(hardware.find("inline constexpr const char* Fragment"))
+                    .find("texture(uDiffuseTexture") &&
+        hardware.substr(0, hardware.find("inline constexpr const char* Fragment"))
+            .find("texture(uDiffuseTexture") == std::string::npos,
+        "mip-filtered albedo is sampled only in the fragment stage");
+    Require(CountText(fragment, "for(int internalBounce=0;internalBounce<4;") == 1 &&
+        CountText(compute, "for(int internalBounce=0;internalBounce<4;") == 1 &&
+        CountText(fragment, "reflect(insideDirection,exitNormal)") == 1 &&
+        CountText(compute, "reflect(insideDirection,exitNormal)") == 1,
+        "exit-boundary TIR continues inside the closed material with a finite budget");
 
     const std::string gl33 = ReadSource("Engine/Render/UGL33RayTracingBackend.cpp");
     const std::string gl33Header = ReadSource("Engine/Render/UGL33RayTracingBackend.h");

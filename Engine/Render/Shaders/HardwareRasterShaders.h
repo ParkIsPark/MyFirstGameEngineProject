@@ -32,50 +32,38 @@ uniform int uPointLightCount;
 uniform vec3 uPointLightPositions[MAX_POINT_LIGHTS];
 uniform vec3 uPointLightSources[MAX_POINT_LIGHTS];
 uniform vec3 uEye;
-uniform vec3 uAlbedo;
 uniform vec3 uSpecular;
 uniform float uShininess;
-uniform vec2 uUVTiling;
-uniform bool uHasDiffuseTexture;
-uniform bool uRepeatDiffuseTexture;
-uniform sampler2D uDiffuseTexture;
 out GS_OUT {
     vec3 worldPosition;
     vec3 shadingNormal;
     vec2 uv;
     flat vec3 geometricNormal;
-    vec3 vertexLighting;
-    flat vec3 faceLighting;
+    vec3 vertexDiffuseIrradiance;
+    vec3 vertexSpecular;
+    flat vec3 faceDiffuseIrradiance;
+    flat vec3 faceSpecular;
 } gsOut;
 )GLSL";
 
 inline constexpr const char* GeometryAfterPointLight = R"GLSL(
-vec3 sampledAlbedo(vec2 uv)
-{
-    vec3 albedo = uAlbedo;
-    if (uHasDiffuseTexture)
-    {
-        vec2 tiled = uv * uUVTiling;
-        vec2 addressed = uRepeatDiffuseTexture ? fract(tiled) : clamp(tiled, 0.0, 1.0);
-        albedo *= texture(uDiffuseTexture, addressed).rgb;
-    }
-    return albedo;
-}
-vec3 directAt(vec3 position, vec3 normal, vec3 albedo)
+void directAt(vec3 position, vec3 normal, out vec3 diffuseIrradiance,
+              out vec3 specularRadiance)
 {
     vec3 N = normalize(normal);
     vec3 V = normalize(uEye - position);
-    vec3 result = vec3(0.0);
+    diffuseIrradiance = vec3(0.0);
+    specularRadiance = vec3(0.0);
     for (int i = 0; i < uPointLightCount; ++i)
     {
         vec3 diffuse;
         vec3 specular;
-        evaluatePointLight(position, N, V, albedo, uSpecular, uShininess,
+        evaluatePointLight(position, N, V, vec3(1.0), uSpecular, uShininess,
                            uPointLightPositions[i], uPointLightSources[i],
                            diffuse, specular);
-        result += diffuse + specular;
+        diffuseIrradiance += diffuse;
+        specularRadiance += specular;
     }
-    return result;
 }
 void main()
 {
@@ -86,8 +74,9 @@ void main()
     if (dot(geometric, reference) < 0.0) geometric = -geometric;
     vec3 faceCenter = (gsIn[0].worldPosition + gsIn[1].worldPosition +
                        gsIn[2].worldPosition) / 3.0;
-    vec2 centroidUV = (gsIn[0].uv + gsIn[1].uv + gsIn[2].uv) / 3.0;
-    vec3 faceLighting = directAt(faceCenter, geometric, sampledAlbedo(centroidUV));
+    vec3 faceDiffuseIrradiance;
+    vec3 faceSpecular;
+    directAt(faceCenter, geometric, faceDiffuseIrradiance, faceSpecular);
     for (int vertex = 0; vertex < 3; ++vertex)
     {
         gl_Position = gl_in[vertex].gl_Position;
@@ -95,9 +84,11 @@ void main()
         gsOut.shadingNormal = gsIn[vertex].shadingNormal;
         gsOut.uv = gsIn[vertex].uv;
         gsOut.geometricNormal = geometric;
-        gsOut.vertexLighting = directAt(gsIn[vertex].worldPosition,
-            normalize(gsIn[vertex].shadingNormal), sampledAlbedo(gsIn[vertex].uv));
-        gsOut.faceLighting = faceLighting;
+        directAt(gsIn[vertex].worldPosition,
+            normalize(gsIn[vertex].shadingNormal),
+            gsOut.vertexDiffuseIrradiance, gsOut.vertexSpecular);
+        gsOut.faceDiffuseIrradiance = faceDiffuseIrradiance;
+        gsOut.faceSpecular = faceSpecular;
         EmitVertex();
     }
     EndPrimitive();
@@ -110,8 +101,10 @@ in GS_OUT {
     vec3 shadingNormal;
     vec2 uv;
     flat vec3 geometricNormal;
-    vec3 vertexLighting;
-    flat vec3 faceLighting;
+    vec3 vertexDiffuseIrradiance;
+    vec3 vertexSpecular;
+    flat vec3 faceDiffuseIrradiance;
+    flat vec3 faceSpecular;
 } fsIn;
 layout(location = 0) out vec4 oPositionCoverage;
 layout(location = 1) out vec4 oGeometricNormal;
@@ -152,7 +145,11 @@ void main()
     oAlbedoShininess = vec4(albedo, uShininess);
     oSpecularMirror = vec4(uSpecular, uMirrorFactor);
     oIdentity = uvec2(uObjectIdentity, uMaterialIdentity);
-    vec3 precomputed = uShadingModel == 0 ? fsIn.faceLighting : fsIn.vertexLighting;
+    vec3 diffuseIrradiance = uShadingModel == 0
+        ? fsIn.faceDiffuseIrradiance : fsIn.vertexDiffuseIrradiance;
+    vec3 specularRadiance = uShadingModel == 0
+        ? fsIn.faceSpecular : fsIn.vertexSpecular;
+    vec3 precomputed = albedo * diffuseIrradiance + specularRadiance;
     oPrecomputedLighting = vec4(precomputed, uAmbient.g);
     oEmissive = vec4(uEmissive, uAmbient.b);
 }

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <limits>
 #include <unordered_set>
 
@@ -129,7 +130,9 @@ bool HasCPUTexture(const FResolvedRenderMaterial& material)
 }
 
 void HashMaterial(std::uint64_t& hash, const FResolvedRenderMaterial& material,
-                  std::uint32_t identity, const glm::vec2& instanceTiling)
+                  std::uint32_t identity, const glm::vec2& instanceTiling,
+                  std::unordered_set<const Material*>& evaluatedSources,
+                  FRaySceneCacheStats& stats)
 {
     HashBytes(hash, &identity, sizeof(identity));
     HashBytes(hash, &material.ambient, sizeof(material.ambient));
@@ -153,6 +156,10 @@ void HashMaterial(std::uint64_t& hash, const FResolvedRenderMaterial& material,
         HashBytes(hash, material.diffuseTexturePath.data(), pathLength);
     if (!material.source) return;
     const Material& source = *material.source;
+    if (!evaluatedSources.insert(&source).second) return;
+    ++stats.materialTextureMetadataEvaluations;
+    const std::uint64_t sourceRuntimeRevision = source.RuntimeRevision();
+    HashBytes(hash, &sourceRuntimeRevision, sizeof(sourceRuntimeRevision));
     HashBytes(hash, &source.texture, sizeof(source.texture));
     HashBytes(hash, &source.texWidth, sizeof(source.texWidth));
     HashBytes(hash, &source.texHeight, sizeof(source.texHeight));
@@ -161,7 +168,12 @@ void HashMaterial(std::uint64_t& hash, const FResolvedRenderMaterial& material,
     HashBytes(hash, &source.uvTiling, sizeof(source.uvTiling));
     const std::size_t bytes = source.texData.size();
     HashBytes(hash, &bytes, sizeof(bytes));
-    if (bytes) HashBytes(hash, source.texData.data(), bytes);
+    std::error_code stampError;
+    const auto stamp = std::filesystem::last_write_time(
+        material.diffuseTexturePath, stampError);
+    const auto stampValue = stampError ? std::filesystem::file_time_type::duration::rep{} :
+        stamp.time_since_epoch().count();
+    HashBytes(hash, &stampValue, sizeof(stampValue));
 }
 } // namespace
 
@@ -391,9 +403,11 @@ const FPackedRayScene& FRaySceneCache::Prepare(const FRenderScene& scene)
 
     std::uint64_t newInstanceHash = 1469598103934665603ull;
     std::uint64_t newMaterialHash = 1469598103934665603ull;
+    std::unordered_set<const Material*> evaluatedMaterialSources;
     for (std::size_t identity = 0; identity < scene.materialsByIdentity.size(); ++identity)
         HashMaterial(newMaterialHash, scene.materialsByIdentity[identity],
-            static_cast<std::uint32_t>(identity + 1u), glm::vec2(1.0f));
+            static_cast<std::uint32_t>(identity + 1u), glm::vec2(1.0f),
+            evaluatedMaterialSources, stats_);
     for (const FRenderMeshInstance* instance : validInstances)
     {
         const std::uint64_t asset = instance->mesh->AssetId();
@@ -410,7 +424,8 @@ const FPackedRayScene& FRaySceneCache::Prepare(const FRenderScene& scene)
         HashBytes(newMaterialHash, &materialCount, sizeof(materialCount));
         for (std::size_t slot = 0; slot < materialCount; ++slot)
             HashMaterial(newMaterialHash, MaterialAt(*instance, slot),
-                MaterialIdentityAt(*instance, slot), instance->uvTiling);
+                MaterialIdentityAt(*instance, slot), instance->uvTiling,
+                evaluatedMaterialSources, stats_);
     }
     packed_.instancesChanged = packed_.blasChanged ||
         newInstanceHash != instanceHash_;

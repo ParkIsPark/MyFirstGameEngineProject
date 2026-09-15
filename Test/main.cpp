@@ -26,6 +26,7 @@
 #include <memory>
 #include <filesystem>
 #include <chrono>
+#include <array>
 
 #if defined(_MSC_VER)
 #pragma warning(disable : 4996) // Regression gates intentionally exercise deprecated renderers.
@@ -1516,8 +1517,8 @@ public:
               activeAfterHostileError == GL_TEXTURE5);
         rasterizer.InjectNextMaterialTextureUploadFailureForTesting();
         material.texData[0] = 254;
+        material.MarkRuntimeDirty();
         const auto checkerFailedUpload = renderFrame(scene, quality);
-        material.texData[0] = 255;
         check("failed material texture upload is transactional",
               !checkerFailedUpload.first &&
               rasterizer.MaterialTextureUploads() == textureUploadsBefore + 1u &&
@@ -1525,6 +1526,25 @@ public:
         const auto checkerFirst = renderFrame(scene, quality);
         const std::uint64_t textureUploadsAfterFirst = rasterizer.MaterialTextureUploads();
         const auto checkerSecond = renderFrame(scene, quality);
+        const ERenderShadingModel savedTexturedModel =
+            scene.meshes.front().shadingModel;
+        std::array<std::pair<bool, std::vector<unsigned char>>, 3>
+            distantTexturedFrames;
+        for (int model = 0; model < 3; ++model)
+        {
+            scene.meshes.front().shadingModel =
+                static_cast<ERenderShadingModel>(model);
+            distantTexturedFrames[static_cast<std::size_t>(model)] =
+                renderFrame(scene, quality);
+        }
+        scene.meshes.front().shadingModel = savedTexturedModel;
+        check("distant high-frequency texture renders through mip-filtered Flat Gouraud and Phong paths",
+              distantTexturedFrames[0].first && distantTexturedFrames[1].first &&
+              distantTexturedFrames[2].first &&
+              imageDifference(distantTexturedFrames[0].second,
+                              distantTexturedFrames[1].second) > 0u &&
+              imageDifference(distantTexturedFrames[1].second,
+                              distantTexturedFrames[2].second) > 0u);
         GLint restoredGeometryActiveTexture = 0;
         GLint restoredGeometryEnvironment = 0;
         GLint restoredGeometrySamplers[2] = {};
@@ -1536,7 +1556,7 @@ public:
         glActiveTexture(GL_TEXTURE5);
         check("checker texture uploads once and remains cached",
               checkerFirst.first && checkerSecond.first &&
-              textureUploadsAfterFirst == textureUploadsBefore + 1u &&
+              textureUploadsAfterFirst == textureUploadsBefore + 2u &&
               rasterizer.MaterialTextureUploads() == textureUploadsAfterFirst);
         const GLuint rasterMaterialTexture = static_cast<GLuint>(
             rasterizer.MaterialTextureForTesting(&material));
@@ -1604,6 +1624,7 @@ public:
         check("repeated checker UVs produce alternating surface samples",
               checkerDifference > 500u);
         material.texData[0] = 64;
+        material.MarkRuntimeDirty();
         rasterizer.InjectNextMaterialTextureUploadFailureForTesting();
         const auto checkerFailedEdit = renderFrame(scene, quality);
         check("failed live texture refresh retains the committed cache",
@@ -1621,6 +1642,34 @@ public:
         check("runtime-only material revisions refresh raster texture storage",
               checkerRevisionOnly.first && rasterizer.MaterialTextureUploads() ==
                   uploadsBeforeRuntimeRevision + 1u);
+        material.texWidth = material.texHeight = 1;
+        material.texChannels = 1;
+        material.texData = {37u};
+        material.MarkRuntimeDirty();
+        const auto grayRasterFrame = renderFrame(scene, quality);
+        unsigned char grayRasterTexel[4] = {};
+        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(
+            rasterizer.MaterialTextureForTesting(&material)));
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                      grayRasterTexel);
+        material.texChannels = 2;
+        material.texData = {61u, 173u};
+        material.MarkRuntimeDirty();
+        const auto grayAlphaRasterFrame = renderFrame(scene, quality);
+        unsigned char grayAlphaRasterTexel[4] = {};
+        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(
+            rasterizer.MaterialTextureForTesting(&material)));
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                      grayAlphaRasterTexel);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        check("one-channel raster base color expands gray with opaque alpha",
+              grayRasterFrame.first && grayRasterTexel[0] == 37u &&
+              grayRasterTexel[1] == 37u && grayRasterTexel[2] == 37u &&
+              grayRasterTexel[3] == 255u);
+        check("two-channel raster base color expands gray and preserves alpha",
+              grayAlphaRasterFrame.first && grayAlphaRasterTexel[0] == 61u &&
+              grayAlphaRasterTexel[1] == 61u && grayAlphaRasterTexel[2] == 61u &&
+              grayAlphaRasterTexel[3] == 173u);
         material.texData.clear();
         material.texWidth = material.texHeight = material.texChannels = 0;
         material.diffuseTexPath.clear();
@@ -1628,6 +1677,7 @@ public:
         scene.meshes.front().uvTiling = glm::vec2(1.0f);
         material.kd = glm::vec3(0.25f, 0.4f, 0.85f);
         material.texture = 0;
+        material.MarkRuntimeDirty();
         const auto externalFallbackReference = renderFrame(scene, quality);
         GLuint hostileLegacyTexture = 0;
         const unsigned char hostileLegacyPixels[16] = {
@@ -3245,6 +3295,7 @@ public:
         std::fill(secondaryTextured.texData.begin(), secondaryTextured.texData.end(), 0u);
         for (std::size_t byte = 0; byte < secondaryTextured.texData.size(); byte += 3u)
             secondaryTextured.texData[byte] = 255u;
+        secondaryTextured.MarkRuntimeDirty();
         const std::vector<float> redSecondary = readSecondaryGI();
         std::vector<float> computeRedSecondary;
         if (computeQualityAvailable)
@@ -3770,6 +3821,70 @@ public:
                   openFallback43.second.r < 0.05f &&
                   glm::length(glm::vec3(openFallback43.second -
                                         openFallback33.second)) < 0.015f);
+
+        // A grazing camera ray enters the cube's front face, hits the top face
+        // above the glass-to-air critical angle, reflects internally, then
+        // exits through the back. The procedural sky is red above and blue
+        // below, so returning the unrelated entry reflection is unmistakably
+        // red while the bounded internal continuation is predominantly blue.
+        std::unique_ptr<UMesh> tirVolume(UMesh::GenerateCube(glm::vec3(0.5f)));
+        Material tirGlass;
+        tirGlass.blendMode = EMaterialBlendMode::Translucent;
+        tirGlass.opacity = 0.0f;
+        tirGlass.refraction = 1.52f;
+        FRenderMeshInstance tirInstance;
+        tirInstance.mesh = tirVolume.get();
+        tirInstance.materialOverride = resolved(tirGlass);
+        tirInstance.materialOverrideIdentity = 1u;
+        tirInstance.objectIdentity = 1u;
+        FRenderScene tirScene;
+        tirScene.camera.eye = glm::vec3(0.0f, -0.912f, 0.91f);
+        tirScene.environment.tint = glm::vec3(1.0f);
+        tirScene.environment.horizon = glm::vec3(0.0f, 0.0f, 1.0f);
+        tirScene.environment.zenith = glm::vec3(1.0f, 0.0f, 0.0f);
+        tirScene.meshes = {tirInstance};
+        tirScene.materialsByIdentity = {*tirInstance.materialOverride};
+        if (controlledGBuffer.BindForGeometry())
+        {
+            const GLfloat tirPosition[4] = {0.0f, 0.0f, 0.5f, 1.0f};
+            const GLfloat tirNormal[4] = {0.0f, 0.0f, 1.0f, 0.0f};
+            const GLfloat tirModel[4] = {0.0f, 0.0f, 1.0f, 2.0f};
+            const GLuint tirIdentity[4] = {1u, 1u, 0u, 0u};
+            glClearBufferfv(GL_COLOR, 0, tirPosition);
+            glClearBufferfv(GL_COLOR, 1, tirNormal);
+            glClearBufferfv(GL_COLOR, 2, tirModel);
+            glClearBufferuiv(GL_COLOR, 5, tirIdentity);
+            controlledGBuffer.EndGeometry();
+        }
+        FRayEffectInputs tirInputs = controlledInputs;
+        tirInputs.scene = &tirScene;
+        tirInputs.features.rayTracedReflections = false;
+        tirInputs.features.rayTracedTranslucency = true;
+        const auto tir33 = renderControlledPixel(controlledRays, tirInputs, true);
+        const auto tir43 = computeQualityAvailable
+            ? renderControlledPixel(computeControlledRays, tirInputs, true)
+            : std::make_pair(false, glm::vec4(0.0f));
+        check("GL33 exit-boundary TIR follows bounded internal continuation",
+              tir33.first && tir33.second.b > 0.55f &&
+              tir33.second.b > tir33.second.r * 3.0f);
+        if (computeQualityAvailable)
+            check("GL43 exit-boundary TIR matches GL33 rendered pixel",
+                  tir43.first && tir43.second.b > 0.55f &&
+                  glm::length(glm::vec3(tir43.second - tir33.second)) < 0.015f);
+        std::printf("visual-probe exit-tir rgba=(%.6f,%.6f,%.6f,%.6f)\n",
+            tir33.second.r, tir33.second.g, tir33.second.b, tir33.second.a);
+        if (controlledGBuffer.BindForGeometry())
+        {
+            const GLfloat positionCoverage[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            const GLfloat geometricNormal[4] = {0.0f, 0.0f, 1.0f, 0.0f};
+            const GLfloat shadingNormal[4] = {0.0f, 0.0f, 1.0f, 2.0f};
+            const GLuint primaryIdentity[4] = {71u, 72u, 0u, 0u};
+            glClearBufferfv(GL_COLOR, 0, positionCoverage);
+            glClearBufferfv(GL_COLOR, 1, geometricNormal);
+            glClearBufferfv(GL_COLOR, 2, shadingNormal);
+            glClearBufferuiv(GL_COLOR, 5, primaryIdentity);
+            controlledGBuffer.EndGeometry();
+        }
 
         // Non-casting dielectric surfaces are ignored wherever they occur in
         // the bounded shadow walk, without needing to discover a paired exit.
@@ -4787,6 +4902,7 @@ public:
                     check("HDRI first/refresh content ignores hostile row/image/skip layout", environmentExact);
                     hostile.Set();
                     for (auto& channel : textured.texData) ++channel;
+                    textured.MarkRuntimeDirty();
                     uploadMeshes.BeginFrame();
                     const bool geometryOkay = uploadRaster.RenderGeometry(uploadScene, quality, uploadMeshes,
                         uploadGBuffer, ContextGeneration(), &diagnostic);
@@ -4815,7 +4931,7 @@ public:
                     const bool rayOkay = uploadRays.RenderEffects(uploadInputs, effects, &diagnostic);
                     check("Compatible allocation/scene refresh/resize preserves full unpack state", rayOkay && hostile.Preserved() && hostile.NoError());
                 }
-                hostile.Set(); ++textured.texData[0];
+                hostile.Set(); ++textured.texData[0]; textured.MarkRuntimeDirty();
                 uploadRaster.InjectNextMaterialTextureUploadFailureForTesting(); uploadMeshes.BeginFrame();
                 const bool materialFailed = !uploadRaster.RenderGeometry(uploadScene, quality, uploadMeshes,
                     uploadGBuffer, ContextGeneration(), &diagnostic);
@@ -5029,7 +5145,20 @@ public:
         }
 
         FRaySceneCache cache;
-        cache.Prepare(sharedScene);
+        const std::uint64_t metadataBefore =
+            cache.Stats().materialTextureMetadataEvaluations;
+        const std::uint64_t bytesBefore = cache.Stats().materialTextureBytesScanned;
+        const std::uint64_t beforeDirtyRevision =
+            cache.Prepare(sharedScene).materialRevision;
+        check("1000 shared ray instances inspect one unique material and zero texture bytes",
+              cache.Stats().materialTextureMetadataEvaluations == metadataBefore + 1u &&
+              cache.Stats().materialTextureBytesScanned == bytesBefore);
+        cubeMaterial.MarkRuntimeDirty();
+        const std::uint64_t afterDirtyRevision =
+            cache.Prepare(sharedScene).materialRevision;
+        check("same-path material runtime revision invalidates ray atlas metadata",
+              afterDirtyRevision != beforeDirtyRevision &&
+              cache.Stats().materialTextureBytesScanned == bytesBefore);
         FRenderScene replacement;
         cache.Prepare(replacement);
         check("world replacement releases unused BLAS",

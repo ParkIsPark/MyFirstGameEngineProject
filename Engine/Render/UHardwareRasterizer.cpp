@@ -19,6 +19,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include <cstddef>
+#include <filesystem>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -293,9 +294,14 @@ std::uint64_t TextureSignature(const Material& material)
     mix(&runtimeRevision, sizeof(runtimeRevision));
     const std::size_t size = material.texData.size();
     mix(&size, sizeof(size));
-    if (!material.texData.empty()) mix(material.texData.data(), material.texData.size());
     if (!material.diffuseTexPath.empty())
         mix(material.diffuseTexPath.data(), material.diffuseTexPath.size());
+    std::error_code stampError;
+    const auto stamp = std::filesystem::last_write_time(
+        material.diffuseTexPath, stampError);
+    const auto stampValue = stampError ? std::filesystem::file_time_type::duration::rep{} :
+        stamp.time_since_epoch().count();
+    mix(&stampValue, sizeof(stampValue));
     return hash;
 }
 }
@@ -512,7 +518,6 @@ bool UHardwareRasterizer::Init(std::uint64_t contextGeneration,
         std::max(1, (geometryUniformComponents - 64) / 6));
     glUseProgram(program_);
     glUniform1i(glGetUniformLocation(program_, "uDiffuseTexture"), 0);
-    glUniform1i(glGetUniformLocation(program_, "uEnvironmentTexture"), 1);
     glUseProgram(static_cast<unsigned>(previousProgram));
     if (diagnostic) diagnostic->clear();
     return true;
@@ -604,11 +609,11 @@ bool UHardwareRasterizer::ResolveMaterialTexture(
     glGenTextures(1, &candidate);
     resourceAllocations_ += candidate ? 1u : 0u;
     glBindTexture(GL_TEXTURE_2D, candidate);
-    const GLenum format = channels == 4 ? GL_RGBA : channels == 2 ? GL_RG :
-                          channels == 1 ? GL_RED : GL_RGB;
+    const std::vector<unsigned char> canonical = ResampleRGBA8ToLayer(
+        *material, material->texWidth, material->texHeight);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8,
-                 material->texWidth, material->texHeight, 0, format,
-                 GL_UNSIGNED_BYTE, material->texData.data());
+                 material->texWidth, material->texHeight, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, canonical.data());
     glGenerateMipmap(GL_TEXTURE_2D);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
                     GL_LINEAR_MIPMAP_LINEAR);

@@ -64,6 +64,10 @@ struct FRaySceneCacheStats
     std::uint64_t blasRebuilds = 0;
     std::uint64_t blasReleases = 0;
     std::size_t residentBLAS = 0;
+    // Cumulative unique-source metadata checks. Texture payload bytes are
+    // deliberately never scanned while building steady-frame signatures.
+    std::uint64_t materialTextureMetadataEvaluations = 0;
+    std::uint64_t materialTextureBytesScanned = 0;
 };
 
 // CPU-side deterministic two-level acceleration packing shared by GL backends.
