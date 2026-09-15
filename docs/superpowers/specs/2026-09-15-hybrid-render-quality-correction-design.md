@@ -1,7 +1,7 @@
 # Hybrid Renderer Quality Correction Design
 
-**Status:** Approved in chat on 2026-09-15  
-**Implementation branch:** `codex/hardware-raster-ray-effects`  
+**Status:** Approved in chat on 2026-09-15
+**Implementation branch:** `codex/hardware-raster-ray-effects`
 **Baseline:** OpenGL 3.3 fragment backend, with the OpenGL 4.3 compute backend remaining an optional acceleration path
 
 ## Purpose
