@@ -46,6 +46,23 @@ static std::size_t CountText(const std::string& text, const std::string& needle)
     return count;
 }
 
+static std::string FunctionBody(const std::string& source, const char* marker)
+{
+    const std::size_t signature = source.find(marker);
+    Require(signature != std::string::npos, marker);
+    const std::size_t open = source.find('{', signature);
+    Require(open != std::string::npos, marker);
+    int depth = 0;
+    for (std::size_t offset = open; offset < source.size(); ++offset)
+    {
+        if (source[offset] == '{') ++depth;
+        else if (source[offset] == '}' && --depth == 0)
+            return source.substr(open, offset - open + 1u);
+    }
+    Require(false, marker);
+    return {};
+}
+
 static void CheckFinalRendererSourceInvariants()
 {
     const std::string shared = ReadSource(
@@ -109,23 +126,67 @@ static void CheckFinalRendererSourceInvariants()
     const std::string reconstructionCpp = ReadSource("Engine/Render/URayEffectsReconstruction.cpp");
     const std::string renderSources = rasterizerCpp + lightingCpp + presentationCpp +
         gl33Cpp + gl43Cpp + reconstructionCpp;
-    Require(rasterizerCpp.find("glDisable(GL_FRAMEBUFFER_SRGB)") != std::string::npos &&
-        lightingCpp.find("glDisable(GL_FRAMEBUFFER_SRGB)") != std::string::npos &&
-        presentationCpp.find("glDisable(GL_FRAMEBUFFER_SRGB)") != std::string::npos &&
-        gl33Cpp.find("glDisable(GL_FRAMEBUFFER_SRGB)") != std::string::npos &&
+    const std::string rasterDraw = FunctionBody(rasterizerCpp,
+        "bool UHardwareRasterizer::RenderGeometry(const FRenderScene& scene,\n                                         const FRenderQuality& quality");
+    const std::string lightingDraw = FunctionBody(lightingCpp,
+        "void ConfigureFullscreenState()");
+    const std::string presentationDraw = FunctionBody(presentationCpp,
+        "void ConfigureFullscreenState()");
+    const std::string gl33Draw = FunctionBody(gl33Cpp,
+        "bool UGL33RayTracingBackend::RenderEffects(");
+    const std::string reconstructionDraw = FunctionBody(reconstructionCpp,
+        "bool URayEffectsReconstruction::Reconstruct(");
+    const std::string rasterRestore = FunctionBody(rasterizerCpp, "void RestoreGeometryState(");
+    const std::string lightingRestore = FunctionBody(lightingCpp, "void RestoreState(");
+    const std::string presentationRestore = FunctionBody(presentationCpp, "void RestoreState(");
+    const std::string gl33Restore = FunctionBody(gl33Cpp, "void RestoreState(");
+    const std::string reconstructionRestore = FunctionBody(reconstructionCpp, "~FState()");
+    const auto operationalDisablesSRGB = [](const std::string& function) {
+        return CountText(function, "glDisable(GL_FRAMEBUFFER_SRGB)") == 1 &&
+            function.find("glEnable(GL_FRAMEBUFFER_SRGB)") == std::string::npos;
+    };
+    const auto restoresSRGBBothWays = [](const std::string& function) {
+        return CountText(function, "glEnable(GL_FRAMEBUFFER_SRGB)") == 1 &&
+            CountText(function, "glDisable(GL_FRAMEBUFFER_SRGB)") == 1;
+    };
+    Require(operationalDisablesSRGB(rasterDraw) &&
+        operationalDisablesSRGB(lightingDraw) &&
+        operationalDisablesSRGB(presentationDraw) &&
+        operationalDisablesSRGB(gl33Draw) &&
+        operationalDisablesSRGB(reconstructionDraw) &&
+        restoresSRGBBothWays(rasterRestore) &&
+        restoresSRGBBothWays(lightingRestore) &&
+        restoresSRGBBothWays(presentationRestore) &&
+        restoresSRGBBothWays(gl33Restore) &&
+        restoresSRGBBothWays(reconstructionRestore) &&
         gl43Cpp.find("glEnable(GL_FRAMEBUFFER_SRGB)") == std::string::npos &&
-        reconstructionCpp.find("glDisable(GL_FRAMEBUFFER_SRGB)") != std::string::npos &&
-        CountText(rasterizerCpp, "glEnable(GL_FRAMEBUFFER_SRGB)") == 1 &&
-        CountText(lightingCpp, "glEnable(GL_FRAMEBUFFER_SRGB)") == 1 &&
-        CountText(presentationCpp, "glEnable(GL_FRAMEBUFFER_SRGB)") == 1 &&
-        CountText(gl33Cpp, "glEnable(GL_FRAMEBUFFER_SRGB)") == 1 &&
-        CountText(reconstructionCpp, "glEnable(GL_FRAMEBUFFER_SRGB)") == 1 &&
+        gl43Cpp.find("glDisable(GL_FRAMEBUFFER_SRGB)") == std::string::npos &&
         renderSources.find("glMatrixMode") == std::string::npos &&
         renderSources.find("glOrtho") == std::string::npos &&
         renderSources.find("glBegin(") == std::string::npos &&
         renderSources.find("glDrawPixels") == std::string::npos &&
         renderSources.find("glEnable(GL_LIGHTING)") == std::string::npos,
-        "all passes disable framebuffer sRGB internally and no fixed-function path returns");
+        "each draw function disables framebuffer sRGB independently of restoration and no fixed-function path returns");
+
+    const std::string hardwareInit = FunctionBody(rasterizerCpp,
+        "bool UHardwareRasterizer::Init(");
+    const std::string lightingInit = FunctionBody(lightingCpp,
+        "bool URasterLightingPass::Init(");
+    const std::string gl33Program = FunctionBody(gl33Cpp, "bool BuildProgram(");
+    const std::string gl43Program = FunctionBody(gl43Cpp, "bool CompileComputeProgram(");
+    Require(CountText(hardwareInit,
+                "SharedLightingShaderSource::BuildHardwareGeometryShader()") == 1 &&
+        CountText(lightingInit,
+                "SharedLightingShaderSource::BuildRasterLightingFragmentShader()") == 1 &&
+        CountText(gl33Program,
+                "SharedLightingShaderSource::BuildRayEffectsFragmentShader()") == 1 &&
+        CountText(gl43Program,
+                "SharedLightingShaderSource::BuildRayEffectsComputeShader()") == 1 &&
+        CountText(rasterizerCpp, "BuildHardwareGeometryShader()") == 1 &&
+        CountText(lightingCpp, "BuildRasterLightingFragmentShader()") == 1 &&
+        CountText(gl33Cpp, "BuildRayEffectsFragmentShader()") == 1 &&
+        CountText(gl43Cpp, "BuildRayEffectsComputeShader()") == 1,
+        "each production shader initialization calls its one intended shared-lighting builder");
 
     const std::string outputs = ReadSource("Engine/Render/FRenderOutputs.h");
     const std::string hybrid = ReadSource(
